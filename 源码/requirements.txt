@@ -1,0 +1,12 @@
+# 道语言解释器 - 第一阶段依赖
+# Python >= 3.10
+
+# 测试框架
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# 代码质量
+ruff>=0.1.0
+
+# REPL增强（可选）
+prompt-toolkit>=3.0.0
