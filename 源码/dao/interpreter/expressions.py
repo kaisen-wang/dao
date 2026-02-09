@@ -61,8 +61,7 @@ class ExpressionEvaluator:
             case PipeExpr():
                 return self.eval_pipe(expr, env)
             case _:
-                raise 运行时错误(
-                    f"未知的表达式类型: {type(expr).__name__}",
+                raise 运行时错误(f"未知的表达式类型: {type(expr, 0, 0, self.source).__name__}",
                     expr.line, expr.column,
                 )
 
@@ -100,26 +99,20 @@ class ExpressionEvaluator:
             if expr.member in obj.klass.private_names:
                 # 检查是否在类方法内部（本对象可访问）
                 if not self._in_method_context(env, obj.klass):
-                    raise 运行时错误(
-                        f"无法访问类型 '{obj.klass.name}' 的私有成员 '{expr.member}'",
-                        expr.line, expr.column,
-                    )
+                    raise 运行时错误(f"无法访问类型 '{obj.klass.name}' 的私有成员 '{expr.member}'",
+                        expr.line, expr.column, self.source)
             result = obj.get_field(expr.member)
             if result is not None:
                 return result
-            raise 名称错误(
-                f"类型 '{obj.klass.name}' 的实例没有属性 '{expr.member}'",
-                expr.line, expr.column,
-            )
+            raise 名称错误(f"类型 '{obj.klass.name}' 的实例没有属性 '{expr.member}'",
+                expr.line, expr.column, self.source)
 
         if isinstance(obj, SuperProxy):
             method = obj.parent_class.find_method(expr.member)
             if method:
                 return BoundMethod(obj.instance, method)
-            raise 名称错误(
-                f"父类型中没有方法 '{expr.member}'",
-                expr.line, expr.column,
-            )
+            raise 名称错误(f"父类型中没有方法 '{expr.member}'",
+                expr.line, expr.column, self.source)
 
         if isinstance(obj, DaoClass):
             # 先查找静态方法
@@ -129,10 +122,8 @@ class ExpressionEvaluator:
             method = obj.find_method(expr.member)
             if method:
                 return method
-            raise 名称错误(
-                f"类型 '{obj.name}' 没有方法或静态方法 '{expr.member}'",
-                expr.line, expr.column,
-            )
+            raise 名称错误(f"类型 '{obj.name}' 没有方法或静态方法 '{expr.member}'",
+                expr.line, expr.column, self.source)
 
         if isinstance(obj, dict) and expr.member in obj:
             return obj[expr.member]
@@ -142,10 +133,8 @@ class ExpressionEvaluator:
         if isinstance(obj, list):
             return self._get_list_method(obj, expr.member, expr)
 
-        raise 名称错误(
-            f"对象没有属性 '{expr.member}'",
-            expr.line, expr.column,
-        )
+        raise 名称错误(f"对象没有属性 '{expr.member}'",
+            expr.line, expr.column, self.source)
 
     def _get_str_method(self, s: str, name: str, expr) -> object:
         """获取字符串的内置方法"""
@@ -165,7 +154,7 @@ class ExpressionEvaluator:
             if callable(result) and not isinstance(result, DaoCallable):
                 return result()
             return result
-        raise 名称错误(f"文本没有方法 '{name}'", expr.line, expr.column)
+        raise 名称错误(f"文本没有方法 '{name}'", expr.line, expr.column, self.source)
 
     def _get_list_method(self, lst: list, name: str, expr) -> object:
         """获取列表的内置方法"""
@@ -181,7 +170,7 @@ class ExpressionEvaluator:
             if callable(result) and not isinstance(result, DaoCallable):
                 return result()
             return result
-        raise 名称错误(f"列表没有方法 '{name}'", expr.line, expr.column)
+        raise 名称错误(f"列表没有方法 '{name}'", expr.line, expr.column, self.source)
 
     def eval_index_access(self, expr: IndexAccess, env: Environment) -> object:
         """求值索引访问"""
@@ -191,26 +180,23 @@ class ExpressionEvaluator:
         if isinstance(obj, list):
             idx = int(index)
             if idx < -len(obj) or idx >= len(obj):
-                raise 索引错误(
-                    f"列表索引 {idx} 超出范围 (长度 {len(obj)})",
+                raise 索引错误(f"列表索引 {idx} 超出范围 (长度 {len(obj, 0, 0, self.source)})",
                     expr.line, expr.column,
                 )
             return obj[idx]
         elif isinstance(obj, dict):
             if index not in obj:
-                raise 名称错误(f"字典中不存在键 '{index}'", expr.line, expr.column)
+                raise 名称错误(f"字典中不存在键 '{index}'", expr.line, expr.column, self.source)
             return obj[index]
         elif isinstance(obj, str):
             idx = int(index)
             if idx < -len(obj) or idx >= len(obj):
-                raise 索引错误(
-                    f"字符串索引 {idx} 超出范围 (长度 {len(obj)})",
+                raise 索引错误(f"字符串索引 {idx} 超出范围 (长度 {len(obj, 0, 0, self.source)})",
                     expr.line, expr.column,
                 )
             return obj[idx]
         else:
-            raise 类型错误(
-                f"类型 '{type(obj).__name__}' 不支持索引访问",
+            raise 类型错误(f"类型 '{type(obj, 0, 0, self.source).__name__}' 不支持索引访问",
                 expr.line, expr.column,
             )
 
@@ -252,7 +238,7 @@ class ExpressionEvaluator:
                 return left * right
             case '/':
                 if right == 0:
-                    raise 运行时错误("除零错误", expr.line, expr.column)
+                    raise 运行时错误("除零错误", expr.line, expr.column, self.source)
                 return left / right
             case '%':
                 return left % right
@@ -275,10 +261,8 @@ class ExpressionEvaluator:
             case '不在':
                 return left not in right
             case _:
-                raise 运行时错误(
-                    f"未知的运算符: '{expr.operator}'",
-                    expr.line, expr.column,
-                )
+                 raise 运行时错误(f"未知的运算符: '{expr.operator}'",
+                    expr.line, expr.column, self.source)
 
     def eval_unary_op(self, expr: UnaryOp, env: Environment) -> object:
         """求值一元运算"""
@@ -290,10 +274,8 @@ class ExpressionEvaluator:
             case '不是':
                 return not self._is_truthy(operand)
             case _:
-                raise 运行时错误(
-                    f"未知的一元运算符: '{expr.operator}'",
-                    expr.line, expr.column,
-                )
+                 raise 运行时错误(f"未知的一元运算符: '{expr.operator}'",
+                    expr.line, expr.column, self.source)
 
     def eval_compare_op(self, expr: CompareOp, env: Environment) -> bool:
         """求值链式比较"""
@@ -342,10 +324,8 @@ class ExpressionEvaluator:
             return self._call_method(callee.instance, callee.method, args, kwargs, expr)
 
         if not isinstance(callee, DaoCallable):
-            raise 类型错误(
-                f"'{callee}' 不是一个可调用的函数",
-                expr.line, expr.column,
-            )
+             raise 类型错误(f"'{callee}' 不是一个可调用的函数",
+                expr.line, expr.column, self.source)
 
         if isinstance(callee, BuiltinFunction):
             return callee.call(args, kwargs)
@@ -391,13 +371,11 @@ class ExpressionEvaluator:
                 return callee.call(args, kwargs)
             if isinstance(callee, DaoFunction):
                 return self._call_dao_function(callee, args, kwargs, expr)
-            raise 类型错误("管道右侧必须是函数", expr.line, expr.column)
+            raise 类型错误("管道右侧必须是函数", expr.line, expr.column, self.source)
 
         callee = self.eval_expression(expr.right, env)
         if isinstance(callee, DaoCallable) or isinstance(callee, DaoClass):
             return self.call_function(callee, [left_val])
 
-        raise 类型错误(
-            "管道运算符 |> 右侧必须是函数",
-            expr.line, expr.column,
-        )
+        raise 类型错误("管道运算符 |> 右侧必须是函数",
+            expr.line, expr.column, self.source)

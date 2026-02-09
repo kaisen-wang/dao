@@ -39,11 +39,11 @@ def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>"
     tokens = lexer.tokenize()
 
     # 2. 语法分析
-    parser = Parser(tokens)
+    parser = Parser(tokens, source)
     ast = parser.parse()
 
     # 3. 解释执行
-    result = interpreter.execute(ast)
+    result = interpreter.execute(ast, source=source)
     return result
 
 

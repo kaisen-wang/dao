@@ -64,8 +64,7 @@ class StatementExecutor:
             case DestructureAssign():
                 return self.exec_destructure(stmt, env)
             case _:
-                raise 运行时错误(
-                    f"未知的语句类型: {type(stmt).__name__}",
+                raise 运行时错误(f"未知的语句类型: {type(stmt, 0, 0, self.source).__name__}",
                     stmt.line, stmt.column,
                 )
 
@@ -91,8 +90,7 @@ class StatementExecutor:
             elif isinstance(obj, dict):
                 obj[stmt.target.member] = value
             else:
-                raise 类型错误(
-                    f"无法给类型 '{type(obj).__name__}' 设置属性",
+                raise 类型错误(f"无法给类型 '{type(obj, 0, 0, self.source).__name__}' 设置属性",
                     stmt.line, stmt.column,
                 )
         elif isinstance(stmt.target, IndexAccess):
@@ -103,12 +101,11 @@ class StatementExecutor:
             elif isinstance(obj, dict):
                 obj[index] = value
             else:
-                raise 类型错误(
-                    f"无法给类型 '{type(obj).__name__}' 设置索引",
+                raise 类型错误(f"无法给类型 '{type(obj, 0, 0, self.source).__name__}' 设置索引",
                     stmt.line, stmt.column,
                 )
         else:
-            raise 运行时错误("无效的赋值目标", stmt.line, stmt.column)
+            raise 运行时错误("无效的赋值目标", stmt.line, stmt.column, self.source)
 
     def exec_function_decl(self, stmt: FunctionDecl, env: Environment) -> None:
         """执行函数声明"""
@@ -170,8 +167,7 @@ class StatementExecutor:
         """执行遍历循环"""
         iterable = self.eval_expression(stmt.iterable, env)
         if not hasattr(iterable, '__iter__'):
-            raise 类型错误(
-                f"类型 '{type(iterable).__name__}' 不可遍历",
+            raise 类型错误(f"类型 '{type(iterable, 0, 0, self.source).__name__}' 不可遍历",
                 stmt.line, stmt.column,
             )
 
@@ -235,8 +231,8 @@ class StatementExecutor:
         """执行抛出语句"""
         value = self.eval_expression(stmt.expression, env)
         if isinstance(value, str):
-            raise 运行时错误(value, stmt.line, stmt.column)
-        raise 运行时错误(str(value), stmt.line, stmt.column)
+            raise 运行时错误(value, stmt.line, stmt.column, self.source)
+        raise 运行时错误(str(value, 0, 0, self.source), stmt.line, stmt.column)
 
     def exec_assert(self, stmt: AssertStmt, env: Environment) -> None:
         """执行断言语句"""
@@ -245,7 +241,7 @@ class StatementExecutor:
             msg = "断言失败"
             if stmt.message:
                 msg = str(self.eval_expression(stmt.message, env))
-            raise 断言失败(msg, stmt.line, stmt.column)
+            raise 断言失败(msg, stmt.line, stmt.column, self.source)
 
     # ========================
     # OOP 执行
@@ -257,10 +253,8 @@ class StatementExecutor:
         if stmt.parent_name:
             parent = env.get(stmt.parent_name)
             if not isinstance(parent, DaoClass):
-                raise 类型错误(
-                    f"'{stmt.parent_name}' 不是一个类型，无法继承",
-                    stmt.line, stmt.column,
-                )
+                raise 类型错误(f"'{stmt.parent_name}' 不是一个类型，无法继承",
+                    stmt.line, stmt.column, self.source)
 
         methods = {}
         static_methods = {}
@@ -326,8 +320,7 @@ class StatementExecutor:
         module_path = stmt.module_path.replace(".", os.sep) + ".道"
 
         if not os.path.exists(module_path):
-            raise 运行时错误(
-                f"模块 '{stmt.module_path}' 不存在 (找不到文件: {module_path})",
+            raise 运行时错误(f"模块 '{stmt.module_path}' 不存在 (找不到文件: {module_path}, 0, 0, self.source)",
                 stmt.line, stmt.column,
             )
 
@@ -369,9 +362,8 @@ class StatementExecutor:
 
         if isinstance(value, (list, tuple)):
             if len(stmt.targets) != len(value):
-                raise 运行时错误(
-                    f"解构赋值：目标数量({len(stmt.targets)})与值的数量({len(value)})不匹配",
-                    stmt.line, stmt.column,
+                raise 运行时错误(f"解构赋值：目标数量({len(stmt.targets)})与值的数量({len(value)})不匹配",
+                    stmt.line, stmt.column, self.source
                 )
             for name, val in zip(stmt.targets, value):
                 if stmt.is_declaration:
@@ -383,10 +375,8 @@ class StatementExecutor:
         elif isinstance(value, dict):
             for name in stmt.targets:
                 if name not in value:
-                    raise 运行时错误(
-                        f"解构赋值：字典中不存在键 '{name}'",
-                        stmt.line, stmt.column,
-                    )
+                    raise 运行时错误(f"解构赋值：字典中不存在键 '{name}'",
+                        stmt.line, stmt.column, self.source)
                 if stmt.is_declaration:
                     env.define(name, value[name])
                 elif env.has(name):
@@ -394,7 +384,5 @@ class StatementExecutor:
                 else:
                     env.define(name, value[name])
         else:
-            raise 类型错误(
-                f"无法对类型 '{type(value).__name__}' 进行解构赋值",
-                stmt.line, stmt.column,
-            )
+            raise 类型错误(f"无法对类型 '{type(value).__name__}' 进行解构赋值",
+                stmt.line, stmt.column, self.source)

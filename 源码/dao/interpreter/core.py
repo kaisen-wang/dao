@@ -41,15 +41,17 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
             func.interpreter = self
             self.global_env.define(name, func)
 
-    def execute(self, program: Program, env: Environment | None = None) -> object:
+    def execute(self, program: Program, env: Environment | None = None, source: str = "") -> object:
         """
         执行程序
 
         参数：
             program : AST 根节点
             env     : 执行环境（默认全局环境）
+            source  : 原始源代码（用于错误报告）
         返回：最后一条语句的值
         """
+        self.source = source
         env = env or self.global_env
         result = None
         for stmt in program.statements:
@@ -80,7 +82,7 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
         if isinstance(func, DaoClass):
             return self._instantiate_class(func, args, kwargs, None)
 
-        raise 类型错误(f"'{func}' 不是可调用的函数")
+        raise 类型错误(f"'{func}' 不是可调用的函数", 0, 0, self.source)
 
     # ========================
     # OOP 核心方法
@@ -97,10 +99,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
         elif args:
             line = call_expr.line if call_expr else 0
             col = call_expr.column if call_expr else 0
-            raise 运行时错误(
-                f"类型 '{klass.name}' 没有构造函数，不接受参数",
-                line, col,
-            )
+            raise 运行时错误(f"类型 '{klass.name}' 没有构造函数，不接受参数",
+                line, col, self.source)
 
         return instance
 
@@ -154,10 +154,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
             else:
                 line = call_expr.line if call_expr else 0
                 col = call_expr.column if call_expr else 0
-                raise 运行时错误(
-                    f"函数 '{func.name}' 缺少参数 '{param}'",
-                    line, col,
-                )
+                raise 运行时错误(f"函数 '{func.name}' 缺少参数 '{param}'",
+                    line, col, self.source)
 
     def _exec_block(self, statements: list, env: Environment) -> object:
         """执行一个代码块"""
