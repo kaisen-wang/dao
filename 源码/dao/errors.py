@@ -10,16 +10,21 @@
 class 道错误(Exception):
     """所有"道"语言错误的基类"""
 
-    def __init__(self, message: str, line: int = 0, column: int = 0):
+    def __init__(self, message: str, line: int = 0, column: int = 0, source: str = ""):
         self.message = message
         self.line = line
         self.column = column
+        self.source = source
         super().__init__(self._format_message())
 
     def _format_message(self) -> str:
-        if self.line > 0:
-            return f"[行 {self.line}, 列 {self.column}] {self.message}"
-        return self.message
+        base_msg = f"[行 {self.line}, 列 {self.column}] {self.message}"
+        if self.line > 0 and self.source:
+            lines = self.source.splitlines()
+            if 0 <= self.line - 1 < len(lines):
+                line_content = lines[self.line - 1].rstrip()
+                base_msg = f"{base_msg}\n{line_content}\n{' ' * (self.column - 1)}{'^'}"
+        return base_msg
 
 
 class 词法错误(道错误):

@@ -40,9 +40,10 @@ class Parser(StatementParser, ExpressionParser):
         ast = parser.parse()
     """
 
-    def __init__(self, tokens: list[Token]):
+    def __init__(self, tokens: list[Token], source: str = ""):
         self.tokens = tokens
         self.pos = 0
+        self.source = source
 
     # ========================
     # 基础设施
@@ -72,7 +73,7 @@ class Parser(StatementParser, ExpressionParser):
         """期望当前Token为指定类型，否则报错"""
         if self.current.type != token_type:
             msg = message or f"期望 {token_type.name}，但得到 {self.current.type.name} ('{self.current.value}')"
-            raise 语法错误(msg, self.current.line, self.current.column)
+            raise 语法错误(msg, self.current.line, self.current.column, self.source)
         return self.advance()
 
     def match(self, *types: TokenType) -> Token | None:
@@ -87,7 +88,7 @@ class Parser(StatementParser, ExpressionParser):
             self.advance()
 
     def _error(self, message: str) -> 语法错误:
-        return 语法错误(message, self.current.line, self.current.column)
+        return 语法错误(message, self.current.line, self.current.column, self.source)
 
     # ========================
     # 顶层解析入口

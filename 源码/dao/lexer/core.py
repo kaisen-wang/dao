@@ -71,7 +71,7 @@ class Lexer(LexerReaders):
 
     def _error(self, message: str) -> 词法错误:
         """生成词法错误"""
-        return 词法错误(message, self.line, self.column)
+        return 词法错误(message, self.line, self.column, self.source)
 
     # ========================
     # 缩进处理
