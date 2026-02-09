@@ -440,5 +440,211 @@ class TestIntegration:
         assert output.strip() == "3"
 
 
+class TestStaticMethods:
+    """测试静态方法"""
+
+    def test_static_method_call(self):
+        """调用静态方法"""
+        output = capture_output(
+            '类型 数学\n'
+            '    静态 函数 加法(a, b)\n'
+            '        返回 a + b\n'
+            '打印(数学.加法(3, 4))\n'
+        )
+        assert output.strip() == "7"
+
+    def test_multiple_static_methods(self):
+        """多个静态方法"""
+        output = capture_output(
+            '类型 工具\n'
+            '    静态 函数 平方(x)\n'
+            '        返回 x * x\n'
+            '    静态 函数 立方(x)\n'
+            '        返回 x * x * x\n'
+            '打印(工具.平方(3))\n'
+            '打印(工具.立方(3))\n'
+        )
+        assert output.strip() == "9\n27"
+
+    def test_static_with_instance_methods(self):
+        """静态方法与实例方法共存"""
+        output = capture_output(
+            '类型 计数器\n'
+            '    初始化()\n'
+            '        本对象.值 = 0\n'
+            '    函数 增加()\n'
+            '        本对象.值 = 本对象.值 + 1\n'
+            '    静态 函数 创建(初始值)\n'
+            '        定义 c = 计数器()\n'
+            '        c.值 = 初始值\n'
+            '        返回 c\n'
+            '定义 c = 计数器.创建(10)\n'
+            '打印(c.值)\n'
+        )
+        assert output.strip() == "10"
+
+
+class TestAccessControl:
+    """测试访问控制"""
+
+    def test_private_method_internal_access(self):
+        """类内部可以访问私有方法"""
+        output = capture_output(
+            '类型 账户\n'
+            '    初始化(余额)\n'
+            '        本对象.余额 = 余额\n'
+            '    私有 函数 验证(金额)\n'
+            '        返回 金额 > 0\n'
+            '    函数 存款(金额)\n'
+            '        如果 本对象.验证(金额)\n'
+            '            本对象.余额 = 本对象.余额 + 金额\n'
+            '        返回 本对象.余额\n'
+            '定义 a = 账户(100)\n'
+            '打印(a.存款(50))\n'
+        )
+        assert output.strip() == "150"
+
+    def test_private_method_external_access_denied(self):
+        """类外部无法访问私有方法"""
+        with pytest.raises(运行时错误):
+            run(
+                '类型 账户\n'
+                '    初始化()\n'
+                '        本对象.值 = 0\n'
+                '    私有 函数 内部()\n'
+                '        返回 本对象.值\n'
+                '定义 a = 账户()\n'
+                'a.内部()\n'
+            )
+
+
+class TestTemplateStrings:
+    """测试模板字符串"""
+
+    def test_simple_template(self):
+        """简单模板字符串"""
+        output = capture_output('定义 名字 = "世界"\n打印(`你好 {名字}`)\n')
+        assert output.strip() == "你好 世界"
+
+    def test_template_with_expression(self):
+        """模板字符串中的表达式"""
+        output = capture_output('定义 x = 10\n打印(`结果是 {x + 5}`)\n')
+        assert output.strip() == "结果是 15"
+
+    def test_template_multiple_expressions(self):
+        """多个表达式的模板字符串"""
+        output = capture_output(
+            '定义 名字 = "张三"\n'
+            '定义 年龄 = 25\n'
+            '打印(`{名字}今年{年龄}岁`)\n'
+        )
+        assert output.strip() == "张三今年25岁"
+
+    def test_template_no_expression(self):
+        """没有表达式的模板字符串"""
+        output = capture_output('打印(`纯文本`)\n')
+        assert output.strip() == "纯文本"
+
+    def test_template_with_boolean(self):
+        """模板字符串中的布尔值"""
+        output = capture_output('打印(`值是{真}`)\n')
+        assert output.strip() == "值是真"
+
+    def test_template_with_null(self):
+        """模板字符串中的空值"""
+        output = capture_output('打印(`值是{空}`)\n')
+        assert output.strip() == "值是空"
+
+    def test_template_with_function_call(self):
+        """模板字符串中调用函数"""
+        output = capture_output(
+            '函数 加法(a, b)\n'
+            '    返回 a + b\n'
+            '打印(`结果：{加法(3, 4)}`)\n'
+        )
+        assert output.strip() == "结果：7"
+
+    def test_template_with_member_access(self):
+        """模板字符串中访问成员"""
+        output = capture_output(
+            '类型 人\n'
+            '    初始化(名字)\n'
+            '        本对象.名字 = 名字\n'
+            '定义 张三 = 人("张三")\n'
+            '打印(`他叫{张三.名字}`)\n'
+        )
+        assert output.strip() == "他叫张三"
+
+    def test_template_as_variable(self):
+        """模板字符串赋值给变量"""
+        output = capture_output(
+            '定义 x = 42\n'
+            '定义 消息 = `答案是{x}`\n'
+            '打印(消息)\n'
+        )
+        assert output.strip() == "答案是42"
+
+
+class TestDestructuringAssignment:
+    """测试解构赋值"""
+
+    def test_list_destructure_decl(self):
+        """定义列表解构赋值"""
+        output = capture_output(
+            '定义 [甲, 乙, 丙] = [10, 20, 30]\n'
+            '打印(甲)\n'
+            '打印(乙)\n'
+            '打印(丙)\n'
+        )
+        assert output.strip() == "10\n20\n30"
+
+    def test_list_destructure_assign(self):
+        """列表解构赋值（非声明）"""
+        output = capture_output(
+            '定义 甲 = 0\n'
+            '定义 乙 = 0\n'
+            '[甲, 乙] = [100, 200]\n'
+            '打印(甲)\n'
+            '打印(乙)\n'
+        )
+        assert output.strip() == "100\n200"
+
+    def test_destructure_with_expressions(self):
+        """解构赋值表达式"""
+        output = capture_output(
+            '函数 获取数据()\n'
+            '    返回 [1, 2, 3]\n'
+            '定义 [x, y, z] = 获取数据()\n'
+            '打印(x + y + z)\n'
+        )
+        assert output.strip() == "6"
+
+    def test_destructure_swap(self):
+        """解构赋值交换变量"""
+        output = capture_output(
+            '定义 a = 1\n'
+            '定义 b = 2\n'
+            '[a, b] = [b, a]\n'
+            '打印(a)\n'
+            '打印(b)\n'
+        )
+        assert output.strip() == "2\n1"
+
+    def test_destructure_mismatch_raises(self):
+        """解构赋值数量不匹配报错"""
+        with pytest.raises(运行时错误):
+            run('定义 [甲, 乙] = [1, 2, 3]\n')
+
+    def test_dict_destructure(self):
+        """字典解构赋值"""
+        output = capture_output(
+            '定义 数据 = {"甲": 10, "乙": 20}\n'
+            '定义 [甲, 乙] = [数据["甲"], 数据["乙"]]\n'
+            '打印(甲)\n'
+            '打印(乙)\n'
+        )
+        assert output.strip() == "10\n20"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

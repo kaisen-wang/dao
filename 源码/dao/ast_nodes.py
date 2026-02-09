@@ -185,6 +185,8 @@ class FunctionDecl(Statement):
     params: list[str] = field(default_factory=list)
     default_values: dict[str, Expression] = field(default_factory=dict)
     body: list[Statement] = field(default_factory=list)
+    is_static: bool = False
+    is_private: bool = False
 
 
 @dataclass
@@ -334,3 +336,26 @@ class ImportStmt(Statement):
     module_path: str = ""
     names: list[str] = field(default_factory=list)
     alias: str | None = None
+
+
+# ========================
+# 模板字符串
+# ========================
+
+@dataclass
+class TemplateLiteral(Expression):
+    """模板字符串：`你好 {名字}，{年龄}岁`"""
+    parts: list[str] = field(default_factory=list)
+    expressions: list[Expression] = field(default_factory=list)
+
+
+# ========================
+# 解构赋值
+# ========================
+
+@dataclass
+class DestructureAssign(Statement):
+    """解构赋值：[甲, 乙] = [10, 20]"""
+    targets: list[str] = field(default_factory=list)
+    value: Expression = field(default_factory=lambda: NullLiteral())
+    is_declaration: bool = False

@@ -137,6 +137,80 @@ class Lexer:
         self.advance()  # 跳过结束引号
         return self._make_token(TokenType.文本, ''.join(result), start_line, start_col)
 
+    def _read_template_string(self) -> Token:
+        """读取模板字符串 `你好 {名字}，{年龄}岁`"""
+        start_line = self.line
+        start_col = self.column
+        self.advance()  # 跳过开头的 `
+
+        parts = []       # 字符串片段列表
+        expr_strings = [] # 表达式源码列表
+        current_part = [] # 当前正在构建的字符串片段
+
+        while self.current_char is not None and self.current_char != '`':
+            if self.current_char == '{':
+                # 保存当前字符串片段，开始读取表达式
+                parts.append(''.join(current_part))
+                current_part = []
+                self.advance()  # 跳过 {
+
+                # 读取表达式源码，直到匹配的 }
+                depth = 1
+                expr_chars = []
+                while self.current_char is not None and depth > 0:
+                    if self.current_char == '{':
+                        depth += 1
+                        expr_chars.append(self.advance())
+                    elif self.current_char == '}':
+                        depth -= 1
+                        if depth == 0:
+                            break
+                        expr_chars.append(self.advance())
+                    elif self.current_char == '"' or self.current_char == "'":
+                        # 字符串内的引号不影响 {} 匹配
+                        q = self.current_char
+                        expr_chars.append(self.advance())
+                        while self.current_char is not None and self.current_char != q:
+                            if self.current_char == '\\':
+                                expr_chars.append(self.advance())
+                            expr_chars.append(self.advance())
+                        if self.current_char == q:
+                            expr_chars.append(self.advance())
+                    else:
+                        expr_chars.append(self.advance())
+
+                if self.current_char != '}':
+                    raise self._error("模板字符串中的表达式未闭合")
+                self.advance()  # 跳过 }
+                expr_strings.append(''.join(expr_chars))
+
+            elif self.current_char == '\\':
+                # 转义字符
+                self.advance()
+                escape_map = {
+                    'n': '\n', 't': '\t', 'r': '\r',
+                    '\\': '\\', '`': '`', '{': '{', '}': '}',
+                }
+                if self.current_char in escape_map:
+                    current_part.append(escape_map[self.current_char])
+                    self.advance()
+                else:
+                    raise self._error(f"未知的转义序列: \\{self.current_char}")
+            else:
+                current_part.append(self.advance())
+
+        if self.current_char is None:
+            raise self._error(f"未闭合的模板字符串，从第 {start_line} 行开始")
+
+        self.advance()  # 跳过结束的 `
+        parts.append(''.join(current_part))  # 添加最后一个字符串片段
+
+        return self._make_token(
+            TokenType.模板文本,
+            {'parts': parts, 'exprs': expr_strings},
+            start_line, start_col,
+        )
+
     def _read_number(self) -> Token:
         """读取数值字面量（支持整数、浮点数、下划线分隔）"""
         start_line = self.line
@@ -302,8 +376,7 @@ class Lexer:
 
             # 模板字符串
             if char == '`':
-                # TODO: 实现模板字符串解析
-                self.tokens.append(self._read_string(char))
+                self.tokens.append(self._read_template_string())
                 continue
 
             # 标识符 / 关键字

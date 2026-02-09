@@ -1,0 +1,391 @@
+"""
+语句执行混入
+===========
+
+包含所有 exec_* 方法，负责执行"道"语言的语句节点。
+通过 Python mixin 模式，在运行时与 Interpreter 组合。
+"""
+
+from ..ast_nodes import *
+from ..environment import Environment
+from ..builtins import (
+    DaoFunction, DaoClass, DaoInstance, BoundMethod, SuperProxy,
+    BuiltinFunction, InterpreterBuiltin,
+    get_builtins, get_interpreter_builtins,
+)
+from ..errors import (
+    运行时错误, 类型错误, 名称错误,
+    断言失败, 跳出信号, 继续信号, 返回信号,
+)
+
+
+class StatementExecutor:
+    """语句执行方法集（混入类）"""
+
+    def exec_statement(self, stmt: Statement, env: Environment) -> object:
+        """分派并执行一条语句"""
+        match stmt:
+            case VariableDecl():
+                return self.exec_variable_decl(stmt, env)
+            case Assignment():
+                return self.exec_assignment(stmt, env)
+            case ExpressionStmt():
+                return self.eval_expression(stmt.expression, env)
+            case FunctionDecl():
+                return self.exec_function_decl(stmt, env)
+            case ReturnStmt():
+                return self.exec_return(stmt, env)
+            case IfStmt():
+                return self.exec_if(stmt, env)
+            case WhileStmt():
+                return self.exec_while(stmt, env)
+            case ForInStmt():
+                return self.exec_for_in(stmt, env)
+            case ForRangeStmt():
+                return self.exec_for_range(stmt, env)
+            case BreakStmt():
+                raise 跳出信号()
+            case ContinueStmt():
+                raise 继续信号()
+            case TryStmt():
+                return self.exec_try(stmt, env)
+            case ThrowStmt():
+                return self.exec_throw(stmt, env)
+            case AssertStmt():
+                return self.exec_assert(stmt, env)
+            case ClassDecl():
+                return self.exec_class_decl(stmt, env)
+            case MatchStmt():
+                return self.exec_match(stmt, env)
+            case ImportStmt():
+                return self.exec_import(stmt, env)
+            case DestructureAssign():
+                return self.exec_destructure(stmt, env)
+            case _:
+                raise 运行时错误(
+                    f"未知的语句类型: {type(stmt).__name__}",
+                    stmt.line, stmt.column,
+                )
+
+    # ========================
+    # 基础语句
+    # ========================
+
+    def exec_variable_decl(self, stmt: VariableDecl, env: Environment) -> None:
+        """执行变量/常量声明"""
+        value = self.eval_expression(stmt.value, env)
+        env.define(stmt.name, value, is_constant=stmt.is_constant)
+
+    def exec_assignment(self, stmt: Assignment, env: Environment) -> None:
+        """执行赋值语句"""
+        value = self.eval_expression(stmt.value, env)
+
+        if isinstance(stmt.target, Identifier):
+            env.set(stmt.target.name, value)
+        elif isinstance(stmt.target, MemberAccess):
+            obj = self.eval_expression(stmt.target.object, env)
+            if isinstance(obj, DaoInstance):
+                obj.set_field(stmt.target.member, value)
+            elif isinstance(obj, dict):
+                obj[stmt.target.member] = value
+            else:
+                raise 类型错误(
+                    f"无法给类型 '{type(obj).__name__}' 设置属性",
+                    stmt.line, stmt.column,
+                )
+        elif isinstance(stmt.target, IndexAccess):
+            obj = self.eval_expression(stmt.target.object, env)
+            index = self.eval_expression(stmt.target.index, env)
+            if isinstance(obj, list):
+                obj[int(index)] = value
+            elif isinstance(obj, dict):
+                obj[index] = value
+            else:
+                raise 类型错误(
+                    f"无法给类型 '{type(obj).__name__}' 设置索引",
+                    stmt.line, stmt.column,
+                )
+        else:
+            raise 运行时错误("无效的赋值目标", stmt.line, stmt.column)
+
+    def exec_function_decl(self, stmt: FunctionDecl, env: Environment) -> None:
+        """执行函数声明"""
+        func = DaoFunction(
+            name=stmt.name,
+            params=stmt.params,
+            default_values={
+                k: self.eval_expression(v, env)
+                for k, v in stmt.default_values.items()
+            },
+            body=stmt.body,
+            closure_env=env,
+        )
+        env.define(stmt.name, func)
+
+    def exec_return(self, stmt: ReturnStmt, env: Environment) -> None:
+        """执行返回语句"""
+        value = None
+        if stmt.value is not None:
+            value = self.eval_expression(stmt.value, env)
+        raise 返回信号(value)
+
+    # ========================
+    # 控制流
+    # ========================
+
+    def exec_if(self, stmt: IfStmt, env: Environment) -> object:
+        """执行条件语句"""
+        if self._is_truthy(self.eval_expression(stmt.condition, env)):
+            return self._exec_block(stmt.body, env)
+
+        for elif_cond, elif_body in stmt.elif_clauses:
+            if self._is_truthy(self.eval_expression(elif_cond, env)):
+                return self._exec_block(elif_body, env)
+
+        if stmt.else_body:
+            return self._exec_block(stmt.else_body, env)
+
+        return None
+
+    def exec_while(self, stmt: WhileStmt, env: Environment) -> None:
+        """执行当循环"""
+        while self._is_truthy(self.eval_expression(stmt.condition, env)):
+            try:
+                self._exec_block(stmt.body, env)
+            except 跳出信号:
+                break
+            except 继续信号:
+                continue
+
+    def exec_for_in(self, stmt: ForInStmt, env: Environment) -> None:
+        """执行遍历循环"""
+        iterable = self.eval_expression(stmt.iterable, env)
+        if not hasattr(iterable, '__iter__'):
+            raise 类型错误(
+                f"类型 '{type(iterable).__name__}' 不可遍历",
+                stmt.line, stmt.column,
+            )
+
+        for item in iterable:
+            loop_env = env.create_child()
+            loop_env.define(stmt.variable, item)
+            try:
+                self._exec_block(stmt.body, loop_env)
+            except 跳出信号:
+                break
+            except 继续信号:
+                continue
+
+    def exec_for_range(self, stmt: ForRangeStmt, env: Environment) -> None:
+        """执行范围循环"""
+        start = int(self.eval_expression(stmt.start, env))
+        end = int(self.eval_expression(stmt.end, env))
+        step = int(self.eval_expression(stmt.step, env)) if stmt.step else 1
+
+        for i in range(start, end + 1, step):
+            loop_env = env.create_child()
+            loop_env.define(stmt.variable, i)
+            try:
+                self._exec_block(stmt.body, loop_env)
+            except 跳出信号:
+                break
+            except 继续信号:
+                continue
+
+    # ========================
+    # 错误处理
+    # ========================
+
+    def exec_try(self, stmt: TryStmt, env: Environment) -> object:
+        """执行尝试-捕获-最终"""
+        try:
+            return self._exec_block(stmt.try_body, env)
+        except 运行时错误 as e:
+            if stmt.catch_body:
+                catch_env = env.create_child()
+                if stmt.catch_var:
+                    catch_env.define(stmt.catch_var, {
+                        "信息": e.message,
+                        "行": e.line,
+                        "列": e.column,
+                    })
+                return self._exec_block(stmt.catch_body, catch_env)
+        except Exception as e:
+            if stmt.catch_body:
+                catch_env = env.create_child()
+                if stmt.catch_var:
+                    catch_env.define(stmt.catch_var, {
+                        "信息": str(e),
+                    })
+                return self._exec_block(stmt.catch_body, catch_env)
+        finally:
+            if stmt.finally_body:
+                self._exec_block(stmt.finally_body, env)
+
+    def exec_throw(self, stmt: ThrowStmt, env: Environment) -> None:
+        """执行抛出语句"""
+        value = self.eval_expression(stmt.expression, env)
+        if isinstance(value, str):
+            raise 运行时错误(value, stmt.line, stmt.column)
+        raise 运行时错误(str(value), stmt.line, stmt.column)
+
+    def exec_assert(self, stmt: AssertStmt, env: Environment) -> None:
+        """执行断言语句"""
+        condition = self.eval_expression(stmt.condition, env)
+        if not self._is_truthy(condition):
+            msg = "断言失败"
+            if stmt.message:
+                msg = str(self.eval_expression(stmt.message, env))
+            raise 断言失败(msg, stmt.line, stmt.column)
+
+    # ========================
+    # OOP 执行
+    # ========================
+
+    def exec_class_decl(self, stmt: ClassDecl, env: Environment) -> None:
+        """执行类型声明"""
+        parent = None
+        if stmt.parent_name:
+            parent = env.get(stmt.parent_name)
+            if not isinstance(parent, DaoClass):
+                raise 类型错误(
+                    f"'{stmt.parent_name}' 不是一个类型，无法继承",
+                    stmt.line, stmt.column,
+                )
+
+        methods = {}
+        static_methods = {}
+        private_names = set()
+        for s in stmt.body:
+            if isinstance(s, FunctionDecl):
+                func = DaoFunction(
+                    name=s.name,
+                    params=s.params,
+                    default_values={
+                        k: self.eval_expression(v, env)
+                        for k, v in s.default_values.items()
+                    },
+                    body=s.body,
+                    closure_env=env,
+                )
+                if s.is_private:
+                    private_names.add(s.name)
+                if s.is_static:
+                    static_methods[s.name] = func
+                else:
+                    methods[s.name] = func
+
+        klass = DaoClass(
+            name=stmt.name, parent=parent, methods=methods,
+            static_methods=static_methods, private_names=private_names,
+        )
+        env.define(stmt.name, klass)
+
+    # ========================
+    # 模式匹配
+    # ========================
+
+    def exec_match(self, stmt: MatchStmt, env: Environment) -> object:
+        """执行匹配语句"""
+        subject = self.eval_expression(stmt.subject, env)
+
+        for case in stmt.cases:
+            if case.is_wildcard:
+                if case.guard:
+                    if self._is_truthy(self.eval_expression(case.guard, env)):
+                        return self._exec_block(case.body, env)
+                    continue
+                return self._exec_block(case.body, env)
+
+            pattern_val = self.eval_expression(case.pattern, env)
+
+            if subject == pattern_val:
+                if case.guard:
+                    if not self._is_truthy(self.eval_expression(case.guard, env)):
+                        continue
+                return self._exec_block(case.body, env)
+
+        return None
+
+    # ========================
+    # 导入
+    # ========================
+
+    def exec_import(self, stmt: ImportStmt, env: Environment) -> None:
+        """执行导入语句"""
+        import os
+        module_path = stmt.module_path.replace(".", os.sep) + ".道"
+
+        if not os.path.exists(module_path):
+            raise 运行时错误(
+                f"模块 '{stmt.module_path}' 不存在 (找不到文件: {module_path})",
+                stmt.line, stmt.column,
+            )
+
+        with open(module_path, 'r', encoding='utf-8') as f:
+            source = f.read()
+
+        from ..lexer import Lexer
+        from ..parser import Parser
+
+        lexer = Lexer(source, module_path)
+        tokens = lexer.tokenize()
+        parser = Parser(tokens)
+        ast = parser.parse()
+
+        module_env = Environment()
+        for name, func in get_builtins().items():
+            module_env.define(name, func)
+        for name, func in get_interpreter_builtins().items():
+            func.interpreter = self
+            module_env.define(name, func)
+
+        self.execute(ast, module_env)
+
+        alias = stmt.alias or stmt.module_path.split(".")[-1]
+        module_dict = {}
+        for name, value in module_env.values.items():
+            if not isinstance(value, (BuiltinFunction, InterpreterBuiltin)):
+                module_dict[name] = value
+
+        env.define(alias, module_dict)
+
+    # ========================
+    # 解构赋值
+    # ========================
+
+    def exec_destructure(self, stmt, env: Environment) -> None:
+        """执行解构赋值"""
+        value = self.eval_expression(stmt.value, env)
+
+        if isinstance(value, (list, tuple)):
+            if len(stmt.targets) != len(value):
+                raise 运行时错误(
+                    f"解构赋值：目标数量({len(stmt.targets)})与值的数量({len(value)})不匹配",
+                    stmt.line, stmt.column,
+                )
+            for name, val in zip(stmt.targets, value):
+                if stmt.is_declaration:
+                    env.define(name, val)
+                elif env.has(name):
+                    env.set(name, val)
+                else:
+                    env.define(name, val)
+        elif isinstance(value, dict):
+            for name in stmt.targets:
+                if name not in value:
+                    raise 运行时错误(
+                        f"解构赋值：字典中不存在键 '{name}'",
+                        stmt.line, stmt.column,
+                    )
+                if stmt.is_declaration:
+                    env.define(name, value[name])
+                elif env.has(name):
+                    env.set(name, value[name])
+                else:
+                    env.define(name, value[name])
+        else:
+            raise 类型错误(
+                f"无法对类型 '{type(value).__name__}' 进行解构赋值",
+                stmt.line, stmt.column,
+            )

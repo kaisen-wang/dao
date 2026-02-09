@@ -115,6 +115,7 @@ class TokenType(Enum):
     本对象 = auto()      # this/self
     父对象 = auto()      # super
     私有 = auto()        # private
+    静态 = auto()        # static
 
     # ========================
     # 模块关键字
@@ -197,6 +198,7 @@ KEYWORDS: dict[str, TokenType] = {
     "本对象": TokenType.本对象,
     "父对象": TokenType.父对象,
     "私有": TokenType.私有,
+    "静态": TokenType.静态,
     # 模块
     "导入": TokenType.导入,
     "导出": TokenType.导出,

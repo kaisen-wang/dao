@@ -141,9 +141,14 @@ class Parser:
             case _:
                 return self.parse_expression_or_assignment()
 
-    def parse_variable_decl(self, is_constant: bool) -> VariableDecl:
-        """解析变量/常量声明：定义 x = 值"""
+    def parse_variable_decl(self, is_constant: bool) -> VariableDecl | DestructureAssign:
+        """解析变量/常量声明：定义 x = 值 或 定义 [甲, 乙] = 值"""
         token = self.advance()  # 消费 定义/常量
+
+        # 检查是否是解构赋值：定义 [甲, 乙] = ...
+        if self.current.type == TokenType.左方括号:
+            return self._parse_destructure_decl(token, is_constant)
+
         name_token = self.expect(TokenType.标识符, "变量声明需要一个变量名")
         self.expect(TokenType.赋值, "变量声明需要 '=' 赋值")
         value = self.parse_expression()
@@ -152,6 +157,27 @@ class Parser:
             name=name_token.value,
             value=value,
             is_constant=is_constant,
+            line=token.line,
+            column=token.column,
+        )
+
+    def _parse_destructure_decl(self, token: Token, is_constant: bool) -> DestructureAssign:
+        """解析解构声明：定义 [甲, 乙] = [1, 2]"""
+        self.advance()  # 消费 [
+        targets = []
+        while self.current.type != TokenType.右方括号:
+            name = self.expect(TokenType.标识符, "解构赋值需要变量名")
+            targets.append(name.value)
+            if not self.match(TokenType.逗号):
+                break
+        self.expect(TokenType.右方括号, "解构赋值需要 ']'")
+        self.expect(TokenType.赋值, "解构赋值需要 '='")
+        value = self.parse_expression()
+        self.expect(TokenType.换行, "语句末尾需要换行")
+        return DestructureAssign(
+            targets=targets,
+            value=value,
+            is_declaration=True,
             line=token.line,
             column=token.column,
         )
@@ -381,12 +407,27 @@ class Parser:
             if self.current.type in (TokenType.回退, TokenType.文件结束):
                 break
 
+            # 修饰符
+            is_static = False
+            is_private = False
+            if self.current.type == TokenType.私有:
+                is_private = True
+                self.advance()
+            if self.current.type == TokenType.静态:
+                is_static = True
+                self.advance()
+
             if self.current.type == TokenType.初始化:
                 # 构造函数：初始化(参数) ...
-                statements.append(self.parse_constructor())
+                func = self.parse_constructor()
+                func.is_private = is_private
+                statements.append(func)
             elif self.current.type == TokenType.函数:
                 # 方法：函数 名字(参数) ...
-                statements.append(self.parse_function_decl())
+                func = self.parse_function_decl()
+                func.is_static = is_static
+                func.is_private = is_private
+                statements.append(func)
             else:
                 # 其他语句（如类级别的属性声明）
                 statements.append(self.parse_statement())
@@ -512,8 +553,25 @@ class Parser:
         """解析表达式语句或赋值语句"""
         expr = self.parse_expression()
 
-        # 检查是否为赋值
+        # 检查是否为解构赋值：[甲, 乙] = ...
         if self.match(TokenType.赋值):
+            if isinstance(expr, ListLiteral):
+                # 列表解构赋值
+                targets = []
+                for elem in expr.elements:
+                    if not isinstance(elem, Identifier):
+                        raise self._error("解构赋值的目标必须是变量名")
+                    targets.append(elem.name)
+                value = self.parse_expression()
+                self.match(TokenType.换行)
+                return DestructureAssign(
+                    targets=targets,
+                    value=value,
+                    is_declaration=False,
+                    line=expr.line,
+                    column=expr.column,
+                )
+            # 普通赋值
             value = self.parse_expression()
             self.match(TokenType.换行)
             return Assignment(
@@ -730,6 +788,10 @@ class Parser:
             self.advance()
             return StringLiteral(value=token.value, line=token.line, column=token.column)
 
+        # 模板字符串
+        if token.type == TokenType.模板文本:
+            return self.parse_template_literal()
+
         # 布尔字面量
         if token.type == TokenType.真:
             self.advance()
@@ -778,6 +840,30 @@ class Parser:
             return self.parse_dict_literal()
 
         raise self._error(f"无法解析的表达式: '{token.value}' ({token.type.name})")
+
+    def parse_template_literal(self) -> TemplateLiteral:
+        """解析模板字符串：`你好 {名字}，{年龄}岁`"""
+        token = self.advance()  # 消费 模板文本 Token
+        data = token.value  # {'parts': [...], 'exprs': [...]}
+        parts = data['parts']
+        expr_strings = data['exprs']
+
+        # 将每个表达式源码字符串解析为 AST 表达式
+        from .lexer import Lexer
+        expressions = []
+        for expr_src in expr_strings:
+            expr_lexer = Lexer(expr_src, "<模板表达式>")
+            expr_tokens = expr_lexer.tokenize()
+            expr_parser = Parser(expr_tokens)
+            expr_node = expr_parser.parse_expression()
+            expressions.append(expr_node)
+
+        return TemplateLiteral(
+            parts=parts,
+            expressions=expressions,
+            line=token.line,
+            column=token.column,
+        )
 
     def parse_lambda(self) -> LambdaExpr:
         """解析匿名函数"""
