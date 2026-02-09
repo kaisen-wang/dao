@@ -282,10 +282,18 @@ class AssertStmt(Statement):
 # ========================
 
 @dataclass
+class TraitDecl(Statement):
+    """特征声明：特征 名字 ..."""
+    name: str = ""
+    body: list[Statement] = field(default_factory=list)
+
+
+@dataclass
 class ClassDecl(Statement):
-    """类型声明：类型 名字 [继承自 父类] ..."""
+    """类型声明：类型 名字 [继承自 父类] [实现 特征1, 特征2] ..."""
     name: str = ""
     parent_name: str | None = None
+    implemented_traits: list[str] = field(default_factory=list)
     body: list[Statement] = field(default_factory=list)
 
 

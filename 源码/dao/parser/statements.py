@@ -13,7 +13,7 @@ from ..ast_nodes import (
     VariableDecl, Assignment, ExpressionStmt, FunctionDecl, ReturnStmt, YieldStmt,
     IfStmt, WhileStmt, ForInStmt, ForRangeStmt, BreakStmt, ContinueStmt,
     TryStmt, ThrowStmt, AssertStmt,
-    ClassDecl, MatchStmt, MatchCase, ImportStmt,
+    ClassDecl, TraitDecl, MatchStmt, MatchCase, ImportStmt,
     DestructureAssign, NullLiteral, ListLiteral, Identifier,
 )
 
@@ -36,6 +36,8 @@ class StatementParser:
                 return self.parse_variable_decl(is_constant=True)
             case TokenType.函数:
                 return self.parse_function_decl()
+            case TokenType.特征:
+                return self.parse_trait_decl()
             case TokenType.返回:
                 return self.parse_return_stmt()
             case TokenType.产出:
@@ -325,7 +327,7 @@ class StatementParser:
     # ========================
 
     def parse_class_decl(self) -> ClassDecl:
-        """解析类型声明：类型 名字 [继承自 父类] ..."""
+        """解析类型声明：类型 名字 [继承自 父类] [实现 特征1, 特征2] ..."""
         token = self.advance()  # 消费 类型
         name_token = self.expect(TokenType.标识符, "类型声明需要一个类名")
 
@@ -334,12 +336,37 @@ class StatementParser:
             parent_token = self.expect(TokenType.标识符, "'继承自' 后需要父类名")
             parent_name = parent_token.value
 
+        implemented_traits = []
+        if self.match(TokenType.实现):
+            # 解析特征列表
+            while True:
+                trait_token = self.expect(TokenType.标识符, "'实现' 后需要特征名")
+                implemented_traits.append(trait_token.value)
+                if not self.match(TokenType.逗号):
+                    break
+
         self.expect(TokenType.换行, "类型声明后需要换行")
         body = self.parse_class_body()
 
         return ClassDecl(
             name=name_token.value,
             parent_name=parent_name,
+            implemented_traits=implemented_traits,
+            body=body,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_trait_decl(self) -> TraitDecl:
+        """解析特征声明：特征 名字 ..."""
+        token = self.advance()  # 消费 特征
+        name_token = self.expect(TokenType.标识符, "特征声明需要一个特征名")
+
+        self.expect(TokenType.换行, "特征声明后需要换行")
+        body = self.parse_class_body()  # 特征体和类体结构相同
+
+        return TraitDecl(
+            name=name_token.value,
             body=body,
             line=token.line,
             column=token.column,
