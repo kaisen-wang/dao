@@ -10,10 +10,10 @@ from ..ast_nodes import Program
 from ..environment import Environment
 from ..builtins import (
     DaoCallable, DaoFunction, BuiltinFunction, InterpreterBuiltin,
-    DaoClass, DaoInstance, BoundMethod, SuperProxy,
+    DaoClass, DaoInstance, BoundMethod, SuperProxy, CurriedFunction, DaoGenerator,
     get_builtins, get_interpreter_builtins,
 )
-from ..errors import 运行时错误, 类型错误, 返回信号
+from ..errors import 运行时错误, 类型错误, 返回信号, 产出信号
 from .statements import StatementExecutor
 from .expressions import ExpressionEvaluator
 
@@ -70,6 +70,9 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
 
         if isinstance(func, DaoFunction):
             return self._call_dao_function(func, args, kwargs, None)
+
+        if isinstance(func, CurriedFunction):
+            return func.call(args, kwargs)
 
         if isinstance(func, BoundMethod):
             return self._call_method(func.instance, func.method, args, kwargs, None)
@@ -131,6 +134,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
 
         try:
             self._exec_block(func.body, func_env)
+        except 产出信号 as e:
+            return DaoGenerator(func, args, kwargs, self)
         except 返回信号 as ret:
             return ret.value
 

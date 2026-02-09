@@ -104,3 +104,83 @@ class SuperProxy:
     def __init__(self, instance: DaoInstance, parent_class: DaoClass):
         self.instance = instance
         self.parent_class = parent_class
+
+
+class DaoGenerator:
+    """生成器对象（预生成所有值的简化实现）"""
+
+    def __init__(self, func, args: list, kwargs: dict, interpreter):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        self.interpreter = interpreter
+        self._values = self._collect_all_values()
+        self._index = 0
+
+    def _collect_all_values(self):
+        """收集所有产出的值"""
+        from ..errors import 产出信号, 返回信号
+
+        values = []
+
+        def bind_params(func_env):
+            for i, param in enumerate(self.func.params):
+                if i < len(self.args):
+                    func_env.define(param, self.args[i])
+                elif param in self.kwargs:
+                    func_env.define(param, self.kwargs[param])
+                elif param in self.func.default_values:
+                    func_env.define(param, self.func.default_values[param])
+                else:
+                    from ..errors import 运行时错误
+                    raise 运行时错误(f"函数 '{self.func.name}' 缺少参数 '{param}'")
+
+        func_env = self.func.closure_env.create_child()
+        bind_params(func_env)
+
+        def exec_block_with_yield(statements, env, values):
+            from ..errors import 跳出信号, 继续信号
+            for stmt in statements:
+                try:
+                    from dao.interpreter.core import Interpreter
+                    if stmt.__class__.__name__ == 'WhileStmt':
+                        while self.interpreter._is_truthy(self.interpreter.eval_expression(stmt.condition, env)):
+                            try:
+                                for s in stmt.body:
+                                    exec_block_with_yield([s], env, values)
+                            except 跳出信号:
+                                break
+                            except 继续信号:
+                                continue
+                    else:
+                        self.interpreter.exec_statement(stmt, env)
+                except 产出信号 as e:
+                    values.append(e.value)
+                except 跳出信号:
+                    raise
+                except 继续信号:
+                    raise
+                except 返回信号:
+                    raise
+
+        try:
+            exec_block_with_yield(self.func.body, func_env, values)
+        except 返回信号:
+            pass
+
+        return values
+
+    def __iter__(self):
+        """返回迭代器"""
+        return self
+
+    def __next__(self):
+        """获取下一个值"""
+        if self._index >= len(self._values):
+            raise StopIteration
+        value = self._values[self._index]
+        self._index += 1
+        return value
+
+    def __repr__(self) -> str:
+        return f"<生成器>"

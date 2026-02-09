@@ -53,6 +53,7 @@ class TokenType(Enum):
     继续 = auto()        # continue
     匹配 = auto()        # match
     情况 = auto()        # case
+    产出 = auto()        # yield
 
     # ========================
     # 错误处理关键字
@@ -179,6 +180,7 @@ KEYWORDS: dict[str, TokenType] = {
     "继续": TokenType.继续,
     "匹配": TokenType.匹配,
     "情况": TokenType.情况,
+    "产出": TokenType.产出,
     "尝试": TokenType.尝试,
     "捕获": TokenType.捕获,
     "最终": TokenType.最终,

@@ -15,7 +15,7 @@ from ..builtins import (
 )
 from ..errors import (
     运行时错误, 类型错误, 名称错误,
-    断言失败, 跳出信号, 继续信号, 返回信号,
+    断言失败, 跳出信号, 继续信号, 返回信号, 产出信号,
 )
 
 
@@ -35,6 +35,8 @@ class StatementExecutor:
                 return self.exec_function_decl(stmt, env)
             case ReturnStmt():
                 return self.exec_return(stmt, env)
+            case YieldStmt():
+                return self.exec_yield(stmt, env)
             case IfStmt():
                 return self.exec_if(stmt, env)
             case WhileStmt():
@@ -128,6 +130,13 @@ class StatementExecutor:
         if stmt.value is not None:
             value = self.eval_expression(stmt.value, env)
         raise 返回信号(value)
+
+    def exec_yield(self, stmt: YieldStmt, env: Environment) -> None:
+        """执行产出语句"""
+        value = None
+        if stmt.value is not None:
+            value = self.eval_expression(stmt.value, env)
+        raise 产出信号(value)
 
     # ========================
     # 控制流

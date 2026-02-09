@@ -10,7 +10,7 @@ OOP（类型/构造函数）、模式匹配、模块导入、解构赋值等。
 from ..tokens import TokenType
 from ..ast_nodes import (
     Statement, Expression,
-    VariableDecl, Assignment, ExpressionStmt, FunctionDecl, ReturnStmt,
+    VariableDecl, Assignment, ExpressionStmt, FunctionDecl, ReturnStmt, YieldStmt,
     IfStmt, WhileStmt, ForInStmt, ForRangeStmt, BreakStmt, ContinueStmt,
     TryStmt, ThrowStmt, AssertStmt,
     ClassDecl, MatchStmt, MatchCase, ImportStmt,
@@ -38,6 +38,8 @@ class StatementParser:
                 return self.parse_function_decl()
             case TokenType.返回:
                 return self.parse_return_stmt()
+            case TokenType.产出:
+                return self.parse_yield_stmt()
             case TokenType.如果:
                 return self.parse_if_stmt()
             case TokenType.当:
@@ -156,6 +158,15 @@ class StatementParser:
             value = self.parse_expression()
         self.match(TokenType.换行)
         return ReturnStmt(value=value, line=token.line, column=token.column)
+
+    def parse_yield_stmt(self) -> YieldStmt:
+        """解析产出语句"""
+        token = self.advance()  # 消费 产出
+        value = None
+        if self.current.type != TokenType.换行 and self.current.type != TokenType.文件结束:
+            value = self.parse_expression()
+        self.match(TokenType.换行)
+        return YieldStmt(value=value, line=token.line, column=token.column)
 
     # ========================
     # 控制流

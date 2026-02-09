@@ -1,12 +1,62 @@
 """
 高阶内置函数
-===========
+==========
 
 需要解释器引用的高阶内置函数实现：映射、筛选、折叠、排序 等。
 这些函数接受用户自定义函数作为参数，需要通过解释器来调用它们。
 """
 
-from .callables import InterpreterBuiltin
+from .callables import InterpreterBuiltin, CurriedFunction, DaoCallable
+
+
+def _hof_柯里化(interpreter, func):
+    """柯里化函数：将多参数函数转换为单参数函数链"""
+    if not isinstance(func, DaoCallable):
+        from ..errors import 类型错误
+        raise 类型错误("柯里化() 参数必须是函数")
+    curried = CurriedFunction(func)
+    curried.interpreter = interpreter
+    return curried
+
+
+def _hof_组合(interpreter, *funcs):
+    """函数组合：组合(f, g) 返回函数 f(g(x)) - 从右到左应用（传统数学定义）"""
+    if not funcs:
+        from ..errors import 运行时错误
+        raise 运行时错误("组合() 至少需要一个函数")
+    for func in funcs:
+        if not isinstance(func, DaoCallable):
+            from ..errors import 类型错误
+            raise 类型错误("组合() 所有参数都必须是函数")
+    if len(funcs) == 1:
+        return funcs[0]
+    def composed(*args, **kwargs):
+        result = interpreter.call_function(funcs[-1], args, kwargs)
+        for func in reversed(funcs[:-1]):
+            result = interpreter.call_function(func, [result])
+        return result
+    from .callables import BuiltinFunction
+    return BuiltinFunction("组合函数", composed)
+
+
+def _hof_管道组合(interpreter, *funcs):
+    """管道组合：管道组合(f, g, h) 等价于 x => h(g(f(x))) - 从左到右应用"""
+    if not funcs:
+        from ..errors import 运行时错误
+        raise 运行时错误("管道组合() 至少需要一个函数")
+    for func in funcs:
+        if not isinstance(func, DaoCallable):
+            from ..errors import 类型错误
+            raise 类型错误("管道组合() 所有参数都必须是函数")
+    if len(funcs) == 1:
+        return funcs[0]
+    def composed(*args, **kwargs):
+        result = interpreter.call_function(funcs[0], args, kwargs)
+        for func in funcs[1:]:
+            result = interpreter.call_function(func, [result])
+        return result
+    from .callables import BuiltinFunction
+    return BuiltinFunction("管道组合函数", composed)
 
 
 def _hof_映射(interpreter, collection, func):
@@ -104,4 +154,7 @@ def get_interpreter_builtins() -> dict[str, InterpreterBuiltin]:
         "排序": InterpreterBuiltin("排序", _hof_排序),
         "展平映射": InterpreterBuiltin("展平映射", _hof_展平映射, 2),
         "分组": InterpreterBuiltin("分组", _hof_分组, 2),
+        "柯里化": InterpreterBuiltin("柯里化", _hof_柯里化, 1),
+        "组合": InterpreterBuiltin("组合", _hof_组合),
+        "管道组合": InterpreterBuiltin("管道组合", _hof_管道组合),
     }

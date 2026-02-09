@@ -7,7 +7,7 @@
 """
 
 from ..errors import 运行时错误, 类型错误
-from .callables import BuiltinFunction, InterpreterBuiltin, DaoFunction
+from .callables import BuiltinFunction, InterpreterBuiltin, DaoFunction, DaoCallable
 from .oop_types import DaoClass, DaoInstance, BoundMethod
 
 
@@ -177,6 +177,15 @@ def _builtin_是实例(obj, cls):
     return False
 
 
+def _builtin_下一个(iterator):
+    """获取迭代器的下一个值"""
+    try:
+        return next(iterator)
+    except StopIteration:
+        from ..errors import 运行时错误
+        raise 运行时错误("迭代器已耗尽")
+
+
 # ========================================================
 # 注册表
 # ========================================================
@@ -202,4 +211,5 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         "最小值": BuiltinFunction("最小值", _builtin_最小值),
         "绝对值": BuiltinFunction("绝对值", _builtin_绝对值, 1),
         "是实例": BuiltinFunction("是实例", _builtin_是实例, 2),
+        "下一个": BuiltinFunction("下一个", _builtin_下一个, 1),
     }

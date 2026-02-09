@@ -73,3 +73,11 @@ class 返回信号(Exception):
     def __init__(self, value):
         self.value = value
         super().__init__()
+
+
+class 产出信号(Exception):
+    """生成器产出值的控制流信号（非真正的错误）"""
+
+    def __init__(self, value):
+        self.value = value
+        super().__init__()

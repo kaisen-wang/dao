@@ -356,6 +356,10 @@ class ExpressionEvaluator:
         if isinstance(callee, DaoFunction):
             return self._call_dao_function(callee, args, kwargs, expr)
 
+        from ..builtins import CurriedFunction
+        if isinstance(callee, CurriedFunction):
+            return callee.call(args, kwargs)
+
         return callee.call(args, kwargs)
 
     def eval_lambda(self, expr: LambdaExpr, env: Environment) -> DaoFunction:

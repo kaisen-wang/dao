@@ -195,6 +195,12 @@ class ReturnStmt(Statement):
     value: Expression | None = None
 
 
+@dataclass
+class YieldStmt(Statement):
+    """产出语句：产出 值"""
+    value: Expression | None = None
+
+
 # ========================
 # 控制流
 # ========================

@@ -646,5 +646,174 @@ class TestDestructuringAssignment:
         assert output.strip() == "10\n20"
 
 
+class TestCurrying:
+    """柯里化测试"""
+
+    def test_simple_currying(self):
+        source = (
+            '函数 加法(甲, 乙)\n'
+            '    返回 甲 + 乙\n'
+            '定义 加法柯里化 = 柯里化(加法)\n'
+            '定义 加5 = 加法柯里化(5)\n'
+            '打印(加5(3))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "8"
+
+    def test_currying_three_params(self):
+        source = (
+            '函数 累加(甲, 乙, 丙)\n'
+            '    返回 甲 + 乙 + 丙\n'
+            '定义 累加柯里化 = 柯里化(累加)\n'
+            '定义 加1 = 累加柯里化(1)\n'
+            '定义 加1再加2 = 加1(2)\n'
+            '打印(加1再加2(3))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "6"
+
+    def test_currying_partial_application(self):
+        source = (
+            '函数 乘法(甲, 乙)\n'
+            '    返回 甲 * 乙\n'
+            '定义 乘法柯里化 = 柯里化(乘法)\n'
+            '定义 双倍 = 乘法柯里化(2)\n'
+            '打印(双倍(5))\n'
+            '打印(双倍(10))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "10\n20"
+
+    def test_currying_with_pipe(self):
+        source = (
+            '函数 加法(甲, 乙)\n'
+            '    返回 甲 + 乙\n'
+            '定义 加法柯里化 = 柯里化(加法)\n'
+            '定义 数据 = [1, 2, 3, 4, 5]\n'
+            '定义 结果 = 映射(数据, 加法柯里化(10))\n'
+            '打印(结果[2])\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "13"
+
+    def test_currying_with_lambda(self):
+        source = (
+            '定义 乘法 = 函数(甲, 乙) => 甲 * 乙\n'
+            '定义 乘法柯里化 = 柯里化(乘法)\n'
+            '定义 三倍 = 乘法柯里化(3)\n'
+            '打印(三倍(7))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "21"
+
+
+class TestFunctionComposition:
+    """函数组合测试"""
+
+    def test_simple_compose(self):
+        source = (
+            '函数 加10(数值)\n'
+            '    返回 数值 + 10\n'
+            '函数 乘2(数值)\n'
+            '    返回 数值 * 2\n'
+            '定义 组合函数 = 组合(加10, 乘2)\n'
+            '打印(组合函数(5))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "20"
+
+    def test_compose_three_functions(self):
+        source = (
+            '函数 加1(数值)\n'
+            '    返回 数值 + 1\n'
+            '函数 平方(数值)\n'
+            '    返回 数值 * 数值\n'
+            '函数 减5(数值)\n'
+            '    返回 数值 - 5\n'
+            '定义 组合函数 = 组合(加1, 减5, 平方)\n'
+            '打印(组合函数(4))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "12"
+
+    def test_pipe_compose(self):
+        source = (
+            '函数 加10(数值)\n'
+            '    返回 数值 + 10\n'
+            '函数 乘2(数值)\n'
+            '    返回 数值 * 2\n'
+            '定义 管道组合函数 = 管道组合(加10, 乘2)\n'
+            '打印(管道组合函数(5))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "30"
+
+    def test_compose_with_map(self):
+        source = (
+            '函数 加10(数值)\n'
+            '    返回 数值 + 10\n'
+            '函数 乘2(数值)\n'
+            '    返回 数值 * 2\n'
+            '定义 组合函数 = 组合(加10, 乘2)\n'
+            '定义 数据 = [1, 2, 3, 4, 5]\n'
+            '定义 结果 = 映射(数据, 组合函数)\n'
+            '打印(结果[2])\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "16"
+
+    def test_compose_single_function(self):
+        source = (
+            '函数 加10(数值)\n'
+            '    返回 数值 + 10\n'
+            '定义 组合函数 = 组合(加10)\n'
+            '打印(组合函数(5))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "15"
+
+
+class TestGenerators:
+    """生成器测试"""
+
+    def test_simple_generator(self):
+        source = (
+            '函数 生成器(上限)\n'
+            '    定义 计数器 = 0\n'
+            '    当 计数器 < 上限\n'
+            '        产出 计数器\n'
+            '        计数器 = 计数器 + 1\n'
+            '定义 生成器实例 = 生成器(5)\n'
+            '打印(下一个(生成器实例))\n'
+            '打印(下一个(生成器实例))\n'
+            '打印(下一个(生成器实例))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "0\n1\n2"
+
+    def test_generator_with_foreach(self):
+        source = (
+            '函数 生成器(上限)\n'
+            '    定义 计数器 = 0\n'
+            '    当 计数器 < 上限\n'
+            '        产出 计数器\n'
+            '        计数器 = 计数器 + 1\n'
+            '定义 生成器实例 = 生成器(5)\n'
+            '遍历 数值 在 生成器实例\n'
+            '    打印(数值)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "0\n1\n2\n3\n4"
+
+    def test_generator_infinite(self):
+        source = (
+            'function 无限生成器()\n'
+            '    定义 计数器 = 0\n'
+            '    当 真\n'
+            '        产出 计数器\n'
+            '        计数器 = 计数器 + 1\n'
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

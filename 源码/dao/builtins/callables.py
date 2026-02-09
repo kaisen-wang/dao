@@ -74,3 +74,38 @@ class DaoFunction(DaoCallable):
 
     def __repr__(self) -> str:
         return f"<函数 {self.name}>"
+
+
+class CurriedFunction(DaoCallable):
+    """柯里化后的函数"""
+
+    def __init__(self, original: DaoCallable, accumulated_args: list = []):
+        self.original = original
+        self.accumulated_args = accumulated_args.copy()
+        self.interpreter = None
+
+    def call(self, args: list, kwargs: dict) -> object:
+        if not args:
+            return self
+        new_args = self.accumulated_args + args
+        expected_arity = self.original.arity()
+        if expected_arity == -1:
+            return self.original.call(new_args, kwargs)
+        if len(new_args) >= expected_arity:
+            if isinstance(self.original, DaoFunction) and self.interpreter:
+                return self.interpreter._call_dao_function(
+                    self.original, new_args[:expected_arity], kwargs, None
+                )
+            return self.original.call(new_args[:expected_arity], kwargs)
+        result = CurriedFunction(self.original, new_args)
+        result.interpreter = self.interpreter
+        return result
+
+    def arity(self) -> int:
+        expected = self.original.arity()
+        if expected == -1:
+            return -1
+        return max(0, expected - len(self.accumulated_args))
+
+    def __repr__(self) -> str:
+        return f"<柯里化函数 {getattr(self.original, 'name', '匿名')}>"
