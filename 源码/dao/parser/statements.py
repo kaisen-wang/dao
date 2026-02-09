@@ -1,106 +1,28 @@
 """
-语法分析器 (Parser)
-==================
+语句解析混入
+===========
 
-将Token流转换为抽象语法树（AST）。
-
-采用递归下降（Recursive Descent）解析策略：
-- 每个语法规则对应一个解析方法
-- 自顶向下解析，从 program() 开始
-- 运算符优先级通过方法调用层级实现
-
-优先级（从低到高）：
-1. 管道 (|>)
-2. 或者
-3. 并且
-4. 不是
-5. 比较 (==, !=, <, >, <=, >=, 在, 不在)
-6. 加减 (+, -)
-7. 乘除余 (*, /, %, //)
-8. 幂 (**)
-9. 一元 (-, 不是)
-10. 调用/成员访问 (f(), obj.x, list[0])
-11. 基本 (字面量, 标识符, 括号表达式)
+包含所有语句解析方法：变量声明、函数声明、控制流、
+OOP（类型/构造函数）、模式匹配、模块导入、解构赋值等。
+通过 Python mixin 模式，在运行时与 Parser 组合。
 """
 
-from .tokens import Token, TokenType
-from .ast_nodes import *
-from .errors import 语法错误
+from ..tokens import TokenType
+from ..ast_nodes import (
+    Statement, Expression,
+    VariableDecl, Assignment, ExpressionStmt, FunctionDecl, ReturnStmt,
+    IfStmt, WhileStmt, ForInStmt, ForRangeStmt, BreakStmt, ContinueStmt,
+    TryStmt, ThrowStmt, AssertStmt,
+    ClassDecl, MatchStmt, MatchCase, ImportStmt,
+    DestructureAssign, NullLiteral, ListLiteral, Identifier,
+)
 
 
-class Parser:
-    """
-    语法分析器
-
-    使用方法：
-        parser = Parser(token_list)
-        ast = parser.parse()
-    """
-
-    def __init__(self, tokens: list[Token]):
-        self.tokens = tokens
-        self.pos = 0
-
-    @property
-    def current(self) -> Token:
-        """获取当前Token"""
-        if self.pos < len(self.tokens):
-            return self.tokens[self.pos]
-        return self.tokens[-1]  # EOF
-
-    def peek(self, offset: int = 1) -> Token:
-        """向前查看"""
-        pos = self.pos + offset
-        if pos < len(self.tokens):
-            return self.tokens[pos]
-        return self.tokens[-1]
-
-    def advance(self) -> Token:
-        """消费当前Token并返回"""
-        token = self.current
-        self.pos += 1
-        return token
-
-    def expect(self, token_type: TokenType, message: str = "") -> Token:
-        """期望当前Token为指定类型，否则报错"""
-        if self.current.type != token_type:
-            msg = message or f"期望 {token_type.name}，但得到 {self.current.type.name} ('{self.current.value}')"
-            raise 语法错误(msg, self.current.line, self.current.column)
-        return self.advance()
-
-    def match(self, *types: TokenType) -> Token | None:
-        """如果当前Token是指定类型之一，消费并返回；否则返回None"""
-        if self.current.type in types:
-            return self.advance()
-        return None
-
-    def skip_newlines(self):
-        """跳过所有换行Token"""
-        while self.current.type == TokenType.换行:
-            self.advance()
-
-    def _error(self, message: str) -> 语法错误:
-        return 语法错误(message, self.current.line, self.current.column)
+class StatementParser:
+    """语句解析方法集（混入类）"""
 
     # ========================
-    # 顶层解析
-    # ========================
-
-    def parse(self) -> Program:
-        """解析整个程序"""
-        program = Program(statements=[])
-        self.skip_newlines()
-
-        while self.current.type != TokenType.文件结束:
-            stmt = self.parse_statement()
-            if stmt:
-                program.statements.append(stmt)
-            self.skip_newlines()
-
-        return program
-
-    # ========================
-    # 语句解析
+    # 语句分派
     # ========================
 
     def parse_statement(self) -> Statement:
@@ -141,6 +63,10 @@ class Parser:
             case _:
                 return self.parse_expression_or_assignment()
 
+    # ========================
+    # 变量/常量声明
+    # ========================
+
     def parse_variable_decl(self, is_constant: bool) -> VariableDecl | DestructureAssign:
         """解析变量/常量声明：定义 x = 值 或 定义 [甲, 乙] = 值"""
         token = self.advance()  # 消费 定义/常量
@@ -161,7 +87,7 @@ class Parser:
             column=token.column,
         )
 
-    def _parse_destructure_decl(self, token: Token, is_constant: bool) -> DestructureAssign:
+    def _parse_destructure_decl(self, token, is_constant: bool) -> DestructureAssign:
         """解析解构声明：定义 [甲, 乙] = [1, 2]"""
         self.advance()  # 消费 [
         targets = []
@@ -182,11 +108,14 @@ class Parser:
             column=token.column,
         )
 
+    # ========================
+    # 函数声明
+    # ========================
+
     def parse_function_decl(self) -> FunctionDecl:
         """解析函数声明：函数 名字(参数) ..."""
         token = self.advance()  # 消费 函数
 
-        # 在类体外部：函数 名字(参数)
         name_token = self.expect(TokenType.标识符, "函数声明需要函数名")
         self.expect(TokenType.左括号, "函数声明需要 '('")
 
@@ -227,6 +156,10 @@ class Parser:
             value = self.parse_expression()
         self.match(TokenType.换行)
         return ReturnStmt(value=value, line=token.line, column=token.column)
+
+    # ========================
+    # 控制流
+    # ========================
 
     def parse_if_stmt(self) -> IfStmt:
         """解析条件语句"""
@@ -320,6 +253,10 @@ class Parser:
         token = self.advance()
         self.match(TokenType.换行)
         return ContinueStmt(line=token.line, column=token.column)
+
+    # ========================
+    # 错误处理
+    # ========================
 
     def parse_try_stmt(self) -> TryStmt:
         """解析尝试-捕获-最终"""
@@ -587,330 +524,3 @@ class Parser:
             line=expr.line,
             column=expr.column,
         )
-
-    # ========================
-    # 代码块解析
-    # ========================
-
-    def parse_block(self) -> list[Statement]:
-        """解析缩进代码块"""
-        self.expect(TokenType.缩进, "期望缩进的代码块")
-        statements = []
-
-        while self.current.type != TokenType.回退 and self.current.type != TokenType.文件结束:
-            self.skip_newlines()
-            if self.current.type == TokenType.回退 or self.current.type == TokenType.文件结束:
-                break
-            stmt = self.parse_statement()
-            if stmt:
-                statements.append(stmt)
-
-        self.match(TokenType.回退)
-        return statements
-
-    # ========================
-    # 表达式解析（按优先级从低到高）
-    # ========================
-
-    def parse_expression(self) -> Expression:
-        """解析表达式（入口）"""
-        return self.parse_pipe()
-
-    def parse_pipe(self) -> Expression:
-        """解析管道表达式：甲 |> 乙"""
-        left = self.parse_or()
-        while self.match(TokenType.管道):
-            right = self.parse_or()
-            left = PipeExpr(left=left, right=right,
-                            line=left.line, column=left.column)
-        return left
-
-    def parse_or(self) -> Expression:
-        """解析 或者 表达式"""
-        left = self.parse_and()
-        while self.match(TokenType.或者):
-            right = self.parse_and()
-            left = BinaryOp(left=left, operator="或者", right=right,
-                            line=left.line, column=left.column)
-        return left
-
-    def parse_and(self) -> Expression:
-        """解析 并且 表达式"""
-        left = self.parse_not()
-        while self.match(TokenType.并且):
-            right = self.parse_not()
-            left = BinaryOp(left=left, operator="并且", right=right,
-                            line=left.line, column=left.column)
-        return left
-
-    def parse_not(self) -> Expression:
-        """解析 不是 表达式"""
-        if self.match(TokenType.不是):
-            operand = self.parse_not()
-            return UnaryOp(operator="不是", operand=operand,
-                           line=operand.line, column=operand.column)
-        return self.parse_comparison()
-
-    def parse_comparison(self) -> Expression:
-        """解析比较表达式（含 在/不在 成员运算符）"""
-        left = self.parse_addition()
-
-        compare_ops = {
-            TokenType.等于, TokenType.不等于,
-            TokenType.大于, TokenType.小于,
-            TokenType.大于等于, TokenType.小于等于,
-            TokenType.在, TokenType.不在,
-        }
-
-        if self.current.type in compare_ops:
-            operands = [left]
-            operators = []
-            while self.current.type in compare_ops:
-                op = self.advance()
-                right = self.parse_addition()
-                operators.append(op.value)
-                operands.append(right)
-
-            if len(operators) == 1:
-                return BinaryOp(left=operands[0], operator=operators[0],
-                                right=operands[1],
-                                line=left.line, column=left.column)
-            else:
-                return CompareOp(operands=operands, operators=operators,
-                                 line=left.line, column=left.column)
-
-        return left
-
-    def parse_addition(self) -> Expression:
-        """解析加减法"""
-        left = self.parse_multiplication()
-        while self.current.type in (TokenType.加, TokenType.减):
-            op = self.advance()
-            right = self.parse_multiplication()
-            left = BinaryOp(left=left, operator=op.value, right=right,
-                            line=left.line, column=left.column)
-        return left
-
-    def parse_multiplication(self) -> Expression:
-        """解析乘除取余"""
-        left = self.parse_power()
-        while self.current.type in (TokenType.乘, TokenType.除, TokenType.取余):
-            op = self.advance()
-            right = self.parse_power()
-            left = BinaryOp(left=left, operator=op.value, right=right,
-                            line=left.line, column=left.column)
-        return left
-
-    def parse_power(self) -> Expression:
-        """解析幂运算（右结合）"""
-        base = self.parse_unary()
-        if self.match(TokenType.幂):
-            exponent = self.parse_power()  # 右结合：递归调用自身
-            return BinaryOp(left=base, operator="**", right=exponent,
-                            line=base.line, column=base.column)
-        return base
-
-    def parse_unary(self) -> Expression:
-        """解析一元运算符"""
-        if self.current.type == TokenType.减:
-            op = self.advance()
-            operand = self.parse_unary()
-            return UnaryOp(operator="-", operand=operand,
-                           line=op.line, column=op.column)
-        return self.parse_call()
-
-    def parse_call(self) -> Expression:
-        """解析函数调用和成员/索引访问"""
-        expr = self.parse_primary()
-
-        while True:
-            if self.match(TokenType.左括号):
-                # 函数调用
-                args = []
-                kwargs = {}
-                while self.current.type != TokenType.右括号:
-                    # 检查命名参数
-                    if (self.current.type == TokenType.标识符 and
-                            self.peek().type == TokenType.赋值):
-                        name = self.advance().value
-                        self.advance()  # 消费 =
-                        value = self.parse_expression()
-                        kwargs[name] = value
-                    else:
-                        args.append(self.parse_expression())
-                    if not self.match(TokenType.逗号):
-                        break
-                self.expect(TokenType.右括号, "函数调用需要 ')'")
-                expr = FunctionCall(
-                    callee=expr, arguments=args, keyword_args=kwargs,
-                    line=expr.line, column=expr.column,
-                )
-            elif self.match(TokenType.点):
-                # 成员访问（接受标识符和部分关键字作为成员名）
-                member_name = self._expect_member_name()
-                expr = MemberAccess(
-                    object=expr, member=member_name,
-                    line=expr.line, column=expr.column,
-                )
-            elif self.match(TokenType.左方括号):
-                index = self.parse_expression()
-                self.expect(TokenType.右方括号, "索引访问需要 ']'")
-                expr = IndexAccess(
-                    object=expr, index=index,
-                    line=expr.line, column=expr.column,
-                )
-            else:
-                break
-
-        return expr
-
-    def _expect_member_name(self) -> str:
-        """期望一个成员名（标识符或允许作为成员名的关键字）"""
-        # 允许某些关键字作为成员名（如 父对象.初始化()）
-        MEMBER_KEYWORDS = {
-            TokenType.初始化, TokenType.类型, TokenType.标识符,
-        }
-        if self.current.type in MEMBER_KEYWORDS:
-            return self.advance().value
-        raise self._error(f"成员访问需要属性名，但得到 '{self.current.value}'")
-
-    def parse_primary(self) -> Expression:
-        """解析基本表达式（最高优先级）"""
-        token = self.current
-
-        # 数值字面量
-        if token.type == TokenType.数值:
-            self.advance()
-            return NumberLiteral(value=token.value, line=token.line, column=token.column)
-
-        # 字符串字面量
-        if token.type == TokenType.文本:
-            self.advance()
-            return StringLiteral(value=token.value, line=token.line, column=token.column)
-
-        # 模板字符串
-        if token.type == TokenType.模板文本:
-            return self.parse_template_literal()
-
-        # 布尔字面量
-        if token.type == TokenType.真:
-            self.advance()
-            return BooleanLiteral(value=True, line=token.line, column=token.column)
-        if token.type == TokenType.假:
-            self.advance()
-            return BooleanLiteral(value=False, line=token.line, column=token.column)
-
-        # 空值
-        if token.type == TokenType.空:
-            self.advance()
-            return NullLiteral(line=token.line, column=token.column)
-
-        # 标识符
-        if token.type == TokenType.标识符:
-            self.advance()
-            return Identifier(name=token.value, line=token.line, column=token.column)
-
-        # 本对象 (this/self)
-        if token.type == TokenType.本对象:
-            self.advance()
-            return SelfExpr(line=token.line, column=token.column)
-
-        # 父对象 (super)
-        if token.type == TokenType.父对象:
-            self.advance()
-            return SuperExpr(line=token.line, column=token.column)
-
-        # 匿名函数：函数(x) => x * 2
-        if token.type == TokenType.函数:
-            return self.parse_lambda()
-
-        # 括号表达式
-        if token.type == TokenType.左括号:
-            self.advance()
-            expr = self.parse_expression()
-            self.expect(TokenType.右括号, "括号表达式需要 ')'")
-            return expr
-
-        # 列表字面量 [...]
-        if token.type == TokenType.左方括号:
-            return self.parse_list_literal()
-
-        # 字典字面量 {...}
-        if token.type == TokenType.左花括号:
-            return self.parse_dict_literal()
-
-        raise self._error(f"无法解析的表达式: '{token.value}' ({token.type.name})")
-
-    def parse_template_literal(self) -> TemplateLiteral:
-        """解析模板字符串：`你好 {名字}，{年龄}岁`"""
-        token = self.advance()  # 消费 模板文本 Token
-        data = token.value  # {'parts': [...], 'exprs': [...]}
-        parts = data['parts']
-        expr_strings = data['exprs']
-
-        # 将每个表达式源码字符串解析为 AST 表达式
-        from .lexer import Lexer
-        expressions = []
-        for expr_src in expr_strings:
-            expr_lexer = Lexer(expr_src, "<模板表达式>")
-            expr_tokens = expr_lexer.tokenize()
-            expr_parser = Parser(expr_tokens)
-            expr_node = expr_parser.parse_expression()
-            expressions.append(expr_node)
-
-        return TemplateLiteral(
-            parts=parts,
-            expressions=expressions,
-            line=token.line,
-            column=token.column,
-        )
-
-    def parse_lambda(self) -> LambdaExpr:
-        """解析匿名函数"""
-        token = self.advance()  # 消费 函数
-        self.expect(TokenType.左括号, "匿名函数需要 '('")
-
-        params = []
-        while self.current.type != TokenType.右括号:
-            param = self.expect(TokenType.标识符, "期望参数名")
-            params.append(param.value)
-            if not self.match(TokenType.逗号):
-                break
-
-        self.expect(TokenType.右括号, "匿名函数需要 ')'")
-        self.expect(TokenType.箭头, "匿名函数需要 '=>'")
-        body = self.parse_expression()
-
-        return LambdaExpr(
-            params=params, body=body,
-            line=token.line, column=token.column,
-        )
-
-    def parse_list_literal(self) -> ListLiteral:
-        """解析列表字面量"""
-        token = self.advance()  # 消费 [
-        elements = []
-
-        while self.current.type != TokenType.右方括号:
-            elements.append(self.parse_expression())
-            if not self.match(TokenType.逗号):
-                break
-
-        self.expect(TokenType.右方括号, "列表需要 ']'")
-        return ListLiteral(elements=elements, line=token.line, column=token.column)
-
-    def parse_dict_literal(self) -> DictLiteral:
-        """解析字典字面量"""
-        token = self.advance()  # 消费 {
-        pairs = []
-
-        while self.current.type != TokenType.右花括号:
-            key = self.parse_expression()
-            self.expect(TokenType.冒号, "字典需要 ':'")
-            value = self.parse_expression()
-            pairs.append((key, value))
-            if not self.match(TokenType.逗号):
-                break
-
-        self.expect(TokenType.右花括号, "字典需要 '}'")
-        return DictLiteral(pairs=pairs, line=token.line, column=token.column)

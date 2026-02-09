@@ -110,8 +110,8 @@ pytest tests/ -v
 
 | 阶段 | 时间 | 目标 | 当前状态 |
 |------|------|------|---------|
-| **Phase 1** | 第 1-8 周 | 核心原型：Lexer + Parser + 解释器 + REPL | ✅ 脚手架完成 |
-| **Phase 2** | 第 9-20 周 | OOP + FP：类型系统、高阶函数、模式匹配、模块 | ⬜ 待开始 |
+| **Phase 1** | 第 1-8 周 | 核心原型：Lexer + Parser + 解释器 + REPL | ✅ 完成 |
+| **Phase 2** | 第 9-20 周 | OOP + FP：类型系统、高阶函数、模式匹配、模块 | ✅ 大部分完成 |
 | **Phase 3** | 第 21-40 周 | 高级特性：逻辑引擎、宏系统、并发 | ⬜ 待开始 |
 | **Phase 4** | 第 41 周+ | 字节码编译 + GraalVM 迁移 + 生态建设 | ⬜ 待开始 |
 
@@ -140,22 +140,41 @@ pytest tests/ -v
     ├── main.py             ← 主入口（REPL + 文件执行）
     ├── requirements.txt    ← Python 依赖
     ├── dao/                ← 核心解释器包
-    │   ├── tokens.py       ← 词元类型定义（约75个关键字）
-    │   ├── lexer.py        ← 词法分析器（中/西文兼容）
+    │   ├── tokens.py       ← 词元类型定义（32个关键字）
     │   ├── ast_nodes.py    ← AST 节点定义（30+节点类型）
-    │   ├── parser.py       ← 递归下降语法分析器
-    │   ├── interpreter.py  ← 树遍历解释器
     │   ├── environment.py  ← 词法作用域管理
-    │   ├── builtins.py     ← 内置函数（打印、长度等）
-    │   └── errors.py       ← 中文错误类型
-    ├── tests/              ← 测试套件
-    │   ├── test_lexer.py      ← 词法分析器测试
-    │   ├── test_parser.py     ← 语法分析器测试
-    │   └── test_interpreter.py ← 解释器测试
-    └── examples/           ← 示例程序
+    │   ├── errors.py       ← 中文错误类型
+    │   ├── lexer/          ← 词法分析器包
+    │   │   ├── core.py        ← 核心类（初始化+主循环+缩进）
+    │   │   └── readers.py     ← Token读取（字符串/数值/运算符等）
+    │   ├── parser/         ← 语法分析器包
+    │   │   ├── core.py        ← 核心类（初始化+基础设施）
+    │   │   ├── statements.py  ← 语句解析（声明/控制流/OOP等）
+    │   │   └── expressions.py ← 表达式解析（优先级/调用/字面量等）
+    │   ├── builtins/       ← 内置函数包
+    │   │   ├── callables.py   ← 可调用类型基类
+    │   │   ├── oop_types.py   ← OOP 类型（类/实例/方法）
+    │   │   ├── functions.py   ← 基础内置函数（打印/长度等）
+    │   │   └── hof.py         ← 高阶函数（映射/筛选/折叠等）
+    │   └── interpreter/    ← 解释器包
+    │       ├── core.py        ← 核心类（组合混入+辅助方法）
+    │       ├── statements.py  ← 语句执行（声明/控制流/OOP等）
+    │       └── expressions.py ← 表达式求值（运算/调用/管道等）
+    ├── tests/              ← 测试套件（145个测试）
+    │   ├── test_lexer.py          ← 词法分析器测试
+    │   ├── test_parser.py         ← 语法分析器测试
+    │   ├── test_interpreter.py    ← 解释器测试
+    │   ├── test_new_features.py   ← 新特性测试
+    │   └── test_integration.py    ← 集成测试（运行.道示例）
+    └── examples/           ← 示例程序（8个）
         ├── 你好世界.道
         ├── 基础示例.道
-        └── 斐波那契.道
+        ├── 斐波那契.道
+        ├── 面向对象.道
+        ├── 高阶函数.道
+        ├── 模式匹配.道
+        ├── 综合示例.道
+        └── 新特性示例.道
 ```
 
 ## 🛠️ 技术架构
