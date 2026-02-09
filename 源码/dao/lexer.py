@@ -33,6 +33,7 @@ class Lexer:
         self.tokens: list[Token] = []
         self.indent_stack: list[int] = [0]  # 缩进层级栈
         self._at_line_start = True          # 是否在行首（用于缩进检测）
+        self._bracket_depth = 0             # 括号嵌套深度（> 0 时忽略缩进和换行）
 
     @property
     def current_char(self) -> str | None:
@@ -99,14 +100,23 @@ class Lexer:
         if depth > 0:
             raise self._error(f"未闭合的多行注释，从第 {start_line} 行开始")
 
+    # 中文引号 → 对应闭合引号的映射
+    _QUOTE_PAIRS = {
+        '\u201c': '\u201d',  # " → "
+        '\u2018': '\u2019',  # ' → '
+        '\u300c': '\u300d',  # 「 → 」
+    }
+
     def _read_string(self, quote_char: str) -> Token:
-        """读取字符串字面量"""
+        """读取字符串字面量（支持中/西文引号）"""
         start_line = self.line
         start_col = self.column
+        # 确定闭合引号：中文引号左右不同，西文引号左右相同
+        close_char = self._QUOTE_PAIRS.get(quote_char, quote_char)
         self.advance()  # 跳过开头引号
         result = []
 
-        while self.current_char is not None and self.current_char != quote_char:
+        while self.current_char is not None and self.current_char != close_char:
             if self.current_char == '\\':
                 self.advance()
                 escape_map = {
@@ -223,6 +233,7 @@ class Lexer:
         self.column = 1
         self.indent_stack = [0]
         self._at_line_start = True
+        self._bracket_depth = 0
 
         while self.pos < len(self.source):
             # 行首处理缩进
@@ -247,15 +258,19 @@ class Lexer:
                     continue
 
                 self._at_line_start = False
-                self._handle_indentation(indent_level)
+                # 在括号内部时不处理缩进（支持多行表达式）
+                if self._bracket_depth == 0:
+                    self._handle_indentation(indent_level)
 
             char = self.current_char
 
             # 换行
             if char == '\n':
-                self.tokens.append(self._make_token(TokenType.换行, '\\n'))
+                if self._bracket_depth == 0:
+                    self.tokens.append(self._make_token(TokenType.换行, '\\n'))
                 self.advance()
-                self._at_line_start = True
+                if self._bracket_depth == 0:
+                    self._at_line_start = True
                 continue
 
             # 跳过行内空白
@@ -280,8 +295,8 @@ class Lexer:
                 self.tokens.append(self._read_number())
                 continue
 
-            # 字符串
-            if char in ('"', "'"):
+            # 字符串（西文引号 + 中文引号）
+            if char in ('"', "'", '\u201c', '\u2018', '\u300c'):
                 self.tokens.append(self._read_string(char))
                 continue
 
@@ -380,7 +395,13 @@ class Lexer:
             return self._make_token(single_ops[char], char, line, col)
 
         if char in punctuation:
+            token_type = punctuation[char]
+            # 追踪括号嵌套深度（用于多行表达式支持）
+            if token_type in (TokenType.左括号, TokenType.左方括号, TokenType.左花括号):
+                self._bracket_depth += 1
+            elif token_type in (TokenType.右括号, TokenType.右方括号, TokenType.右花括号):
+                self._bracket_depth = max(0, self._bracket_depth - 1)
             self.advance()
-            return self._make_token(punctuation[char], char, line, col)
+            return self._make_token(token_type, char, line, col)
 
         return None

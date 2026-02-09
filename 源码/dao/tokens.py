@@ -107,6 +107,23 @@ class TokenType(Enum):
     感叹号 = auto()      # !（宏调用前缀）
 
     # ========================
+    # OOP 关键字
+    # ========================
+    类型 = auto()        # class
+    继承自 = auto()      # extends
+    初始化 = auto()      # constructor
+    本对象 = auto()      # this/self
+    父对象 = auto()      # super
+    私有 = auto()        # private
+
+    # ========================
+    # 模块关键字
+    # ========================
+    导入 = auto()        # import
+    导出 = auto()        # export
+    作为 = auto()        # as
+
+    # ========================
     # 缩进控制（由词法分析器生成）
     # ========================
     缩进 = auto()        # INDENT - 缩进增加
@@ -173,4 +190,15 @@ KEYWORDS: dict[str, TokenType] = {
     "真": TokenType.真,
     "假": TokenType.假,
     "空": TokenType.空,
+    # OOP
+    "类型": TokenType.类型,
+    "继承自": TokenType.继承自,
+    "初始化": TokenType.初始化,
+    "本对象": TokenType.本对象,
+    "父对象": TokenType.父对象,
+    "私有": TokenType.私有,
+    # 模块
+    "导入": TokenType.导入,
+    "导出": TokenType.导出,
+    "作为": TokenType.作为,
 }

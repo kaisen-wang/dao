@@ -186,8 +186,8 @@ class TestInterpreterCollections:
         output = capture_output('打印(长度([1, 2, 3]))\n')
         assert output.strip() == "3"
 
-    def test_builtin_类型(self):
-        output = capture_output('打印(类型(42))\n')
+    def test_builtin_取类型(self):
+        output = capture_output('打印(取类型(42))\n')
         assert output.strip() == "数值"
 
 

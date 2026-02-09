@@ -267,3 +267,70 @@ class AssertStmt(Statement):
     """断言语句：断言 条件, "消息" """
     condition: Expression = field(default_factory=lambda: BooleanLiteral())
     message: Expression | None = None
+
+
+# ========================
+# OOP
+# ========================
+
+@dataclass
+class ClassDecl(Statement):
+    """类型声明：类型 名字 [继承自 父类] ..."""
+    name: str = ""
+    parent_name: str | None = None
+    body: list[Statement] = field(default_factory=list)
+
+
+@dataclass
+class SelfExpr(Expression):
+    """本对象引用 (this/self)"""
+    pass
+
+
+@dataclass
+class SuperExpr(Expression):
+    """父对象引用 (super)"""
+    pass
+
+
+# ========================
+# 管道运算符
+# ========================
+
+@dataclass
+class PipeExpr(Expression):
+    """管道表达式：甲 |> 乙"""
+    left: Expression = field(default_factory=lambda: Identifier())
+    right: Expression = field(default_factory=lambda: Identifier())
+
+
+# ========================
+# 模式匹配
+# ========================
+
+@dataclass
+class MatchStmt(Statement):
+    """匹配语句：匹配 表达式 ..."""
+    subject: Expression = field(default_factory=lambda: Identifier())
+    cases: list["MatchCase"] = field(default_factory=list)
+
+
+@dataclass
+class MatchCase(ASTNode):
+    """匹配分支：情况 模式 [当 守卫]: 代码块"""
+    pattern: Expression = field(default_factory=lambda: Identifier())
+    guard: Expression | None = None
+    body: list[Statement] = field(default_factory=list)
+    is_wildcard: bool = False
+
+
+# ========================
+# 模块系统
+# ========================
+
+@dataclass
+class ImportStmt(Statement):
+    """导入语句"""
+    module_path: str = ""
+    names: list[str] = field(default_factory=list)
+    alias: str | None = None

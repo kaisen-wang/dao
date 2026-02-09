@@ -10,16 +10,17 @@
 - 运算符优先级通过方法调用层级实现
 
 优先级（从低到高）：
-1. 或者
-2. 并且
-3. 不是
-4. 比较 (==, !=, <, >, <=, >=)
-5. 加减 (+, -)
-6. 乘除余 (*, /, %, //)
-7. 幂 (**)
-8. 一元 (-, 不是)
-9. 调用/成员访问 (f(), obj.x, list[0])
-10. 基本 (字面量, 标识符, 括号表达式)
+1. 管道 (|>)
+2. 或者
+3. 并且
+4. 不是
+5. 比较 (==, !=, <, >, <=, >=, 在, 不在)
+6. 加减 (+, -)
+7. 乘除余 (*, /, %, //)
+8. 幂 (**)
+9. 一元 (-, 不是)
+10. 调用/成员访问 (f(), obj.x, list[0])
+11. 基本 (字面量, 标识符, 括号表达式)
 """
 
 from .tokens import Token, TokenType
@@ -131,6 +132,12 @@ class Parser:
                 return self.parse_throw_stmt()
             case TokenType.断言:
                 return self.parse_assert_stmt()
+            case TokenType.类型:
+                return self.parse_class_decl()
+            case TokenType.匹配:
+                return self.parse_match_stmt()
+            case TokenType.导入:
+                return self.parse_import_stmt()
             case _:
                 return self.parse_expression_or_assignment()
 
@@ -152,19 +159,12 @@ class Parser:
     def parse_function_decl(self) -> FunctionDecl:
         """解析函数声明：函数 名字(参数) ..."""
         token = self.advance()  # 消费 函数
+
+        # 在类体外部：函数 名字(参数)
         name_token = self.expect(TokenType.标识符, "函数声明需要函数名")
         self.expect(TokenType.左括号, "函数声明需要 '('")
 
-        params = []
-        default_values = {}
-        while self.current.type != TokenType.右括号:
-            param = self.expect(TokenType.标识符, "期望参数名")
-            params.append(param.value)
-            # 检查默认值
-            if self.match(TokenType.赋值):
-                default_values[param.value] = self.parse_expression()
-            if not self.match(TokenType.逗号):
-                break
+        params, default_values = self._parse_param_list()
 
         self.expect(TokenType.右括号, "函数声明需要 ')'")
         self.expect(TokenType.换行, "函数头部后需要换行")
@@ -178,6 +178,20 @@ class Parser:
             line=token.line,
             column=token.column,
         )
+
+    def _parse_param_list(self) -> tuple[list[str], dict]:
+        """解析参数列表"""
+        params = []
+        default_values = {}
+        while self.current.type != TokenType.右括号:
+            param = self.expect(TokenType.标识符, "期望参数名")
+            params.append(param.value)
+            # 检查默认值
+            if self.match(TokenType.赋值):
+                default_values[param.value] = self.parse_expression()
+            if not self.match(TokenType.逗号):
+                break
+        return params, default_values
 
     def parse_return_stmt(self) -> ReturnStmt:
         """解析返回语句"""
@@ -332,6 +346,168 @@ class Parser:
             column=token.column,
         )
 
+    # ========================
+    # OOP 解析
+    # ========================
+
+    def parse_class_decl(self) -> ClassDecl:
+        """解析类型声明：类型 名字 [继承自 父类] ..."""
+        token = self.advance()  # 消费 类型
+        name_token = self.expect(TokenType.标识符, "类型声明需要一个类名")
+
+        parent_name = None
+        if self.match(TokenType.继承自):
+            parent_token = self.expect(TokenType.标识符, "'继承自' 后需要父类名")
+            parent_name = parent_token.value
+
+        self.expect(TokenType.换行, "类型声明后需要换行")
+        body = self.parse_class_body()
+
+        return ClassDecl(
+            name=name_token.value,
+            parent_name=parent_name,
+            body=body,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_class_body(self) -> list[Statement]:
+        """解析类体（缩进块，包含构造函数和方法）"""
+        self.expect(TokenType.缩进, "类型体需要缩进")
+        statements = []
+
+        while self.current.type not in (TokenType.回退, TokenType.文件结束):
+            self.skip_newlines()
+            if self.current.type in (TokenType.回退, TokenType.文件结束):
+                break
+
+            if self.current.type == TokenType.初始化:
+                # 构造函数：初始化(参数) ...
+                statements.append(self.parse_constructor())
+            elif self.current.type == TokenType.函数:
+                # 方法：函数 名字(参数) ...
+                statements.append(self.parse_function_decl())
+            else:
+                # 其他语句（如类级别的属性声明）
+                statements.append(self.parse_statement())
+
+        self.match(TokenType.回退)
+        return statements
+
+    def parse_constructor(self) -> FunctionDecl:
+        """解析构造函数：初始化(参数) ..."""
+        token = self.advance()  # 消费 初始化
+        self.expect(TokenType.左括号, "构造函数需要 '('")
+        params, default_values = self._parse_param_list()
+        self.expect(TokenType.右括号, "构造函数需要 ')'")
+        self.expect(TokenType.换行, "构造函数头部后需要换行")
+        body = self.parse_block()
+
+        return FunctionDecl(
+            name="初始化",
+            params=params,
+            default_values=default_values,
+            body=body,
+            line=token.line,
+            column=token.column,
+        )
+
+    # ========================
+    # 模式匹配解析
+    # ========================
+
+    def parse_match_stmt(self) -> MatchStmt:
+        """解析匹配语句：匹配 表达式 ..."""
+        token = self.advance()  # 消费 匹配
+        subject = self.parse_expression()
+        self.expect(TokenType.换行, "'匹配' 后需要换行")
+        self.expect(TokenType.缩进, "匹配体需要缩进")
+
+        cases = []
+        while self.current.type not in (TokenType.回退, TokenType.文件结束):
+            self.skip_newlines()
+            if self.current.type in (TokenType.回退, TokenType.文件结束):
+                break
+            cases.append(self.parse_match_case())
+
+        self.match(TokenType.回退)
+        return MatchStmt(
+            subject=subject,
+            cases=cases,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_match_case(self) -> MatchCase:
+        """解析匹配分支：情况 模式 [当 条件]: 代码块"""
+        self.expect(TokenType.情况, "匹配体中需要 '情况'")
+        line, col = self.current.line, self.current.column
+
+        # 通配符 _
+        is_wildcard = False
+        if self.current.type == TokenType.标识符 and self.current.value == "_":
+            is_wildcard = True
+            self.advance()
+            pattern = NullLiteral(line=line, column=col)
+        else:
+            pattern = self.parse_expression()
+
+        # 守卫条件
+        guard = None
+        if self.match(TokenType.当):
+            guard = self.parse_expression()
+
+        self.expect(TokenType.冒号, "匹配分支需要 ':'")
+        self.skip_newlines()
+
+        # 单行或多行体
+        if self.current.type == TokenType.缩进:
+            body = self.parse_block()
+        else:
+            stmt = self.parse_statement()
+            body = [stmt]
+
+        return MatchCase(
+            pattern=pattern,
+            guard=guard,
+            body=body,
+            is_wildcard=is_wildcard,
+            line=line,
+            column=col,
+        )
+
+    # ========================
+    # 模块解析
+    # ========================
+
+    def parse_import_stmt(self) -> ImportStmt:
+        """解析导入语句：导入 模块 / 从 模块 导入 名字"""
+        token = self.advance()  # 消费 导入
+        module_token = self.expect(TokenType.标识符, "导入需要模块名")
+        module_path = module_token.value
+
+        # 点分路径：工具.数学
+        while self.match(TokenType.点):
+            next_name = self.expect(TokenType.标识符, "模块路径需要名称")
+            module_path += "." + next_name.value
+
+        alias = None
+        if self.match(TokenType.作为):
+            alias_token = self.expect(TokenType.标识符, "'作为' 后需要别名")
+            alias = alias_token.value
+
+        self.match(TokenType.换行)
+        return ImportStmt(
+            module_path=module_path,
+            alias=alias,
+            line=token.line,
+            column=token.column,
+        )
+
+    # ========================
+    # 赋值与表达式语句
+    # ========================
+
     def parse_expression_or_assignment(self) -> Statement:
         """解析表达式语句或赋值语句"""
         expr = self.parse_expression()
@@ -380,7 +556,16 @@ class Parser:
 
     def parse_expression(self) -> Expression:
         """解析表达式（入口）"""
-        return self.parse_or()
+        return self.parse_pipe()
+
+    def parse_pipe(self) -> Expression:
+        """解析管道表达式：甲 |> 乙"""
+        left = self.parse_or()
+        while self.match(TokenType.管道):
+            right = self.parse_or()
+            left = PipeExpr(left=left, right=right,
+                            line=left.line, column=left.column)
+        return left
 
     def parse_or(self) -> Expression:
         """解析 或者 表达式"""
@@ -409,13 +594,14 @@ class Parser:
         return self.parse_comparison()
 
     def parse_comparison(self) -> Expression:
-        """解析比较表达式"""
+        """解析比较表达式（含 在/不在 成员运算符）"""
         left = self.parse_addition()
 
         compare_ops = {
             TokenType.等于, TokenType.不等于,
             TokenType.大于, TokenType.小于,
             TokenType.大于等于, TokenType.小于等于,
+            TokenType.在, TokenType.不在,
         }
 
         if self.current.type in compare_ops:
@@ -476,7 +662,7 @@ class Parser:
         return self.parse_call()
 
     def parse_call(self) -> Expression:
-        """解析函数调用和成员访问"""
+        """解析函数调用和成员/索引访问"""
         expr = self.parse_primary()
 
         while True:
@@ -502,9 +688,10 @@ class Parser:
                     line=expr.line, column=expr.column,
                 )
             elif self.match(TokenType.点):
-                member = self.expect(TokenType.标识符, "成员访问需要属性名")
+                # 成员访问（接受标识符和部分关键字作为成员名）
+                member_name = self._expect_member_name()
                 expr = MemberAccess(
-                    object=expr, member=member.value,
+                    object=expr, member=member_name,
                     line=expr.line, column=expr.column,
                 )
             elif self.match(TokenType.左方括号):
@@ -518,6 +705,16 @@ class Parser:
                 break
 
         return expr
+
+    def _expect_member_name(self) -> str:
+        """期望一个成员名（标识符或允许作为成员名的关键字）"""
+        # 允许某些关键字作为成员名（如 父对象.初始化()）
+        MEMBER_KEYWORDS = {
+            TokenType.初始化, TokenType.类型, TokenType.标识符,
+        }
+        if self.current.type in MEMBER_KEYWORDS:
+            return self.advance().value
+        raise self._error(f"成员访问需要属性名，但得到 '{self.current.value}'")
 
     def parse_primary(self) -> Expression:
         """解析基本表达式（最高优先级）"""
@@ -550,6 +747,16 @@ class Parser:
         if token.type == TokenType.标识符:
             self.advance()
             return Identifier(name=token.value, line=token.line, column=token.column)
+
+        # 本对象 (this/self)
+        if token.type == TokenType.本对象:
+            self.advance()
+            return SelfExpr(line=token.line, column=token.column)
+
+        # 父对象 (super)
+        if token.type == TokenType.父对象:
+            self.advance()
+            return SuperExpr(line=token.line, column=token.column)
 
         # 匿名函数：函数(x) => x * 2
         if token.type == TokenType.函数:
