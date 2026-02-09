@@ -17,7 +17,9 @@ python main.py examples/你好世界.道  # 执行.道文件
 pytest tests/ -v           # 运行所有测试
 pytest tests/test_lexer.py -v     # 运行单个测试文件
 pytest tests/test_lexer.py::TestLexerBasics::test_empty_source -v  # 单个测试
+pytest tests/ -v --cov=dao --cov-report=term-missing  # 覆盖率测试
 ruff check .               # 代码检查
+ruff fix .                 # 自动修复代码问题
 ```
 
 ## 代码风格

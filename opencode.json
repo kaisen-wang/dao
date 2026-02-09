@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "opencode",
+  "autoupdate": true,
+  "provider": {
+    "myprovider": {
+      "options": {
+        "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "apiKey": "08ddeff4-57f7-4896-9965-c1a92b0cbbe8"
+      },
+      "models": {
+        "ark-code-latest": {
+          "name": "ark-code-latest",
+          "options": {
+            "thinking": {
+              "type": "enabled"
+            }
+          }
+        }
+      }
+    }
+  }
+}
