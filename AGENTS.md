@@ -110,6 +110,15 @@ def raise_error(self, message: str):
 
 - 使用pytest
 - 测试类以`Test`开头，方法以`test_`开头
+- 测试文件使用`sys.path.insert(0, ...)`来导入源码：
+```python
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from dao.lexer import Lexer
+from dao.tokens import TokenType
+```
 - 使用辅助函数简化测试：
 ```python
 def parse(source: str) -> Program:
@@ -121,6 +130,7 @@ class TestParserVariables:
         ast = parse("定义 x = 42\n")
         assert len(ast.statements) == 1
 ```
+- 带覆盖率测试：`pytest tests/ -v --cov=dao --cov-report=term-missing`
 
 ## 项目架构
 
