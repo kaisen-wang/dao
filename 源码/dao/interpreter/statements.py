@@ -56,6 +56,43 @@ class DaoEnum:
 class StatementExecutor:
     """语句执行方法集（混入类）"""
 
+    def _has_yield(self, statements: list) -> bool:
+        """检测语句列表中是否包含产出语句"""
+        from ..ast_nodes import (
+            YieldStmt,
+            ForInStmt,
+            ForRangeStmt,
+            WhileStmt,
+            IfStmt,
+            TryStmt,
+        )
+
+        for stmt in statements:
+            if isinstance(stmt, YieldStmt):
+                return True
+            elif isinstance(stmt, ForInStmt) or isinstance(stmt, ForRangeStmt):
+                if self._has_yield(stmt.body):
+                    return True
+            elif isinstance(stmt, WhileStmt):
+                if self._has_yield(stmt.body):
+                    return True
+            elif isinstance(stmt, IfStmt):
+                if self._has_yield(stmt.body):
+                    return True
+                for _, elif_body in stmt.elif_clauses:
+                    if self._has_yield(elif_body):
+                        return True
+                if stmt.else_body and self._has_yield(stmt.else_body):
+                    return True
+            elif isinstance(stmt, TryStmt):
+                if self._has_yield(stmt.try_body):
+                    return True
+                if stmt.catch_body and self._has_yield(stmt.catch_body):
+                    return True
+                if stmt.finally_body and self._has_yield(stmt.finally_body):
+                    return True
+        return False
+
     def exec_statement(self, stmt: Statement, env: Environment) -> object:
         """分派并执行一条语句"""
         match stmt:
@@ -159,6 +196,7 @@ class StatementExecutor:
             },
             body=stmt.body,
             closure_env=env,
+            is_generator=self._has_yield(stmt.body),
         )
         env.define(stmt.name, func)
 
@@ -209,7 +247,7 @@ class StatementExecutor:
         iterable = self.eval_expression(stmt.iterable, env)
         if not hasattr(iterable, "__iter__"):
             raise 类型错误(
-                f"类型 '{type(iterable, 0, 0, self.source).__name__}' 不可遍历",
+                f"类型 '{type(iterable).__name__}' 不可遍历",
                 stmt.line,
                 stmt.column,
             )

@@ -195,6 +195,9 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
 
         try:
             self._exec_block(func.body, func_env)
+            # 如果函数被标记为生成器但没有产出任何值，返回空生成器
+            if hasattr(func, "is_generator") and func.is_generator:
+                return DaoGenerator(func, args, kwargs, self)
         except 产出信号 as e:
             func_env.pop_frame()
             return DaoGenerator(func, args, kwargs, self)

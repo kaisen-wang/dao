@@ -12,8 +12,12 @@ from .callables import DaoCallable, DaoFunction
 class DaoTrait:
     """道语言特征 (trait)"""
 
-    def __init__(self, name: str, methods: dict[str, DaoFunction],
-                 static_methods: dict[str, DaoFunction] | None = None):
+    def __init__(
+        self,
+        name: str,
+        methods: dict[str, DaoFunction],
+        static_methods: dict[str, DaoFunction] | None = None,
+    ):
         self.name = name
         self.methods = methods
         self.static_methods = static_methods or {}
@@ -22,11 +26,15 @@ class DaoTrait:
 class DaoClass(DaoCallable):
     """道语言类型 (class)"""
 
-    def __init__(self, name: str, parent: "DaoClass | None",
-                 methods: dict[str, DaoFunction],
-                 static_methods: dict[str, DaoFunction] | None = None,
-                 private_names: set[str] | None = None,
-                 implemented_traits: list[DaoTrait] | None = None):
+    def __init__(
+        self,
+        name: str,
+        parent: "DaoClass | None",
+        methods: dict[str, DaoFunction],
+        static_methods: dict[str, DaoFunction] | None = None,
+        private_names: set[str] | None = None,
+        implemented_traits: list[DaoTrait] | None = None,
+    ):
         self.name = name
         self.parent = parent
         self.methods = methods
@@ -155,6 +163,7 @@ class DaoGenerator:
                     func_env.define(param, self.func.default_values[param])
                 else:
                     from ..errors import 运行时错误
+
                     raise 运行时错误(f"函数 '{self.func.name}' 缺少参数 '{param}'")
 
         func_env = self.func.closure_env.create_child()
@@ -162,20 +171,65 @@ class DaoGenerator:
 
         def exec_block_with_yield(statements, env, values):
             from ..errors import 跳出信号, 继续信号
+
             for stmt in statements:
                 try:
-                    from dao.interpreter.core import Interpreter
-                    if stmt.__class__.__name__ == 'WhileStmt':
-                        while self.interpreter._is_truthy(self.interpreter.eval_expression(stmt.condition, env)):
+                    stmt_name = stmt.__class__.__name__
+
+                    if stmt_name == "WhileStmt":
+                        while self.interpreter._is_truthy(
+                            self.interpreter.eval_expression(stmt.condition, env)
+                        ):
                             try:
+                                for s in stmt.body:
+                                    for s in [s]:
+                                        exec_block_with_yield([s], env, values)
+                            except 跳出信号:
+                                break
+                            except 继续信号:
+                                continue
+
+                    elif stmt_name == "ForInStmt":
+                        iterable = self.interpreter.eval_expression(stmt.iterable, env)
+                        if not hasattr(iterable, "__iter__"):
+                            from ..errors import 类型错误
+
+                            raise 类型错误(f"类型 '{type(iterable).__name__}' 不可遍历")
+                        for item in iterable:
+                            try:
+                                env.values[stmt.variable] = item
                                 for s in stmt.body:
                                     exec_block_with_yield([s], env, values)
                             except 跳出信号:
                                 break
                             except 继续信号:
                                 continue
+
+                    elif stmt_name == "ForRangeStmt":
+                        start = self.interpreter.eval_expression(stmt.start, env)
+                        end = self.interpreter.eval_expression(stmt.end, env)
+                        step = (
+                            self.interpreter.eval_expression(stmt.step, env)
+                            if stmt.step
+                            else 1
+                        )
+
+                        current = start
+                        while current <= end:
+                            try:
+                                env.values[stmt.variable] = current
+                                for s in stmt.body:
+                                    exec_block_with_yield([s], env, values)
+                                current += step
+                            except 跳出信号:
+                                break
+                            except 继续信号:
+                                current += step
+                                continue
+
                     else:
                         self.interpreter.exec_statement(stmt, env)
+
                 except 产出信号 as e:
                     values.append(e.value)
                 except 跳出信号:

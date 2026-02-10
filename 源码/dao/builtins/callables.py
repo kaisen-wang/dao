@@ -72,12 +72,14 @@ class DaoFunction(DaoCallable):
         default_values: dict,
         body: list,
         closure_env,
+        is_generator: bool = False,
     ):
         self.name = name
         self.params = params
         self.default_values = default_values
         self.body = body
         self.closure_env = closure_env
+        self.is_generator = is_generator  # 是否包含产出语句
 
     def arity(self) -> int:
         return len(self.params)
