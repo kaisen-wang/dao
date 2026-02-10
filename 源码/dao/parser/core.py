@@ -72,7 +72,10 @@ class Parser(StatementParser, ExpressionParser):
     def expect(self, token_type: TokenType, message: str = "") -> Token:
         """期望当前Token为指定类型，否则报错"""
         if self.current.type != token_type:
-            msg = message or f"期望 {token_type.name}，但得到 {self.current.type.name} ('{self.current.value}')"
+            msg = (
+                message
+                or f"期望 {token_type.name}，但得到 {self.current.type.name} ('{self.current.value}')"
+            )
             raise 语法错误(msg, self.current.line, self.current.column, self.source)
         return self.advance()
 
@@ -113,16 +116,9 @@ class Parser(StatementParser, ExpressionParser):
 
     def parse_block(self) -> list[Statement]:
         """解析缩进代码块"""
-        self.expect(TokenType.缩进, "期望缩进的代码块")
+        self.expect(TokenType.缩进, "期望缩进块")
         statements = []
-
-        while self.current.type != TokenType.回退 and self.current.type != TokenType.文件结束:
-            self.skip_newlines()
-            if self.current.type == TokenType.回退 or self.current.type == TokenType.文件结束:
-                break
-            stmt = self.parse_statement()
-            if stmt:
-                statements.append(stmt)
-
-        self.match(TokenType.回退)
+        while self.current.type not in (TokenType.回退, TokenType.文件结束):
+            statements.append(self.parse_statement())
+        self.expect(TokenType.回退, "期望回退")
         return statements

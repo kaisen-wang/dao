@@ -26,7 +26,7 @@ class LexerReaders:
 
     def _skip_line_comment(self):
         """跳过单行注释 (// 或 注：)"""
-        while self.current_char is not None and self.current_char != '\n':
+        while self.current_char is not None and self.current_char != "\n":
             self.advance()
 
     def _skip_block_comment(self):
@@ -37,11 +37,11 @@ class LexerReaders:
         self.advance()  # 跳过下一字符
 
         while self.current_char is not None and depth > 0:
-            if self.current_char == '/' and self.peek() == '*':
+            if self.current_char == "/" and self.peek() == "*":
                 depth += 1
                 self.advance()
                 self.advance()
-            elif self.current_char == '*' and self.peek() == '/':
+            elif self.current_char == "*" and self.peek() == "/":
                 depth -= 1
                 self.advance()
                 self.advance()
@@ -57,9 +57,9 @@ class LexerReaders:
 
     # 中文引号 → 对应闭合引号的映射
     _QUOTE_PAIRS = {
-        '\u201c': '\u201d',  # " → "
-        '\u2018': '\u2019',  # ' → '
-        '\u300c': '\u300d',  # 「 → 」
+        "\u201c": "\u201d",  # " → "
+        "\u2018": "\u2019",  # ' → '
+        "\u300c": "\u300d",  # 「 → 」
     }
 
     def _read_string(self, quote_char: str) -> Token:
@@ -72,11 +72,15 @@ class LexerReaders:
         result = []
 
         while self.current_char is not None and self.current_char != close_char:
-            if self.current_char == '\\':
+            if self.current_char == "\\":
                 self.advance()
                 escape_map = {
-                    'n': '\n', 't': '\t', 'r': '\r',
-                    '\\': '\\', "'": "'", '"': '"',
+                    "n": "\n",
+                    "t": "\t",
+                    "r": "\r",
+                    "\\": "\\",
+                    "'": "'",
+                    '"': '"',
                 }
                 if self.current_char in escape_map:
                     result.append(escape_map[self.current_char])
@@ -90,7 +94,7 @@ class LexerReaders:
             raise self._error(f"未闭合的字符串，从第 {start_line} 行开始")
 
         self.advance()  # 跳过结束引号
-        return self._make_token(TokenType.文本, ''.join(result), start_line, start_col)
+        return self._make_token(TokenType.文本, "".join(result), start_line, start_col)
 
     # ========================
     # 模板字符串
@@ -102,14 +106,14 @@ class LexerReaders:
         start_col = self.column
         self.advance()  # 跳过开头的 `
 
-        parts = []       # 字符串片段列表
-        expr_strings = [] # 表达式源码列表
-        current_part = [] # 当前正在构建的字符串片段
+        parts = []  # 字符串片段列表
+        expr_strings = []  # 表达式源码列表
+        current_part = []  # 当前正在构建的字符串片段
 
-        while self.current_char is not None and self.current_char != '`':
-            if self.current_char == '{':
+        while self.current_char is not None and self.current_char != "`":
+            if self.current_char == "{":
                 # 保存当前字符串片段，开始读取表达式
-                parts.append(''.join(current_part))
+                parts.append("".join(current_part))
                 current_part = []
                 self.advance()  # 跳过 {
 
@@ -117,10 +121,10 @@ class LexerReaders:
                 depth = 1
                 expr_chars = []
                 while self.current_char is not None and depth > 0:
-                    if self.current_char == '{':
+                    if self.current_char == "{":
                         depth += 1
                         expr_chars.append(self.advance())
-                    elif self.current_char == '}':
+                    elif self.current_char == "}":
                         depth -= 1
                         if depth == 0:
                             break
@@ -130,7 +134,7 @@ class LexerReaders:
                         q = self.current_char
                         expr_chars.append(self.advance())
                         while self.current_char is not None and self.current_char != q:
-                            if self.current_char == '\\':
+                            if self.current_char == "\\":
                                 expr_chars.append(self.advance())
                             expr_chars.append(self.advance())
                         if self.current_char == q:
@@ -138,17 +142,22 @@ class LexerReaders:
                     else:
                         expr_chars.append(self.advance())
 
-                if self.current_char != '}':
+                if self.current_char != "}":
                     raise self._error("模板字符串中的表达式未闭合")
                 self.advance()  # 跳过 }
-                expr_strings.append(''.join(expr_chars))
+                expr_strings.append("".join(expr_chars))
 
-            elif self.current_char == '\\':
+            elif self.current_char == "\\":
                 # 转义字符
                 self.advance()
                 escape_map = {
-                    'n': '\n', 't': '\t', 'r': '\r',
-                    '\\': '\\', '`': '`', '{': '{', '}': '}',
+                    "n": "\n",
+                    "t": "\t",
+                    "r": "\r",
+                    "\\": "\\",
+                    "`": "`",
+                    "{": "{",
+                    "}": "}",
                 }
                 if self.current_char in escape_map:
                     current_part.append(escape_map[self.current_char])
@@ -162,12 +171,13 @@ class LexerReaders:
             raise self._error(f"未闭合的模板字符串，从第 {start_line} 行开始")
 
         self.advance()  # 跳过结束的 `
-        parts.append(''.join(current_part))  # 添加最后一个字符串片段
+        parts.append("".join(current_part))  # 添加最后一个字符串片段
 
         return self._make_token(
             TokenType.模板文本,
-            {'parts': parts, 'exprs': expr_strings},
-            start_line, start_col,
+            {"parts": parts, "exprs": expr_strings},
+            start_line,
+            start_col,
         )
 
     # ========================
@@ -184,15 +194,24 @@ class LexerReaders:
         while self.current_char is not None:
             if self.current_char.isdigit():
                 result.append(self.advance())
-            elif self.current_char == '_' and self.peek() is not None and self.peek().isdigit():
+            elif (
+                self.current_char == "_"
+                and self.peek() is not None
+                and self.peek().isdigit()
+            ):
                 self.advance()  # 跳过下划线
-            elif self.current_char == '.' and not has_dot and self.peek() is not None and self.peek().isdigit():
+            elif (
+                self.current_char == "."
+                and not has_dot
+                and self.peek() is not None
+                and self.peek().isdigit()
+            ):
                 has_dot = True
                 result.append(self.advance())
             else:
                 break
 
-        value_str = ''.join(result)
+        value_str = "".join(result)
         value = float(value_str) if has_dot else int(value_str)
         return self._make_token(TokenType.数值, value, start_line, start_col)
 
@@ -206,10 +225,12 @@ class LexerReaders:
         start_col = self.column
         result = []
 
-        while self.current_char is not None and self._is_identifier_char(self.current_char):
+        while self.current_char is not None and self._is_identifier_char(
+            self.current_char
+        ):
             result.append(self.advance())
 
-        word = ''.join(result)
+        word = "".join(result)
 
         # 特殊处理：否则如果（两个词组合的关键字）
         if word == "否则":
@@ -219,16 +240,22 @@ class LexerReaders:
             saved_col = self.column
 
             # 跳过空格
-            while self.current_char == ' ':
+            while self.current_char == " ":
                 self.advance()
 
-            if self.current_char is not None and self._is_identifier_start(self.current_char):
+            if self.current_char is not None and self._is_identifier_start(
+                self.current_char
+            ):
                 next_chars = []
-                while self.current_char is not None and self._is_identifier_char(self.current_char):
+                while self.current_char is not None and self._is_identifier_char(
+                    self.current_char
+                ):
                     next_chars.append(self.advance())
-                next_word = ''.join(next_chars)
+                next_word = "".join(next_chars)
                 if next_word == "如果":
-                    return self._make_token(TokenType.否则如果, "否则如果", start_line, start_col)
+                    return self._make_token(
+                        TokenType.否则如果, "否则如果", start_line, start_col
+                    )
 
             # 回退
             self.pos = saved_pos
@@ -239,12 +266,16 @@ class LexerReaders:
         token_type = KEYWORDS.get(word, TokenType.标识符)
         return self._make_token(token_type, word, start_line, start_col)
 
-    def _is_identifier_start(self, char: str) -> bool:
+    def _is_identifier_start(self, char: str | None) -> bool:
         """判断字符是否可以作为标识符的开头"""
-        return char.isalpha() or char == '_' or '\u4e00' <= char <= '\u9fff'
+        if char is None:
+            return False
+        return char.isalpha() or char == "_" or "\u4e00" <= char <= "\u9fff"
 
-    def _is_identifier_char(self, char: str) -> bool:
+    def _is_identifier_char(self, char: str | None) -> bool:
         """判断字符是否可以作为标识符的一部分"""
+        if char is None:
+            return False
         return self._is_identifier_start(char) or char.isdigit()
 
     # ========================
@@ -256,60 +287,76 @@ class LexerReaders:
         char = self.current_char
         line, col = self.line, self.column
 
+        if char is None:
+            return None
+
         # 双字符运算符（先检查）
-        two_chars = char + (self.peek() or '')
-        three_chars = two_chars + (self.peek(2) or '')
+        two_chars = char + (self.peek() or "")
+        three_chars = two_chars + (self.peek(2) or "")
 
-        if three_chars == '...':
-            self.advance(); self.advance(); self.advance()
-            return self._make_token(TokenType.展开, '...', line, col)
+        if three_chars == "...":
+            self.advance()
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.展开, "...", line, col)
 
-        if two_chars == '=>':
-            self.advance(); self.advance()
-            return self._make_token(TokenType.箭头, '=>', line, col)
-        if two_chars == '|>':
-            self.advance(); self.advance()
-            return self._make_token(TokenType.管道, '|>', line, col)
-        if two_chars == '==':
-            self.advance(); self.advance()
-            return self._make_token(TokenType.等于, '==', line, col)
-        if two_chars == '!=':
-            self.advance(); self.advance()
-            return self._make_token(TokenType.不等于, '!=', line, col)
-        if two_chars == '>=':
-            self.advance(); self.advance()
-            return self._make_token(TokenType.大于等于, '>=', line, col)
-        if two_chars == '<=':
-            self.advance(); self.advance()
-            return self._make_token(TokenType.小于等于, '<=', line, col)
-        if two_chars == '**':
-            self.advance(); self.advance()
-            return self._make_token(TokenType.幂, '**', line, col)
+        if two_chars == "=>":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.箭头, "=>", line, col)
+        if two_chars == "|>":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.管道, "|>", line, col)
+        if two_chars == "==":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.等于, "==", line, col)
+        if two_chars == "!=":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.不等于, "!=", line, col)
+        if two_chars == ">=":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.大于等于, ">=", line, col)
+        if two_chars == "<=":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.小于等于, "<=", line, col)
+        if two_chars == "**":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.幂, "**", line, col)
 
         # 单字符运算符
         single_ops = {
-            '+': TokenType.加,
-            '-': TokenType.减,
-            '*': TokenType.乘,
-            '/': TokenType.除,
-            '%': TokenType.取余,
-            '=': TokenType.赋值,
-            '>': TokenType.大于,
-            '<': TokenType.小于,
-            '.': TokenType.点,
-            '!': TokenType.感叹号,
+            "+": TokenType.加,
+            "-": TokenType.减,
+            "*": TokenType.乘,
+            "/": TokenType.除,
+            "%": TokenType.取余,
+            "=": TokenType.赋值,
+            ">": TokenType.大于,
+            "<": TokenType.小于,
+            ".": TokenType.点,
+            "!": TokenType.感叹号,
         }
 
         # 标点符号（兼容中/西文）
         punctuation = {
-            '(': TokenType.左括号, '（': TokenType.左括号,
-            ')': TokenType.右括号, '）': TokenType.右括号,
-            '[': TokenType.左方括号,
-            ']': TokenType.右方括号,
-            '{': TokenType.左花括号,
-            '}': TokenType.右花括号,
-            ',': TokenType.逗号, '，': TokenType.逗号,
-            ':': TokenType.冒号, '：': TokenType.冒号,
+            "(": TokenType.左括号,
+            "（": TokenType.左括号,
+            ")": TokenType.右括号,
+            "）": TokenType.右括号,
+            "[": TokenType.左方括号,
+            "]": TokenType.右方括号,
+            "{": TokenType.左花括号,
+            "}": TokenType.右花括号,
+            ",": TokenType.逗号,
+            "，": TokenType.逗号,
+            ":": TokenType.冒号,
+            "：": TokenType.冒号,
         }
 
         if char in single_ops:
@@ -321,7 +368,11 @@ class LexerReaders:
             # 追踪括号嵌套深度（用于多行表达式支持）
             if token_type in (TokenType.左括号, TokenType.左方括号, TokenType.左花括号):
                 self._bracket_depth += 1
-            elif token_type in (TokenType.右括号, TokenType.右方括号, TokenType.右花括号):
+            elif token_type in (
+                TokenType.右括号,
+                TokenType.右方括号,
+                TokenType.右花括号,
+            ):
                 self._bracket_depth = max(0, self._bracket_depth - 1)
             self.advance()
             return self._make_token(token_type, char, line, col)

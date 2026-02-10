@@ -48,6 +48,10 @@ class InterpreterBuiltin(DaoCallable):
         self.param_count = param_count
         self.interpreter = None  # 由 Interpreter.__init__ 设置
 
+    def set_interpreter(self, interpreter):
+        """设置解释器引用"""
+        self.interpreter = interpreter
+
     def call(self, args: list, kwargs: dict) -> object:
         return self.func(self.interpreter, *args, **kwargs)
 
@@ -61,8 +65,14 @@ class InterpreterBuiltin(DaoCallable):
 class DaoFunction(DaoCallable):
     """用户自定义函数"""
 
-    def __init__(self, name: str, params: list[str], default_values: dict,
-                 body: list, closure_env):
+    def __init__(
+        self,
+        name: str,
+        params: list[str],
+        default_values: dict,
+        body: list,
+        closure_env,
+    ):
         self.name = name
         self.params = params
         self.default_values = default_values

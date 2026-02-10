@@ -9,14 +9,48 @@
 from ..ast_nodes import *
 from ..environment import Environment
 from ..builtins import (
-    DaoFunction, DaoClass, DaoInstance, BoundMethod, SuperProxy,
-    BuiltinFunction, InterpreterBuiltin,
-    get_builtins, get_interpreter_builtins,
+    DaoFunction,
+    DaoClass,
+    DaoInstance,
+    BoundMethod,
+    SuperProxy,
+    BuiltinFunction,
+    InterpreterBuiltin,
+    get_builtins,
+    get_interpreter_builtins,
 )
 from ..errors import (
-    运行时错误, 类型错误, 名称错误,
-    断言失败, 跳出信号, 继续信号, 返回信号, 产出信号,
+    运行时错误,
+    类型错误,
+    名称错误,
+    断言失败,
+    跳出信号,
+    继续信号,
+    返回信号,
+    产出信号,
 )
+
+
+class DaoEnum:
+    """枚举类型"""
+
+    def __init__(self, name: str, values: list[str]):
+        self.name = name
+        self.values = values
+        self.value_indices = {v: i for i, v in enumerate(values)}
+
+    def __getitem__(self, value: str):
+        """获取枚举值的索引"""
+        if value not in self.value_indices:
+            raise 运行时错误(f"枚举 '{self.name}' 中不存在值 '{value}'")
+        return self.value_indices[value]
+
+    def __contains__(self, value: str) -> bool:
+        """检查值是否在枚举中"""
+        return value in self.value_indices
+
+    def __repr__(self) -> str:
+        return f"<枚举 {self.name}>"
 
 
 class StatementExecutor:
@@ -57,6 +91,8 @@ class StatementExecutor:
                 return self.exec_assert(stmt, env)
             case ClassDecl():
                 return self.exec_class_decl(stmt, env)
+            case EnumDecl():
+                return self.exec_enum_decl(stmt, env)
             case MatchStmt():
                 return self.exec_match(stmt, env)
             case ImportStmt():
@@ -64,8 +100,10 @@ class StatementExecutor:
             case DestructureAssign():
                 return self.exec_destructure(stmt, env)
             case _:
-                raise 运行时错误(f"未知的语句类型: {type(stmt, 0, 0, self.source).__name__}",
-                    stmt.line, stmt.column,
+                raise 运行时错误(
+                    f"未知的语句类型: {type(stmt, 0, 0, self.source).__name__}",
+                    stmt.line,
+                    stmt.column,
                 )
 
     # ========================
@@ -90,8 +128,10 @@ class StatementExecutor:
             elif isinstance(obj, dict):
                 obj[stmt.target.member] = value
             else:
-                raise 类型错误(f"无法给类型 '{type(obj, 0, 0, self.source).__name__}' 设置属性",
-                    stmt.line, stmt.column,
+                raise 类型错误(
+                    f"无法给类型 '{type(obj, 0, 0, self.source).__name__}' 设置属性",
+                    stmt.line,
+                    stmt.column,
                 )
         elif isinstance(stmt.target, IndexAccess):
             obj = self.eval_expression(stmt.target.object, env)
@@ -101,8 +141,10 @@ class StatementExecutor:
             elif isinstance(obj, dict):
                 obj[index] = value
             else:
-                raise 类型错误(f"无法给类型 '{type(obj, 0, 0, self.source).__name__}' 设置索引",
-                    stmt.line, stmt.column,
+                raise 类型错误(
+                    f"无法给类型 '{type(obj, 0, 0, self.source).__name__}' 设置索引",
+                    stmt.line,
+                    stmt.column,
                 )
         else:
             raise 运行时错误("无效的赋值目标", stmt.line, stmt.column, self.source)
@@ -113,8 +155,7 @@ class StatementExecutor:
             name=stmt.name,
             params=stmt.params,
             default_values={
-                k: self.eval_expression(v, env)
-                for k, v in stmt.default_values.items()
+                k: self.eval_expression(v, env) for k, v in stmt.default_values.items()
             },
             body=stmt.body,
             closure_env=env,
@@ -166,9 +207,11 @@ class StatementExecutor:
     def exec_for_in(self, stmt: ForInStmt, env: Environment) -> None:
         """执行遍历循环"""
         iterable = self.eval_expression(stmt.iterable, env)
-        if not hasattr(iterable, '__iter__'):
-            raise 类型错误(f"类型 '{type(iterable, 0, 0, self.source).__name__}' 不可遍历",
-                stmt.line, stmt.column,
+        if not hasattr(iterable, "__iter__"):
+            raise 类型错误(
+                f"类型 '{type(iterable, 0, 0, self.source).__name__}' 不可遍历",
+                stmt.line,
+                stmt.column,
             )
 
         for item in iterable:
@@ -209,19 +252,25 @@ class StatementExecutor:
             if stmt.catch_body:
                 catch_env = env.create_child()
                 if stmt.catch_var:
-                    catch_env.define(stmt.catch_var, {
-                        "信息": e.message,
-                        "行": e.line,
-                        "列": e.column,
-                    })
+                    catch_env.define(
+                        stmt.catch_var,
+                        {
+                            "信息": e.message,
+                            "行": e.line,
+                            "列": e.column,
+                        },
+                    )
                 return self._exec_block(stmt.catch_body, catch_env)
         except Exception as e:
             if stmt.catch_body:
                 catch_env = env.create_child()
                 if stmt.catch_var:
-                    catch_env.define(stmt.catch_var, {
-                        "信息": str(e),
-                    })
+                    catch_env.define(
+                        stmt.catch_var,
+                        {
+                            "信息": str(e),
+                        },
+                    )
                 return self._exec_block(stmt.catch_body, catch_env)
         finally:
             if stmt.finally_body:
@@ -247,14 +296,23 @@ class StatementExecutor:
     # OOP 执行
     # ========================
 
+    def exec_enum_decl(self, stmt: EnumDecl, env: Environment) -> None:
+        """执行枚举声明"""
+        enum_obj = DaoEnum(stmt.name, stmt.values)
+        env.define(stmt.name, enum_obj)
+
     def exec_class_decl(self, stmt: ClassDecl, env: Environment) -> None:
         """执行类型声明"""
         parent = None
         if stmt.parent_name:
             parent = env.get(stmt.parent_name)
             if not isinstance(parent, DaoClass):
-                raise 类型错误(f"'{stmt.parent_name}' 不是一个类型，无法继承",
-                    stmt.line, stmt.column, self.source)
+                raise 类型错误(
+                    f"'{stmt.parent_name}' 不是一个类型，无法继承",
+                    stmt.line,
+                    stmt.column,
+                    self.source,
+                )
 
         methods = {}
         static_methods = {}
@@ -279,8 +337,11 @@ class StatementExecutor:
                     methods[s.name] = func
 
         klass = DaoClass(
-            name=stmt.name, parent=parent, methods=methods,
-            static_methods=static_methods, private_names=private_names,
+            name=stmt.name,
+            parent=parent,
+            methods=methods,
+            static_methods=static_methods,
+            private_names=private_names,
         )
         env.define(stmt.name, klass)
 
@@ -317,14 +378,17 @@ class StatementExecutor:
     def exec_import(self, stmt: ImportStmt, env: Environment) -> None:
         """执行导入语句"""
         import os
+
         module_path = stmt.module_path.replace(".", os.sep) + ".道"
 
         if not os.path.exists(module_path):
-            raise 运行时错误(f"模块 '{stmt.module_path}' 不存在 (找不到文件: {module_path}, 0, 0, self.source)",
-                stmt.line, stmt.column,
+            raise 运行时错误(
+                f"模块 '{stmt.module_path}' 不存在 (找不到文件: {module_path}, 0, 0, self.source)",
+                stmt.line,
+                stmt.column,
             )
 
-        with open(module_path, 'r', encoding='utf-8') as f:
+        with open(module_path, "r", encoding="utf-8") as f:
             source = f.read()
 
         from ..lexer import Lexer
@@ -362,8 +426,11 @@ class StatementExecutor:
 
         if isinstance(value, (list, tuple)):
             if len(stmt.targets) != len(value):
-                raise 运行时错误(f"解构赋值：目标数量({len(stmt.targets)})与值的数量({len(value)})不匹配",
-                    stmt.line, stmt.column, self.source
+                raise 运行时错误(
+                    f"解构赋值：目标数量({len(stmt.targets)})与值的数量({len(value)})不匹配",
+                    stmt.line,
+                    stmt.column,
+                    self.source,
                 )
             for name, val in zip(stmt.targets, value):
                 if stmt.is_declaration:
@@ -375,8 +442,12 @@ class StatementExecutor:
         elif isinstance(value, dict):
             for name in stmt.targets:
                 if name not in value:
-                    raise 运行时错误(f"解构赋值：字典中不存在键 '{name}'",
-                        stmt.line, stmt.column, self.source)
+                    raise 运行时错误(
+                        f"解构赋值：字典中不存在键 '{name}'",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
                 if stmt.is_declaration:
                     env.define(name, value[name])
                 elif env.has(name):
@@ -384,5 +455,9 @@ class StatementExecutor:
                 else:
                     env.define(name, value[name])
         else:
-            raise 类型错误(f"无法对类型 '{type(value).__name__}' 进行解构赋值",
-                stmt.line, stmt.column, self.source)
+            raise 类型错误(
+                f"无法对类型 '{type(value).__name__}' 进行解构赋值",
+                stmt.line,
+                stmt.column,
+                self.source,
+            )

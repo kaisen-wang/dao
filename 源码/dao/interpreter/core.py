@@ -9,9 +9,18 @@ Interpreter 类：组合 StatementExecutor 和 ExpressionEvaluator 混入，
 from ..ast_nodes import Program
 from ..environment import Environment
 from ..builtins import (
-    DaoCallable, DaoFunction, BuiltinFunction, InterpreterBuiltin,
-    DaoClass, DaoInstance, BoundMethod, SuperProxy, CurriedFunction, DaoGenerator,
-    get_builtins, get_interpreter_builtins,
+    DaoCallable,
+    DaoFunction,
+    BuiltinFunction,
+    InterpreterBuiltin,
+    DaoClass,
+    DaoInstance,
+    BoundMethod,
+    SuperProxy,
+    CurriedFunction,
+    DaoGenerator,
+    get_builtins,
+    get_interpreter_builtins,
 )
 from ..errors import 运行时错误, 类型错误, 返回信号, 产出信号
 from .statements import StatementExecutor
@@ -41,7 +50,9 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
             func.interpreter = self
             self.global_env.define(name, func)
 
-    def execute(self, program: Program, env: Environment | None = None, source: str = "") -> object:
+    def execute(
+        self, program: Program, env: Environment | None = None, source: str = ""
+    ) -> object:
         """
         执行程序
 
@@ -54,8 +65,14 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
         self.source = source
         env = env or self.global_env
         result = None
-        for stmt in program.statements:
-            result = self.exec_statement(stmt, env)
+        try:
+            for stmt in program.statements:
+                result = self.exec_statement(stmt, env)
+        except 运行时错误 as e:
+            # 在全局层面，确保调用栈信息被保留
+            if not hasattr(e, "stack") or not e.stack:
+                e.stack = env.get_stack()
+            raise
         return result
 
     def call_function(self, func, args, kwargs=None):
@@ -88,8 +105,9 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
     # OOP 核心方法
     # ========================
 
-    def _instantiate_class(self, klass: DaoClass, args: list,
-                           kwargs: dict, call_expr) -> DaoInstance:
+    def _instantiate_class(
+        self, klass: DaoClass, args: list, kwargs: dict, call_expr
+    ) -> DaoInstance:
         """创建类型实例"""
         instance = DaoInstance(klass)
 
@@ -99,13 +117,20 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
         elif args:
             line = call_expr.line if call_expr else 0
             col = call_expr.column if call_expr else 0
-            raise 运行时错误(f"类型 '{klass.name}' 没有构造函数，不接受参数",
-                line, col, self.source)
+            raise 运行时错误(
+                f"类型 '{klass.name}' 没有构造函数，不接受参数", line, col, self.source
+            )
 
         return instance
 
-    def _call_method(self, instance: DaoInstance, method: DaoFunction,
-                     args: list, kwargs: dict, call_expr) -> object:
+    def _call_method(
+        self,
+        instance: DaoInstance,
+        method: DaoFunction,
+        args: list,
+        kwargs: dict,
+        call_expr,
+    ) -> object:
         """调用实例方法（绑定 本对象）"""
         func_env = method.closure_env.create_child()
         func_env.define("本对象", instance)
@@ -115,10 +140,41 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
 
         self._bind_params(method, args, kwargs, func_env, call_expr)
 
+        line = call_expr.line if call_expr else 0
+        file = getattr(call_expr, "file", "") if call_expr else ""
+        func_env.push_frame(f"{instance.klass.name}.{method.name}", file, line)
+
         try:
             self._exec_block(method.body, func_env)
         except 返回信号 as ret:
+            func_env.pop_frame()
             return ret.value
+        except 运行时错误 as e:
+            # 如果错误已经有栈信息，直接重新抛出
+            if hasattr(e, "stack") and e.stack:
+                func_env.pop_frame()
+                raise
+
+            # 重新创建错误，包含调用栈信息
+            new_error = 运行时错误(
+                e.message,
+                e.line,
+                e.column,
+                getattr(e, "source", getattr(self, "source", "")),
+                func_env.get_stack(),
+            )
+            func_env.pop_frame()
+            raise new_error
+        except Exception as e:
+            # 对于非道语言异常，创建运行时错误包装
+            new_error = 运行时错误(
+                str(e), 0, 0, getattr(self, "source", ""), func_env.get_stack()
+            )
+            func_env.pop_frame()
+            raise new_error
+        finally:
+            if func_env.current_frame:
+                func_env.pop_frame()
 
         return None
 
@@ -126,23 +182,58 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
     # 辅助方法
     # ========================
 
-    def _call_dao_function(self, func: DaoFunction, args: list,
-                           kwargs: dict, call_expr) -> object:
+    def _call_dao_function(
+        self, func: DaoFunction, args: list, kwargs: dict, call_expr
+    ) -> object:
         """调用用户自定义函数"""
         func_env = func.closure_env.create_child()
         self._bind_params(func, args, kwargs, func_env, call_expr)
 
+        line = call_expr.line if call_expr else 0
+        file = getattr(call_expr, "file", "") if call_expr else ""
+        func_env.push_frame(func.name, file, line)
+
         try:
             self._exec_block(func.body, func_env)
         except 产出信号 as e:
+            func_env.pop_frame()
             return DaoGenerator(func, args, kwargs, self)
         except 返回信号 as ret:
+            func_env.pop_frame()
             return ret.value
+        except 运行时错误 as e:
+            # 如果错误已经有栈信息，说明是从下层传递上来的，直接重新抛出
+            # 没有栈信息才创建新的错误并附加调用栈
+            if hasattr(e, "stack") and e.stack:
+                func_env.pop_frame()
+                raise
+
+            # 重新创建错误，包含调用栈信息
+            new_error = 运行时错误(
+                e.message,
+                e.line,
+                e.column,
+                getattr(e, "source", getattr(self, "source", "")),
+                func_env.get_stack(),
+            )
+            func_env.pop_frame()
+            raise new_error
+        except Exception as e:
+            # 对于非道语言异常，创建运行时错误包装
+            new_error = 运行时错误(
+                str(e), 0, 0, getattr(self, "source", ""), func_env.get_stack()
+            )
+            func_env.pop_frame()
+            raise new_error
+        finally:
+            if func_env.current_frame:
+                func_env.pop_frame()
 
         return None
 
-    def _bind_params(self, func: DaoFunction, args: list, kwargs: dict,
-                     env: Environment, call_expr) -> None:
+    def _bind_params(
+        self, func: DaoFunction, args: list, kwargs: dict, env: Environment, call_expr
+    ) -> None:
         """绑定函数参数到环境"""
         for i, param in enumerate(func.params):
             if i < len(args):
@@ -154,8 +245,9 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
             else:
                 line = call_expr.line if call_expr else 0
                 col = call_expr.column if call_expr else 0
-                raise 运行时错误(f"函数 '{func.name}' 缺少参数 '{param}'",
-                    line, col, self.source)
+                raise 运行时错误(
+                    f"函数 '{func.name}' 缺少参数 '{param}'", line, col, self.source
+                )
 
     def _exec_block(self, statements: list, env: Environment) -> object:
         """执行一个代码块"""

@@ -23,13 +23,13 @@ class Lexer(LexerReaders):
     def __init__(self, source: str, filename: str = "<输入>"):
         self.source = source
         self.filename = filename
-        self.pos = 0          # 当前字符位置
-        self.line = 1         # 当前行号
-        self.column = 1       # 当前列号
+        self.pos = 0  # 当前字符位置
+        self.line = 1  # 当前行号
+        self.column = 1  # 当前列号
         self.tokens: list[Token] = []
         self.indent_stack: list[int] = [0]  # 缩进层级栈
-        self._at_line_start = True          # 是否在行首（用于缩进检测）
-        self._bracket_depth = 0             # 括号嵌套深度（> 0 时忽略缩进和换行）
+        self._at_line_start = True  # 是否在行首（用于缩进检测）
+        self._bracket_depth = 0  # 括号嵌套深度（> 0 时忽略缩进和换行）
 
     # ========================
     # 字符流基础设施
@@ -53,14 +53,16 @@ class Lexer(LexerReaders):
         """读取当前字符并向前移动一位"""
         char = self.source[self.pos]
         self.pos += 1
-        if char == '\n':
+        if char == "\n":
             self.line += 1
             self.column = 1
         else:
             self.column += 1
         return char
 
-    def _make_token(self, token_type: TokenType, value, line: int = 0, column: int = 0) -> Token:
+    def _make_token(
+        self, token_type: TokenType, value, line: int = 0, column: int = 0
+    ) -> Token:
         """创建一个Token"""
         return Token(
             type=token_type,
@@ -89,7 +91,9 @@ class Lexer(LexerReaders):
                 self.indent_stack.pop()
                 self.tokens.append(self._make_token(TokenType.回退, indent_level))
             if self.indent_stack[-1] != indent_level:
-                raise self._error(f"缩进不一致：期望 {self.indent_stack[-1]} 个空格，实际 {indent_level} 个")
+                raise self._error(
+                    f"缩进不一致：期望 {self.indent_stack[-1]} 个空格，实际 {indent_level} 个"
+                )
 
     # ========================
     # 主循环
@@ -113,21 +117,21 @@ class Lexer(LexerReaders):
             # 行首处理缩进
             if self._at_line_start:
                 indent_level = 0
-                while self.current_char == ' ':
+                while self.current_char == " ":
                     indent_level += 1
                     self.advance()
-                if self.current_char == '\t':
+                if self.current_char == "\t":
                     raise self._error("请使用空格缩进，不支持制表符与空格混用")
 
                 # 跳过空行
-                if self.current_char == '\n':
+                if self.current_char == "\n":
                     self.advance()
                     continue
                 # 跳过注释行
-                if self.current_char == '/' and self.peek() == '/':
+                if self.current_char == "/" and self.peek() == "/":
                     self._skip_line_comment()
                     continue
-                if self.current_char == '注' and self.peek() == '：':
+                if self.current_char == "注" and self.peek() == "：":
                     self._skip_line_comment()
                     continue
 
@@ -138,44 +142,48 @@ class Lexer(LexerReaders):
 
             char = self.current_char
 
+            # 文件结束
+            if char is None:
+                break
+
             # 换行
-            if char == '\n':
+            if char == "\n":
                 if self._bracket_depth == 0:
-                    self.tokens.append(self._make_token(TokenType.换行, '\\n'))
+                    self.tokens.append(self._make_token(TokenType.换行, "\\n"))
                 self.advance()
                 if self._bracket_depth == 0:
                     self._at_line_start = True
                 continue
 
             # 跳过行内空白
-            if char in (' ', '\t', '\r'):
+            if char in (" ", "\t", "\r"):
                 self.advance()
                 continue
 
             # 注释
-            if char == '/' and self.peek() == '/':
+            if char == "/" and self.peek() == "/":
                 self._skip_line_comment()
                 continue
-            if char == '/' and self.peek() == '*':
+            if char == "/" and self.peek() == "*":
                 self.advance()  # 跳过 /
                 self._skip_block_comment()
                 continue
-            if char == '注' and self.peek() == '：':
+            if char == "注" and self.peek() == "：":
                 self._skip_line_comment()
                 continue
 
             # 数值
-            if char.isdigit():
+            if char is not None and char.isdigit():
                 self.tokens.append(self._read_number())
                 continue
 
             # 字符串（西文引号 + 中文引号）
-            if char in ('"', "'", '\u201c', '\u2018', '\u300c'):
+            if char in ('"', "'", "\u201c", "\u2018", "\u300c"):
                 self.tokens.append(self._read_string(char))
                 continue
 
             # 模板字符串
-            if char == '`':
+            if char == "`":
                 self.tokens.append(self._read_template_string())
                 continue
 
@@ -194,7 +202,7 @@ class Lexer(LexerReaders):
 
         # 文件结束时关闭所有缩进
         if self.tokens and self.tokens[-1].type != TokenType.换行:
-            self.tokens.append(self._make_token(TokenType.换行, '\\n'))
+            self.tokens.append(self._make_token(TokenType.换行, "\\n"))
         while len(self.indent_stack) > 1:
             self.indent_stack.pop()
             self.tokens.append(self._make_token(TokenType.回退, 0))

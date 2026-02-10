@@ -9,12 +9,33 @@ OOP（类型/构造函数）、模式匹配、模块导入、解构赋值等。
 
 from ..tokens import TokenType
 from ..ast_nodes import (
-    Statement, Expression,
-    VariableDecl, Assignment, ExpressionStmt, FunctionDecl, ReturnStmt, YieldStmt,
-    IfStmt, WhileStmt, ForInStmt, ForRangeStmt, BreakStmt, ContinueStmt,
-    TryStmt, ThrowStmt, AssertStmt,
-    ClassDecl, TraitDecl, MatchStmt, MatchCase, ImportStmt,
-    DestructureAssign, NullLiteral, ListLiteral, Identifier,
+    Statement,
+    Expression,
+    VariableDecl,
+    Assignment,
+    ExpressionStmt,
+    FunctionDecl,
+    ReturnStmt,
+    YieldStmt,
+    IfStmt,
+    WhileStmt,
+    ForInStmt,
+    ForRangeStmt,
+    BreakStmt,
+    ContinueStmt,
+    TryStmt,
+    ThrowStmt,
+    AssertStmt,
+    ClassDecl,
+    EnumDecl,
+    TraitDecl,
+    MatchStmt,
+    MatchCase,
+    ImportStmt,
+    DestructureAssign,
+    NullLiteral,
+    ListLiteral,
+    Identifier,
 )
 
 
@@ -36,6 +57,10 @@ class StatementParser:
                 return self.parse_variable_decl(is_constant=True)
             case TokenType.函数:
                 return self.parse_function_decl()
+            case TokenType.类型:
+                return self.parse_class_decl()
+            case TokenType.枚举:
+                return self.parse_enum_decl()
             case TokenType.特征:
                 return self.parse_trait_decl()
             case TokenType.返回:
@@ -71,7 +96,9 @@ class StatementParser:
     # 变量/常量声明
     # ========================
 
-    def parse_variable_decl(self, is_constant: bool) -> VariableDecl | DestructureAssign:
+    def parse_variable_decl(
+        self, is_constant: bool
+    ) -> VariableDecl | DestructureAssign:
         """解析变量/常量声明：定义 x = 值 或 定义 [甲, 乙] = 值"""
         token = self.advance()  # 消费 定义/常量
 
@@ -156,7 +183,10 @@ class StatementParser:
         """解析返回语句"""
         token = self.advance()  # 消费 返回
         value = None
-        if self.current.type != TokenType.换行 and self.current.type != TokenType.文件结束:
+        if (
+            self.current.type != TokenType.换行
+            and self.current.type != TokenType.文件结束
+        ):
             value = self.parse_expression()
         self.match(TokenType.换行)
         return ReturnStmt(value=value, line=token.line, column=token.column)
@@ -165,7 +195,10 @@ class StatementParser:
         """解析产出语句"""
         token = self.advance()  # 消费 产出
         value = None
-        if self.current.type != TokenType.换行 and self.current.type != TokenType.文件结束:
+        if (
+            self.current.type != TokenType.换行
+            and self.current.type != TokenType.文件结束
+        ):
             value = self.parse_expression()
         self.match(TokenType.换行)
         return YieldStmt(value=value, line=token.line, column=token.column)
@@ -325,6 +358,30 @@ class StatementParser:
     # ========================
     # OOP 解析
     # ========================
+
+    def parse_enum_decl(self) -> EnumDecl:
+        """解析枚举声明：枚举 名字 { 枚举值1, 枚举值2, ... }"""
+        from ..ast_nodes import EnumDecl
+
+        token = self.advance()  # 消费 枚举
+        name_token = self.expect(TokenType.标识符, "枚举声明需要一个枚举名")
+
+        self.expect(TokenType.左花括号, "枚举声明需要 '{'")
+
+        values = []
+        while not self.match(TokenType.右花括号):
+            value_token = self.expect(TokenType.标识符, "枚举值需要是标识符")
+            values.append(value_token.value)
+
+            # 逗号是可选的
+            self.match(TokenType.逗号)
+
+        return EnumDecl(
+            name=name_token.value,
+            values=values,
+            line=token.line,
+            column=token.column,
+        )
 
     def parse_class_decl(self) -> ClassDecl:
         """解析类型声明：类型 名字 [继承自 父类] [实现 特征1, 特征2] ..."""

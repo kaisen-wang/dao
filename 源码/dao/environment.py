@@ -19,12 +19,16 @@ class Environment:
         parent  : 父环境（外层作用域），为None时表示全局作用域
         values  : 当前作用域中的变量名 → 值 的映射
         constants: 记录哪些变量名是常量，不可重新赋值
+        call_stack: 调用栈，用于错误追踪
+        current_frame: 当前栈帧信息
     """
 
     def __init__(self, parent: "Environment | None" = None):
         self.parent = parent
         self.values: dict[str, object] = {}
         self.constants: set[str] = set()
+        self.call_stack: list[dict] = []
+        self.current_frame: dict | None = None
 
     def define(self, name: str, value: object, is_constant: bool = False) -> None:
         """
@@ -87,4 +91,23 @@ class Environment:
 
     def create_child(self) -> "Environment":
         """创建一个子环境（新的作用域）"""
-        return Environment(parent=self)
+        child = Environment(parent=self)
+        child.call_stack = self.call_stack
+        child.current_frame = self.current_frame
+        return child
+
+    def push_frame(self, function_name: str, file: str = "", line: int = 0) -> None:
+        """压入一个新的调用栈帧"""
+        frame = {"function": function_name, "file": file, "line": line}
+        self.call_stack.append(frame)
+        self.current_frame = frame
+
+    def pop_frame(self) -> None:
+        """弹出当前调用栈帧"""
+        if self.call_stack:
+            self.call_stack.pop()
+        self.current_frame = self.call_stack[-1] if self.call_stack else None
+
+    def get_stack(self) -> list:
+        """获取当前调用栈"""
+        return self.call_stack.copy()

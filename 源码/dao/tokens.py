@@ -17,17 +17,17 @@ class TokenType(Enum):
     # ========================
     # 字面量 (Literals)
     # ========================
-    数值 = auto()        # 42, 3.14, 1_000_000
-    文本 = auto()        # "你好", '世界'
-    模板文本 = auto()    # `你好 {名字}`
-    真 = auto()          # 真
-    假 = auto()          # 假
-    空 = auto()          # 空
+    数值 = auto()  # 42, 3.14, 1_000_000
+    文本 = auto()  # "你好", '世界'
+    模板文本 = auto()  # `你好 {名字}`
+    真 = auto()  # 真
+    假 = auto()  # 假
+    空 = auto()  # 空
 
     # ========================
     # 标识符
     # ========================
-    标识符 = auto()      # 变量名、函数名等
+    标识符 = auto()  # 变量名、函数名等
 
     # ========================
     # 基础关键字
@@ -43,17 +43,17 @@ class TokenType(Enum):
     如果 = auto()
     否则如果 = auto()
     否则 = auto()
-    当 = auto()          # while
-    遍历 = auto()        # for
-    在 = auto()          # in
-    从 = auto()          # from (range)
-    到 = auto()          # to (range)
-    步长 = auto()        # step
-    跳出 = auto()        # break
-    继续 = auto()        # continue
-    匹配 = auto()        # match
-    情况 = auto()        # case
-    产出 = auto()        # yield
+    当 = auto()  # while
+    遍历 = auto()  # for
+    在 = auto()  # in
+    从 = auto()  # from (range)
+    到 = auto()  # to (range)
+    步长 = auto()  # step
+    跳出 = auto()  # break
+    继续 = auto()  # continue
+    匹配 = auto()  # match
+    情况 = auto()  # case
+    产出 = auto()  # yield
 
     # ========================
     # 错误处理关键字
@@ -67,77 +67,78 @@ class TokenType(Enum):
     # ========================
     # 逻辑运算关键字
     # ========================
-    并且 = auto()        # and
-    或者 = auto()        # or
-    不是 = auto()        # not
-    不在 = auto()        # not in
+    并且 = auto()  # and
+    或者 = auto()  # or
+    不是 = auto()  # not
+    不在 = auto()  # not in
 
     # ========================
     # 运算符 (Operators)
     # ========================
-    加 = auto()          # +
-    减 = auto()          # -
-    乘 = auto()          # *
-    除 = auto()          # /
-    整除 = auto()        # //（表达式上下文）
-    取余 = auto()        # %
-    幂 = auto()          # **
-    赋值 = auto()        # =
-    等于 = auto()        # ==
-    不等于 = auto()      # !=
-    大于 = auto()        # >
-    小于 = auto()        # <
-    大于等于 = auto()    # >=
-    小于等于 = auto()    # <=
-    箭头 = auto()        # =>
-    管道 = auto()        # |>
-    展开 = auto()        # ...
-    点 = auto()          # .
+    加 = auto()  # +
+    减 = auto()  # -
+    乘 = auto()  # *
+    除 = auto()  # /
+    整除 = auto()  # //（表达式上下文）
+    取余 = auto()  # %
+    幂 = auto()  # **
+    赋值 = auto()  # =
+    等于 = auto()  # ==
+    不等于 = auto()  # !=
+    大于 = auto()  # >
+    小于 = auto()  # <
+    大于等于 = auto()  # >=
+    小于等于 = auto()  # <=
+    箭头 = auto()  # =>
+    管道 = auto()  # |>
+    展开 = auto()  # ...
+    点 = auto()  # .
 
     # ========================
     # 标点符号 (Punctuation)
     # ========================
-    左括号 = auto()      # ( 或 （
-    右括号 = auto()      # ) 或 ）
-    左方括号 = auto()    # [
-    右方括号 = auto()    # ]
-    左花括号 = auto()    # {
-    右花括号 = auto()    # }
-    逗号 = auto()        # , 或 ，
-    冒号 = auto()        # : 或 ：
-    感叹号 = auto()      # !（宏调用前缀）
+    左括号 = auto()  # ( 或 （
+    右括号 = auto()  # ) 或 ）
+    左方括号 = auto()  # [
+    右方括号 = auto()  # ]
+    左花括号 = auto()  # {
+    右花括号 = auto()  # }
+    逗号 = auto()  # , 或 ，
+    冒号 = auto()  # : 或 ：
+    感叹号 = auto()  # !（宏调用前缀）
 
     # ========================
     # OOP 关键字
     # ========================
-    类型 = auto()        # class
-    继承自 = auto()      # extends
-    初始化 = auto()      # constructor
-    本对象 = auto()      # this/self
-    父对象 = auto()      # super
-    私有 = auto()        # private
-    静态 = auto()        # static
-    特征 = auto()        # trait
-    实现 = auto()        # implements
+    类型 = auto()  # class
+    枚举 = auto()  # enum
+    继承自 = auto()  # extends
+    初始化 = auto()  # constructor
+    本对象 = auto()  # this/self
+    父对象 = auto()  # super
+    私有 = auto()  # private
+    静态 = auto()  # static
+    特征 = auto()  # trait
+    实现 = auto()  # implements
 
     # ========================
     # 模块关键字
     # ========================
-    导入 = auto()        # import
-    导出 = auto()        # export
-    作为 = auto()        # as
+    导入 = auto()  # import
+    导出 = auto()  # export
+    作为 = auto()  # as
 
     # ========================
     # 缩进控制（由词法分析器生成）
     # ========================
-    缩进 = auto()        # INDENT - 缩进增加
-    回退 = auto()        # DEDENT - 缩进减少
-    换行 = auto()        # NEWLINE
+    缩进 = auto()  # INDENT - 缩进增加
+    回退 = auto()  # DEDENT - 缩进减少
+    换行 = auto()  # NEWLINE
 
     # ========================
     # 特殊
     # ========================
-    文件结束 = auto()    # EOF
+    文件结束 = auto()  # EOF
 
 
 @dataclass(frozen=True)
@@ -151,6 +152,7 @@ class Token:
         line   : 所在行号（从1开始）
         column : 所在列号（从1开始）
     """
+
     type: TokenType
     value: Any
     line: int
@@ -197,6 +199,7 @@ KEYWORDS: dict[str, TokenType] = {
     "空": TokenType.空,
     # OOP
     "类型": TokenType.类型,
+    "枚举": TokenType.枚举,
     "继承自": TokenType.继承自,
     "初始化": TokenType.初始化,
     "本对象": TokenType.本对象,
