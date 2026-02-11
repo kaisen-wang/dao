@@ -50,12 +50,6 @@ from ..ast_nodes import (
     LogicCut,
     LogicConstraint,
 )
-    LogicCut,
-    LogicConstraint,
-)
-    DictPattern,
-    Identifier,
-)
 
 
 class StatementParser:
@@ -961,16 +955,16 @@ class StatementParser:
     def parse_logic_block(self) -> LogicBlock:
         """解析逻辑代码块：逻辑 名称 { ... }"""
         token = self.advance()  # 消费 逻辑
-        
+
         name_token = self.expect(TokenType.标识符, "逻辑块需要一个名称")
         name = name_token.value
-        
+
         facts = []
         rules = []
-        
+
         # 消费左花括号
         self.expect(TokenType.左花括号, "逻辑块需要以 { 开始")
-        
+
         # 解析逻辑块内容
         while not self.match(TokenType.右花括号):
             if self.current.type == TokenType.事实:
@@ -982,10 +976,10 @@ class StatementParser:
             else:
                 # 跳过其他内容
                 self.advance()
-        
+
         # 消费右花括号
         self.advance()
-        
+
         return LogicBlock(
             name=name,
             facts=facts,
@@ -997,22 +991,22 @@ class StatementParser:
     def parse_logic_fact(self) -> LogicFact:
         """解析事实声明：事实: 父母("张三", "小明")"""
         token = self.advance()  # 消费 事实
-        
+
         # 消费冒号
         self.match(TokenType.冒号)
-        
+
         # 解析谓词
         predicate_expr = self.parse_expression()
         predicate = ""
         arguments = []
-        
+
         if isinstance(predicate_expr, Identifier):
             predicate = predicate_expr.name
         elif isinstance(predicate_expr, CallExpr):
             if isinstance(predicate_expr.callee, Identifier):
                 predicate = predicate_expr.callee.name
             arguments = predicate_expr.arguments
-        
+
         return LogicFact(
             predicate=predicate,
             arguments=arguments,
@@ -1023,13 +1017,13 @@ class StatementParser:
     def parse_logic_rule(self) -> LogicRule:
         """解析规则声明：规则: 祖父母(?祖, ?孙) 如果 父母(?祖, ?父) 并且 父母(?父, ?孙)"""
         token = self.advance()  # 消费 规则
-        
+
         # 消费冒号
         self.match(TokenType.冒号)
-        
+
         # 解析规则头
         head = self.parse_logic_fact()
-        
+
         # 检查是否有"如果"
         body = []
         if self.match(TokenType.如果):
@@ -1038,7 +1032,7 @@ class StatementParser:
                 if self.current.type == TokenType.标识符:
                     body.append(self.parse_expression())
                     self.match(TokenType.并且)
-        
+
         return LogicRule(
             head=head,
             body=body,
