@@ -149,7 +149,7 @@ class StatementParser:
         """解析函数声明：函数 名字(参数) ..."""
         token = self.advance()  # 消费 函数
 
-        name_token = self.expect(TokenType.标识符, "函数声明需要函数名")
+        name_token = self.expect_identifier_or_keyword("函数声明需要函数名")
         self.expect(TokenType.左括号, "函数声明需要 '('")
 
         params, default_values = self._parse_param_list()
@@ -172,7 +172,7 @@ class StatementParser:
         params = []
         default_values = {}
         while self.current.type != TokenType.右括号:
-            param = self.expect(TokenType.标识符, "期望参数名")
+            param = self.expect_identifier_or_keyword("期望参数名")
             params.append(param.value)
             # 检查默认值
             if self.match(TokenType.赋值):
@@ -397,18 +397,27 @@ class StatementParser:
 
         implemented_traits = []
 
-        # 实现 clause can appear before or after newline/indent
-        # Check both current position and after newline/indent
-        if self.match(TokenType.实现):
-            # 解析特征列表 (出现在类声明同一行或下一行)
-            while True:
-                trait_token = self.expect(TokenType.标识符, "'实现' 后需要特征名")
-                implemented_traits.append(trait_token.value)
-                if not self.match(TokenType.逗号):
-                    break
-
         self.expect(TokenType.换行, "类型声明后需要换行")
-        body = self.parse_class_body()
+
+        # 实现 clause can appear after newline/indent (in class body)
+        # Skip INDENT if present and check for '实现'
+        has_indent = self.match(TokenType.缩进)
+        if has_indent:
+            # Check if the first token in class body is '实现'
+            if self.match(TokenType.实现):
+                # 解析特征列表
+                while True:
+                    trait_token = self.expect(TokenType.标识符, "'实现' 后需要特征名")
+                    implemented_traits.append(trait_token.value)
+                    if not self.match(TokenType.逗号):
+                        break
+                # Skip newline after implements clause
+                self.skip_newlines()
+            else:
+                # No implements clause, so we need to put back the indent
+                self.pos -= 1  # Undo the match(TokenType.缩进)
+
+        body = self.parse_class_body(indent_consumed=has_indent)
 
         return ClassDecl(
             name=name_token.value,
@@ -434,9 +443,10 @@ class StatementParser:
             column=token.column,
         )
 
-    def parse_class_body(self) -> list[Statement]:
+    def parse_class_body(self, indent_consumed: bool = False) -> list[Statement]:
         """解析类体（缩进块，包含构造函数和方法）"""
-        self.expect(TokenType.缩进, "类型类体需要缩进")
+        if not indent_consumed:
+            self.expect(TokenType.缩进, "类型类体需要缩进")
         statements = []
 
         while self.current.type not in (TokenType.回退, TokenType.文件结束):
@@ -454,16 +464,14 @@ class StatementParser:
                 is_static = True
                 self.advance()
 
-            # 跳过实现语句（在类体中实现特征时）
+            # '实现' 子句已在 parse_class_decl 中处理，这里不再需要
             if self.current.type == TokenType.实现:
-                self.advance()
-                while self.current.type == TokenType.标识符:
-                    self.advance()
-                    if not self.match(TokenType.逗号):
-                        break
-                # Skip any following newlines/indents/dedents before next statement
-                self.skip_newlines()
-                continue
+                raise 语法错误(
+                    "'实现' 子句必须在类型声明的开始处",
+                    self.current.line,
+                    self.current.column,
+                    self.source,
+                )
 
             if self.current.type == TokenType.初始化:
                 # 构造函数：初始化(参数) ...
@@ -556,7 +564,9 @@ class StatementParser:
         # 冒号是可选的，如果有换行+缩进
         if self.current.type != TokenType.换行 and self.current.type != TokenType.缩进:
             self.expect(TokenType.冒号, "匹配分支需要 ':'")
-        self.skip_newlines()
+        # 只跳换行，不跳缩进（因为缩进表示多行块）
+        while self.current.type == TokenType.换行:
+            self.advance()
 
         # 单行或多行体
         if self.current.type == TokenType.缩进:

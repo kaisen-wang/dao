@@ -85,6 +85,24 @@ class Parser(StatementParser, ExpressionParser):
             return self.advance()
         return None
 
+    def expect_identifier_or_keyword(self, message: str = "") -> Token:
+        """期望当前Token为标识符或允许的关键字，否则报错"""
+        # 允许的关键字列表（这些可以用作函数名、变量名等）
+        allowed_keywords = (
+            TokenType.初始化,
+            TokenType.本对象,
+            TokenType.父对象,
+            TokenType.真,
+            TokenType.假,
+            TokenType.空,
+        )
+
+        if self.current.type == TokenType.标识符 or self.current.type in allowed_keywords:
+            return self.advance()
+
+        msg = message or f"期望标识符或关键字，但得到 {self.current.type.name} ('{self.current.value}')"
+        raise 语法错误(msg, self.current.line, self.current.column, self.source)
+
     def skip_newlines(self):
         """跳过所有换行Token"""
         while self.current.type == TokenType.换行:

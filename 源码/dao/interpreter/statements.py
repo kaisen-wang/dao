@@ -446,22 +446,116 @@ class StatementExecutor:
         subject = self.eval_expression(stmt.subject, env)
 
         for case in stmt.cases:
+            # 为每个 case 创建子环境，避免变量冲突
+            case_env = env.create_child()
+
+            # 通配符匹配任何值（应该在最后作为默认分支）
             if case.is_wildcard:
                 if case.guard:
-                    if self._is_truthy(self.eval_expression(case.guard, env)):
-                        return self._exec_block(case.body, env)
-                    continue
-                return self._exec_block(case.body, env)
-
-            pattern_val = self.eval_expression(case.pattern, env)
-
-            if subject == pattern_val:
-                if case.guard:
-                    if not self._is_truthy(self.eval_expression(case.guard, env)):
+                    if not self._is_truthy(self.eval_expression(case.guard, case_env)):
                         continue
-                return self._exec_block(case.body, env)
+                return self._exec_block(case.body, case_env)
+
+            # 检查模式是否匹配
+            match_result = self._match_pattern(case.pattern, subject, case_env)
+            if match_result:
+                if case.guard:
+                    if not self._is_truthy(self.eval_expression(case.guard, case_env)):
+                        continue
+                return self._exec_block(case.body, case_env)
 
         return None
+
+    def _match_pattern(self, pattern, subject, env: Environment) -> bool:
+        """匹配模式与主体"""
+        from ..ast_nodes import ListPattern, DictPattern, Identifier
+
+        # 列表模式
+        if isinstance(pattern, ListPattern):
+            if not isinstance(subject, list):
+                return False
+
+            if len(pattern.elements) > len(subject):
+                return False
+
+            # 处理展开操作符 ...rest
+            if pattern.has_spread:
+                # 最后一个元素是展开变量，不参与前面的匹配
+                num_fixed = len(pattern.elements) - 1
+                if len(subject) < num_fixed:
+                    return False
+
+                # 匹配前面的固定元素
+                for i in range(num_fixed):
+                    elem = pattern.elements[i]
+                    if isinstance(elem, Identifier) and elem.name == "_":
+                        continue  # 通配符，跳过
+                    elif isinstance(elem, Identifier):
+                        env.define(elem.name, subject[i])
+                    else:
+                        # 字面量比较
+                        pattern_val = self.eval_expression(elem, env)
+                        if pattern_val != subject[i]:
+                            return False
+
+                # 将剩余元素绑定到展开变量
+                rest = subject[num_fixed:]
+                spread_var = pattern.elements[-1]
+                if isinstance(spread_var, Identifier):
+                    rest_name = spread_var.name
+                    if rest_name != "_":
+                        env.define(rest_name, rest)
+                return True
+            else:
+                # 匹配所有元素
+                for i, elem in enumerate(pattern.elements):
+                    if isinstance(elem, Identifier) and elem.name == "_":
+                        continue  # 通配符，跳过
+                    elif isinstance(elem, Identifier):
+                        env.define(elem.name, subject[i])
+                    else:
+                        # 字面量比较
+                        pattern_val = self.eval_expression(elem, env)
+                        if pattern_val != subject[i]:
+                            return False
+
+                if len(subject) != len(pattern.elements):
+                    return False
+
+                return True
+
+        # 字典模式
+        elif isinstance(pattern, DictPattern):
+            if not isinstance(subject, dict):
+                return False
+
+            for key_expr, value_expr in pattern.pairs:
+                key = self.eval_expression(key_expr, env)
+                if key not in subject:
+                    return False
+
+                if isinstance(value_expr, Identifier) and value_expr.name == "_":
+                    continue  # 通配符
+                elif isinstance(value_expr, Identifier):
+                    env.define(value_expr.name, subject[key])
+                else:
+                    # 字面量比较
+                    pattern_val = self.eval_expression(value_expr, env)
+                    if pattern_val != subject[key]:
+                        return False
+
+            return True
+
+        # 简单值模式（字面量或标识符）
+        else:
+            if isinstance(pattern, Identifier) and pattern.name == "_":
+                return True  # 通配符匹配任何值
+            elif isinstance(pattern, Identifier):
+                env.define(pattern.name, subject)
+                return True
+            else:
+                pattern_val = self.eval_expression(pattern, env)
+                return pattern_val == subject
 
     # ========================
     # 导入

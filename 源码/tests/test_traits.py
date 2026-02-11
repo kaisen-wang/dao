@@ -65,15 +65,15 @@ c.draw()
 
 类型 矩形
     实现 形状
-    函数 初始化(宽度, 高度)
-        定义 width = 宽度
-        定义 height = 高度
+    初始化(宽度, 高度)
+        本对象.width = 宽度
+        本对象.height = 高度
     函数 area()
         返回 本对象.width * 本对象.height
     函数 perimeter()
         返回 2 * (本对象.width + 本对象.height)
 
-定义 r = = 矩形(5, 3)
+定义 r = 矩形(5, 3)
 打印(r.area())
 打印(r.perimeter())
 """

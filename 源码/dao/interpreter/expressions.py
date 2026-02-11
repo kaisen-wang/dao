@@ -61,7 +61,7 @@ class ExpressionEvaluator:
             case PipeExpr():
                 return self.eval_pipe(expr, env)
             case _:
-                raise 运行时错误(f"未知的表达式类型: {type(expr, 0, 0, self.source).__name__}",
+                raise 运行时错误(f"未知的表达式类型: {type(expr).__name__}",
                     expr.line, expr.column,
                 )
 
