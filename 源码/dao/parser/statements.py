@@ -7,7 +7,7 @@ OOP（类型/构造函数）、模式匹配、模块导入、解构赋值等。
 通过 Python mixin 模式，在运行时与 Parser 组合。
 """
 
-from ..tokens import TokenType
+from ..tokens import TokenType, Token
 from ..ast_nodes import (
     Statement,
     Expression,
@@ -27,6 +27,7 @@ from ..ast_nodes import (
     ThrowStmt,
     AssertStmt,
     ClassDecl,
+    AbstractDecl,
     EnumDecl,
     TraitDecl,
     MatchStmt,
@@ -60,6 +61,8 @@ class StatementParser:
                 return self.parse_variable_decl(is_constant=True)
             case TokenType.函数:
                 return self.parse_function_decl()
+            case TokenType.抽象:
+                return self.parse_abstract_decl()
             case TokenType.类型:
                 return self.parse_class_decl()
             case TokenType.枚举:
@@ -169,6 +172,25 @@ class StatementParser:
             params=params,
             default_values=default_values,
             body=body,
+            line=token.line,
+            column=token.column,
+        )
+
+    def _parse_method_signature(self, token: Token) -> FunctionDecl:
+        """解析方法签名（用于抽象方法，不需要函数关键字）：方法名(参数)"""
+        name_token = self.expect_identifier_or_keyword("方法声明需要方法名")
+        self.expect(TokenType.左括号, "方法声明需要 '('")
+
+        params, default_values = self._parse_param_list()
+
+        self.expect(TokenType.右括号, "方法声明需要 ')'")
+        self.expect(TokenType.换行, "方法头部后需要换行")
+
+        return FunctionDecl(
+            name=name_token.value,
+            params=params,
+            default_values=default_values,
+            body=[],  # 抽象方法没有方法体
             line=token.line,
             column=token.column,
         )
@@ -397,6 +419,29 @@ class StatementParser:
             column=token.column,
         )
 
+    def parse_abstract_decl(self) -> AbstractDecl:
+        """解析抽象类型声明：抽象 类型 名字 [继承自 父类] ..."""
+        token = self.advance()  # 消费 抽象
+        self.expect(TokenType.类型, "'抽象' 后需要 '类型' 关键字")
+        name_token = self.expect(TokenType.标识符, "抽象类型声明需要一个类名")
+
+        parent_name = None
+        if self.match(TokenType.继承自):
+            parent_token = self.expect(TokenType.标识符, "'继承自' 后需要父类名")
+            parent_name = parent_token.value
+
+        self.expect(TokenType.换行, "抽象类型声明后需要换行")
+
+        body = self.parse_class_body(indent_consumed=False)
+
+        return AbstractDecl(
+            name=name_token.value,
+            parent_name=parent_name,
+            body=body,
+            line=token.line,
+            column=token.column,
+        )
+
     def parse_class_decl(self) -> ClassDecl:
         """解析类型声明：类型 名字 [继承自 父类] [实现 特征1, 特征2] ..."""
         token = self.advance()  # 消费 类型
@@ -414,6 +459,7 @@ class StatementParser:
         # 实现 clause can appear after newline/indent (in class body)
         # 检查是否是错误类型（继承自 DaoError）
         is_error_class = False
+        is_abstract = False
         if parent_name == "错误":
             is_error_class = True
 
@@ -448,6 +494,7 @@ class StatementParser:
             line=token.line,
             column=token.column,
             is_error_class=is_error_class,
+            is_abstract=is_abstract,
         )
 
     def parse_trait_decl(self) -> TraitDecl:
@@ -503,6 +550,14 @@ class StatementParser:
             elif self.current.type == TokenType.函数:
                 # 方法：函数 名字(参数) ...
                 func = self.parse_function_decl()
+                func.is_static = is_static
+                func.is_private = is_private
+                statements.append(func)
+            elif self.current.type == TokenType.抽象:
+                # 抽象方法：抽象 方法名(参数)
+                token = self.advance()  # 消费 抽象
+                func = self._parse_method_signature(token)
+                func.is_abstract = True
                 func.is_static = is_static
                 func.is_private = is_private
                 statements.append(func)

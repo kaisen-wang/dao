@@ -45,6 +45,8 @@ class DaoClass(DaoCallable):
         static_methods: dict[str, DaoFunction] | None = None,
         private_names: set[str] | None = None,
         implemented_traits: list[DaoTrait] | None = None,
+        is_abstract: bool = False,
+        abstract_methods: set[str] | None = None,
     ):
         self.name = name
         self.parent = parent
@@ -52,6 +54,8 @@ class DaoClass(DaoCallable):
         self.static_methods = static_methods or {}
         self.private_names = private_names or set()
         self.implemented_traits = implemented_traits or []
+        self.is_abstract = is_abstract
+        self.abstract_methods = abstract_methods or set()
 
     def find_method(self, name: str) -> DaoFunction | None:
         """查找方法（首先在类中查找，然后在实现的特征中查找，最后沿继承链向上搜索）"""

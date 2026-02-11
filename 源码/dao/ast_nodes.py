@@ -215,6 +215,7 @@ class FunctionDecl(Statement):
     body: list[Statement] = field(default_factory=list)
     is_static: bool = False
     is_private: bool = False
+    is_abstract: bool = False  # 是否是抽象方法
 
 
 @dataclass
@@ -349,6 +350,16 @@ class ClassDecl(Statement):
     implemented_traits: list[str] = field(default_factory=list)
     body: list[Statement] = field(default_factory=list)
     is_error_class: bool = False  # 是否是错误类（继承自 错误）
+    is_abstract: bool = False  # 是否是抽象类
+
+
+@dataclass
+class AbstractDecl(Statement):
+    """抽象类型声明：抽象 类型 名字"""
+
+    name: str = ""
+    parent_name: str | None = None
+    body: list[Statement] = field(default_factory=list)
 
 
 @dataclass

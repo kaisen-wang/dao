@@ -110,6 +110,7 @@ class TokenType(Enum):
     # ========================
     # OOP 关键字
     # ========================
+    抽象 = auto()  # abstract
     类型 = auto()  # class
     枚举 = auto()  # enum
     继承自 = auto()  # extends
@@ -198,6 +199,7 @@ KEYWORDS: dict[str, TokenType] = {
     "假": TokenType.假,
     "空": TokenType.空,
     # OOP
+    "抽象": TokenType.抽象,
     "类型": TokenType.类型,
     "枚举": TokenType.枚举,
     "继承自": TokenType.继承自,

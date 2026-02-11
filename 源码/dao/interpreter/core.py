@@ -109,6 +109,17 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
         self, klass: DaoClass, args: list, kwargs: dict, call_expr
     ) -> DaoInstance:
         """创建类型实例"""
+        # 检查是否为抽象类（抽象类不能被实例化）
+        if klass.is_abstract:
+            line = call_expr.line if call_expr else 0
+            col = call_expr.column if call_expr else 0
+            raise 运行时错误(
+                f"类型 '{klass.name}' 是抽象类，不能被实例化",
+                line,
+                col,
+                self.source,
+            )
+
         instance = DaoInstance(klass)
 
         init_method = klass.find_method("初始化")

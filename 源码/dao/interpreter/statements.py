@@ -129,6 +129,8 @@ class StatementExecutor:
                 return self.exec_assert(stmt, env)
             case ClassDecl():
                 return self.exec_class_decl(stmt, env)
+            case AbstractDecl():
+                return self.exec_abstract_decl(stmt, env)
             case EnumDecl():
                 return self.exec_enum_decl(stmt, env)
             case TraitDecl():
@@ -383,15 +385,31 @@ class StatementExecutor:
         trait = DaoTrait(name=stmt.name, methods=methods, static_methods=static_methods)
         env.define(stmt.name, trait)
 
+    def exec_abstract_decl(self, stmt: AbstractDecl, env: Environment) -> None:
+        """执行抽象类型声明"""
+        # 将 AbstractDecl 转换为 ClassDecl 并执行
+        class_stmt = ClassDecl(
+            name=stmt.name,
+            parent_name=stmt.parent_name,
+            implemented_traits=[],
+            body=stmt.body,
+            line=stmt.line,
+            column=stmt.column,
+            is_error_class=False,
+            is_abstract=True,
+        )
+        self.exec_class_decl(class_stmt, env)
+
     def exec_class_decl(self, stmt: ClassDecl, env: Environment) -> None:
         """执行类型声明"""
+        from ..builtins.oop_types import DaoError
+
         parent = None
         is_error_class = False
         if stmt.parent_name:
             # 检查是否继承自 DaoError（自定义异常类型）
             if stmt.parent_name == "错误":
                 is_error_class = True
-                from ..builtins.oop_types import DaoError
                 parent = DaoError
             else:
                 parent = env.get(stmt.parent_name)
@@ -409,25 +427,52 @@ class StatementExecutor:
         methods = {}
         static_methods = {}
         private_names = set()
+        abstract_methods = set()
         for s in stmt.body:
             if isinstance(s, FunctionDecl):
-                func = DaoFunction(
-                    name=s.name,
-                    params=s.params,
-                    default_values={
-                        k: self.eval_expression(v, env)
-                        for k, v in s.default_values.items()
-                    },
-                    body=s.body,
-                    closure_env=env,
-                    is_generator=self._has_yield(s.body),
-                )
+                if s.is_abstract:
+                    # 抽象方法不需要定义体
+                    abstract_methods.add(s.name)
+                    func = DaoFunction(
+                        name=s.name,
+                        params=s.params,
+                        default_values={
+                            k: self.eval_expression(v, env)
+                            for k, v in s.default_values.items()
+                        },
+                        body=[],  # 抽象方法没有方法体
+                        closure_env=env,
+                        is_generator=False,
+                    )
+                else:
+                    func = DaoFunction(
+                        name=s.name,
+                        params=s.params,
+                        default_values={
+                            k: self.eval_expression(v, env)
+                            for k, v in s.default_values.items()
+                        },
+                        body=s.body,
+                        closure_env=env,
+                        is_generator=self._has_yield(s.body),
+                    )
                 if s.is_private:
                     private_names.add(s.name)
                 if s.is_static:
                     static_methods[s.name] = func
                 else:
                     methods[s.name] = func
+
+        # 检查是否必须实现父类的所有抽象方法（仅对具体类进行检查）
+        if parent and isinstance(parent, DaoClass) and not stmt.is_abstract:
+            for abstract_method in parent.abstract_methods:
+                if abstract_method not in methods:
+                    raise 类型错误(
+                        f"类型 '{stmt.name}' 必须实现父类 '{parent.name}' 的抽象方法 '{abstract_method}'",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
 
         implemented_traits = []
         for trait_name in stmt.implemented_traits:
@@ -471,6 +516,8 @@ class StatementExecutor:
                 static_methods=static_methods,
                 private_names=private_names,
                 implemented_traits=implemented_traits,
+                is_abstract=stmt.is_abstract,
+                abstract_methods=abstract_methods,
             )
             env.define(stmt.name, klass)
 
