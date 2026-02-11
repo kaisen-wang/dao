@@ -216,6 +216,8 @@ class FunctionDecl(Statement):
     is_static: bool = False
     is_private: bool = False
     is_abstract: bool = False  # 是否是抽象方法
+    is_operator: bool = False  # 是否是运算符重载
+    operator_symbol: str = ""  # 运算符符号（如 "+", "-", "=="）
 
 
 @dataclass

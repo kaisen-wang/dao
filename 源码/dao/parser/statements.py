@@ -195,6 +195,74 @@ class StatementParser:
             column=token.column,
         )
 
+    def _parse_operator_overload(self, is_static: bool, is_private: bool) -> FunctionDecl:
+        """解析运算符重载：运算符+(参数)"""
+        token = self.advance()  # 消费 运算符
+
+        # 期望运算符符号
+        operator_token = self.current
+        operator_symbol = ""
+
+        # 支持的运算符符号
+        operator_token_types = {
+            TokenType.加: "+",
+            TokenType.减: "-",
+            TokenType.乘: "*",
+            TokenType.除: "/",
+            TokenType.取余: "%",
+            TokenType.幂: "**",
+            TokenType.等于: "==",
+            TokenType.不等于: "!=",
+            TokenType.小于: "<",
+            TokenType.小于等于: "<=",
+            TokenType.大于: ">",
+            TokenType.大于等于: ">=",
+        }
+
+        if operator_token.type in operator_token_types:
+            operator_symbol = operator_token_types[operator_token.type]
+            self.advance()
+        else:
+            raise 语法错误(
+                f"运算符重载需要一个有效的运算符符号 (+, -, *, /, %, **, ==, !=, <, <=, >, >=)",
+                operator_token.line,
+                operator_token.column,
+                self.source,
+            )
+
+        # 解析参数列表
+        self.expect(TokenType.左括号, "运算符重载需要 '('")
+        params, default_values = self._parse_param_list()
+        self.expect(TokenType.右括号, "运算符重载需要 ')'")
+
+        # 运算符通常接受一个参数（右操作数）
+        if len(params) != 1:
+            raise 语法错误(
+                f"运算符重载需要一个参数（右操作数），但得到 {len(params)} 个参数",
+                token.line,
+                token.column,
+                self.source,
+            )
+
+        self.expect(TokenType.换行, "运算符重载后需要换行")
+
+        # 解析方法体
+        body = self.parse_block()
+
+        return FunctionDecl(
+            name=f"运算符{operator_symbol}",  # 使用特殊名称存储
+            params=params,
+            default_values=default_values,
+            body=body,
+            line=token.line,
+            column=token.column,
+            is_static=is_static,
+            is_private=is_private,
+            is_operator=True,
+            operator_symbol=operator_symbol,
+        )
+
+
     def _parse_param_list(self) -> tuple[list[str], dict]:
         """解析参数列表"""
         params = []
@@ -560,6 +628,10 @@ class StatementParser:
                 func.is_abstract = True
                 func.is_static = is_static
                 func.is_private = is_private
+                statements.append(func)
+            elif self.current.type == TokenType.运算符:
+                # 运算符重载：运算符+(参数)
+                func = self._parse_operator_overload(is_static, is_private)
                 statements.append(func)
             else:
                 # 其他语句（如类级别的属性声明）

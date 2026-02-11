@@ -218,7 +218,18 @@ class ExpressionEvaluator:
                 return left
             return self.eval_expression(expr.right, env)
 
+        # 检查左操作数是否是 DaoInstance 并有运算符重载
         left = self.eval_expression(expr.left, env)
+
+        # 对于运算符重载，只求值右操作数（避免重复求值左操作数）
+        if isinstance(left, DaoInstance):
+            operator_method_name = f"运算符{expr.operator}"
+            method = left.klass.find_method(operator_method_name)
+            if method:
+                # 调用运算符重载方法
+                right = self.eval_expression(expr.right, env)
+                return self._call_method(left, method, [right], {}, expr)
+
         right = self.eval_expression(expr.right, env)
 
         match expr.operator:
