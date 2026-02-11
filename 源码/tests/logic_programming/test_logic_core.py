@@ -10,9 +10,9 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 
 import pytest
-from dao.logic.core import LogicVariable, LogicAtom, LogicStruct, KnowledgeBase, normalize_term
+from dao.logic.core import LogicVariable, LogicAtom, LogicStruct, KnowledgeBase, Substitution, normalize_term
 from dao.logic.unification import unify, apply_substitution, occurs_check, is_unifiable
-from dao.logic.exceptions import 统一化错误, 循环规则错误
+from dao.logic.exceptions import UnificationError as 统一化错误, CircularRuleError as 循环规则错误
 
 
 class TestLogicVariable:
