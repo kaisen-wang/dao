@@ -1,0 +1,59 @@
+// 属性访问器示例：Person 类
+// ============================
+// 这个示例展示了如何使用 获取 和 设置 关键字
+// 来定义属性访问器，提供对属性读写的控制。
+
+类型 Person
+    初始化(name, age)
+        // 使用下划线前缀表示"私有"字段
+        本对象._name = name
+        本对象._age = age
+
+    // 定义 name 属性的 getter
+    获取 name()
+        返回 本对象._name
+
+    // 定义 name 属性的 setter
+    设置 name(value)
+        如果 value == 空
+            抛出 "名字不能为空"
+        本对象._name = value
+
+    // 定义 age 属性的 getter
+    获取 age()
+        返回 本对象._age
+
+    // 定义 age 属性的 setter，带验证
+    设置 age(value)
+        如果 value < 0
+            抛出 "年龄不能为负数"
+        如果 value > 150
+            抛出 "年龄超过合理范围"
+        本对象._age = value
+
+    // 只读属性：只能通过 getter 访问，没有 setter
+    获取 info()
+        返回 "姓名: " + 本对象._name + ", 年龄: " + 本对象._age
+
+// 创建 Person 实例
+定义 p = Person("张三", 25)
+
+// 使用 property getter 读取属性
+打印("初始姓名: " + p.name)
+打印("初始年龄: " + p.age)
+打印("人员信息: " + p.info)
+打印
+
+// 使用 property setter 修改属性
+p.name = "李四"
+p.age = 30
+
+打印("修改后姓名: " + p.name)
+打印("修改后年龄: " + p.age)
+打印
+
+// 测试验证：设置无效年龄会抛出错误
+尝试
+    p.age = -10
+捕获 错误
+    打印("错误捕获: " + 错误.消息)

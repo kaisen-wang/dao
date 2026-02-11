@@ -122,6 +122,8 @@ class TokenType(Enum):
     静态 = auto()  # static
     特征 = auto()  # trait
     实现 = auto()  # implements
+    获取 = auto()  # get (property getter)
+    设置 = auto()  # set (property setter)
 
     # ========================
     # 模块关键字
@@ -212,6 +214,8 @@ KEYWORDS: dict[str, TokenType] = {
     "静态": TokenType.静态,
     "特征": TokenType.特征,
     "实现": TokenType.实现,
+    "获取": TokenType.获取,
+    "设置": TokenType.设置,
     # 模块
     "导入": TokenType.导入,
     "导出": TokenType.导出,

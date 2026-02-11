@@ -262,6 +262,60 @@ class StatementParser:
             operator_symbol=operator_symbol,
         )
 
+    def _parse_property_accessor(self, is_static: bool, is_private: bool, is_getter: bool) -> FunctionDecl:
+        """解析属性访问器：获取 属性名() 或 设置 属性名(值)"""
+        token = self.advance()  # 消费 获取或设置
+
+        # 获取属性名
+        property_name_token = self.expect_identifier_or_keyword("属性访问器需要一个属性名")
+        property_name = property_name_token.value
+
+        # 解析参数列表
+        self.expect(TokenType.左括号, "属性访问器需要 '('")
+        params, default_values = self._parse_param_list()
+        self.expect(TokenType.右括号, "属性访问器需要 ')'")
+
+        # 验证参数
+        if is_getter:
+            # getter 不应该有参数
+            if len(params) > 0:
+                raise 语法错误(
+                    f"属性 getter '{property_name}' 不应该有参数，但得到 {len(params)} 个参数",
+                    token.line,
+                    token.column,
+                    self.source,
+                )
+        else:
+            # setter 必须有一个参数
+            if len(params) != 1:
+                raise 语法错误(
+                    f"属性 setter '{property_name}' 必须有一个参数，但得到 {len(params)} 个参数",
+                    token.line,
+                    token.column,
+                    self.source,
+                )
+
+        self.expect(TokenType.换行, "属性访问器后需要换行")
+
+        # 解析方法体
+        body = self.parse_block()
+
+        # 使用特殊名称存储属性访问器
+        accessor_name = f"获取{property_name}" if is_getter else f"设置{property_name}"
+
+        return FunctionDecl(
+            name=accessor_name,
+            params=params,
+            default_values=default_values,
+            body=body,
+            line=token.line,
+            column=token.column,
+            is_static=is_static,
+            is_private=is_private,
+            is_getter=is_getter,
+            is_setter=not is_getter,
+        )
+
 
     def _parse_param_list(self) -> tuple[list[str], dict]:
         """解析参数列表"""
@@ -632,6 +686,14 @@ class StatementParser:
             elif self.current.type == TokenType.运算符:
                 # 运算符重载：运算符+(参数)
                 func = self._parse_operator_overload(is_static, is_private)
+                statements.append(func)
+            elif self.current.type == TokenType.获取:
+                # 属性 getter：获取 属性名()
+                func = self._parse_property_accessor(is_static, is_private, is_getter=True)
+                statements.append(func)
+            elif self.current.type == TokenType.设置:
+                # 属性 setter：设置 属性名(value)
+                func = self._parse_property_accessor(is_static, is_private, is_getter=False)
                 statements.append(func)
             else:
                 # 其他语句（如类级别的属性声明）

@@ -218,6 +218,8 @@ class FunctionDecl(Statement):
     is_abstract: bool = False  # 是否是抽象方法
     is_operator: bool = False  # 是否是运算符重载
     operator_symbol: str = ""  # 运算符符号（如 "+", "-", "=="）
+    is_getter: bool = False  # 是否是属性 getter
+    is_setter: bool = False  # 是否是属性 setter
 
 
 @dataclass

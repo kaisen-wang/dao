@@ -165,15 +165,22 @@ class StatementExecutor:
 
         if isinstance(stmt.target, Identifier):
             env.set(stmt.target.name, value)
-        elif isinstance(stmt.target, MemberAccess):
+        if isinstance(stmt.target, MemberAccess):
             obj = self.eval_expression(stmt.target.object, env)
             if isinstance(obj, DaoInstance):
+                # 先检查是否有 property setter
+                setter_name = f"设置{stmt.target.member}"
+                setter = obj.klass.find_method(setter_name)
+                if setter and setter.is_setter:
+                    self._call_method(obj, setter, [value], {}, stmt)
+                    return
+
                 obj.set_field(stmt.target.member, value)
             elif isinstance(obj, dict):
                 obj[stmt.target.member] = value
             else:
                 raise 类型错误(
-                    f"无法给类型 '{type(obj, 0, 0, self.source).__name__}' 设置属性",
+                    f"无法给类型 '{type(obj).__name__}' 设置属性",
                     stmt.line,
                     stmt.column,
                 )
@@ -455,6 +462,8 @@ class StatementExecutor:
                         body=s.body,
                         closure_env=env,
                         is_generator=self._has_yield(s.body),
+                        is_getter=s.is_getter,
+                        is_setter=s.is_setter,
                     )
                 if s.is_private:
                     private_names.add(s.name)

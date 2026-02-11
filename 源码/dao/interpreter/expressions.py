@@ -101,6 +101,12 @@ class ExpressionEvaluator:
                 if not self._in_method_context(env, obj.klass):
                     raise 运行时错误(f"无法访问类型 '{obj.klass.name}' 的私有成员 '{expr.member}'",
                         expr.line, expr.column, self.source)
+            # 先检查是否有 property getter
+            getter_name = f"获取{expr.member}"
+            getter = obj.klass.find_method(getter_name)
+            if getter and getter.is_getter:
+                return self._call_method(obj, getter, [], {}, expr)
+
             result = obj.get_field(expr.member)
             if result is not None:
                 return result
