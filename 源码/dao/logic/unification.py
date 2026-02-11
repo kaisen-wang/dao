@@ -97,6 +97,7 @@ def _unify_variable(var: LogicVariable, term: Any, substitution: Substitution) -
     if occurs_check(var, term):
         raise CircularRuleError(f"Circular binding: variable {var} occurs in term {term}")
 
+    substitution.bind(var, term)
     return substitution
 
 

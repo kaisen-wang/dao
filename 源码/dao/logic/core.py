@@ -53,8 +53,26 @@ class LogicAtom:
 
 @dataclass
 class LogicStruct:
+    """Logic structure - predicate call"""
     predicate: str
     args: tuple[Any, ...]
+
+    def __post_init__(self):
+        """Auto-normalize arguments to LogicAtom/LogicVariable"""
+        normalized_args = []
+        for arg in self.args:
+            if isinstance(arg, LogicStruct):
+                # Keep LogicStruct as is for recursive occurs_check
+                normalized_args.append(arg)
+            elif isinstance(arg, LogicAtom):
+                normalized_args.append(arg)
+            elif isinstance(arg, LogicVariable):
+                normalized_args.append(arg)
+            elif isinstance(arg, str) and arg.startswith('?'):
+                normalized_args.append(LogicVariable(arg))
+            else:
+                normalized_args.append(LogicAtom(arg))
+        self.args = tuple(normalized_args)
 
     def __repr__(self) -> str:
         args_str = ', '.join(repr(arg) for arg in self.args)
@@ -84,7 +102,23 @@ class Substitution(dict):
         self[var.name] = value
 
     def get_value(self, var: LogicVariable) -> Any:
-        return self.get(var.name, None)
+        """Get variable value with recursive dereferencing"""
+        value = self.get(var.name, None)
+        if value is None:
+            return None
+        # If value is another LogicVariable, recursively get its binding
+        if isinstance(value, LogicVariable):
+            # Use a set to detect cycles
+            visited = {var.name}
+            current = value
+            while isinstance(current, LogicVariable) and current.name not in visited:
+                visited.add(current.name)
+                next_value = self.get(current.name, None)
+                if next_value is None:
+                    return current
+                current = next_value
+            return current
+        return value
 
     def is_bound(self, var: LogicVariable) -> bool:
         return var.name in self
@@ -148,12 +182,12 @@ class KnowledgeBase:
     def __repr__(self) -> str:
         result = f"KnowledgeBase: {self.name}"
         if self.facts:
-            result += " Facts:"
+            result += " 事实:"
             for pred, facts in self.facts.items():
                 for fact in facts:
                     result += f" {fact}"
         if self.rules:
-            result += " Rules:"
+            result += " 规则:"
             for pred, rules in self.rules.items():
                 for head, body in rules:
                     result += f" {head} if {body}"
