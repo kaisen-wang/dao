@@ -483,3 +483,79 @@ class DestructureAssign(Statement):
     targets: list[str] = field(default_factory=list)
     value: Expression = field(default_factory=lambda: NullLiteral())
     is_declaration: bool = False
+
+
+# ========================
+# 逻辑编程
+# ========================
+
+
+@dataclass
+class LogicBlock(Statement):
+    """逻辑代码块：逻辑 名称 { ... }"""
+
+    name: str = ""
+    facts: list["LogicFact"] = field(default_factory=list)
+    rules: list["LogicRule"] = field(default_factory=list)
+
+
+@dataclass
+class LogicFact(Expression):
+    """事实声明：事实: 父母("张三", "小明")"""
+
+    predicate: str = ""
+    arguments: list[Expression] = field(default_factory=list)
+
+
+@dataclass
+class LogicRule(Expression):
+    """规则声明：规则: 祖父母(?祖, ?孙) 如果 父母(?祖, ?父) 并且 父母(?父, ?孙)"""
+
+    head: "LogicFact" = field(default_factory=lambda: LogicFact())
+    body: list[Expression] = field(default_factory=list)  # 规则体中的逻辑表达式
+
+
+@dataclass
+class LogicVariable(Expression):
+    """逻辑变量：?变量名"""
+
+    name: str = ""
+
+
+@dataclass
+class LogicQuery(Expression):
+    """查询表达式：查询(知识库, 目标)"""
+
+    knowledge_base: str = ""
+    goal: Expression = field(default_factory=lambda: NullLiteral())
+
+
+@dataclass
+class LogicPredicate(Expression):
+    """逻辑谓词调用：父母(?父, ?子)"""
+
+    predicate: str = ""
+    arguments: list[Expression] = field(default_factory=list)
+
+
+@dataclass
+class LogicNegation(Expression):
+    """逻辑否定：非 已封禁(?用户)"""
+
+    expression: Expression = field(default_factory=lambda: NullLiteral())
+
+
+@dataclass
+class LogicCut(Expression):
+    """剪枝操作符：剪枝"""
+
+    pass
+
+
+@dataclass
+class LogicConstraint(Expression):
+    """约束表达式：?x 在范围 1..10"""
+
+    variable: str = ""
+    operator: str = ""  # "在范围"
+    bounds: tuple[int, int] = (0, 0)

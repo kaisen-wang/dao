@@ -133,6 +133,15 @@ class TokenType(Enum):
     作为 = auto()  # as
 
     # ========================
+    # 逻辑编程关键字
+    # ========================
+    逻辑 = auto()  # logic - 逻辑代码块
+    事实 = auto()  # fact - 事实声明
+    规则 = auto()  # rule - 规则声明
+    查询 = auto()  # query - 查询表达式
+    剪枝 = auto()  # cut - 剪枝操作符
+
+    # ========================
     # 缩进控制（由词法分析器生成）
     # ========================
     缩进 = auto()  # INDENT - 缩进增加
@@ -220,4 +229,10 @@ KEYWORDS: dict[str, TokenType] = {
     "导入": TokenType.导入,
     "导出": TokenType.导出,
     "作为": TokenType.作为,
+    # 逻辑编程
+    "逻辑": TokenType.逻辑,
+    "事实": TokenType.事实,
+    "规则": TokenType.规则,
+    "查询": TokenType.查询,
+    "剪枝": TokenType.剪枝,
 }
