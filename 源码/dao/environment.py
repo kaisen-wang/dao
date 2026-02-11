@@ -19,6 +19,7 @@ class Environment:
         parent  : 父环境（外层作用域），为None时表示全局作用域
         values  : 当前作用域中的变量名 → 值 的映射
         constants: 记录哪些变量名是常量，不可重新赋值
+        exports : 导出列表（用于模块系统）
         call_stack: 调用栈，用于错误追踪
         current_frame: 当前栈帧信息
     """
@@ -27,6 +28,7 @@ class Environment:
         self.parent = parent
         self.values: dict[str, object] = {}
         self.constants: set[str] = set()
+        self.exports: list[str] = []  # 导出列表
         self.call_stack: list[dict] = []
         self.current_frame: dict | None = None
 

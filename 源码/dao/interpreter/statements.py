@@ -133,6 +133,8 @@ class StatementExecutor:
                 return self.exec_enum_decl(stmt, env)
             case TraitDecl():
                 return self.exec_trait_decl(stmt, env)
+            case ExportStmt():
+                return self.exec_export(stmt, env)
             case MatchStmt():
                 return self.exec_match(stmt, env)
             case ImportStmt():
@@ -558,8 +560,12 @@ class StatementExecutor:
                 return pattern_val == subject
 
     # ========================
-    # 导入
+    # 导入和导出
     # ========================
+
+    def exec_export(self, stmt: ExportStmt, env: Environment) -> None:
+        """执行导出语句：标记要导出的变量名"""
+        env.exports = stmt.names
 
     def exec_import(self, stmt: ImportStmt, env: Environment) -> None:
         """执行导入语句"""
@@ -594,13 +600,35 @@ class StatementExecutor:
 
         self.execute(ast, module_env)
 
-        alias = stmt.alias or stmt.module_path.split(".")[-1]
-        module_dict = {}
-        for name, value in module_env.values.items():
-            if not isinstance(value, (BuiltinFunction, InterpreterBuiltin)):
-                module_dict[name] = value
+        # 根据导出列表过滤变量
+        if module_env.exports:
+            # 如果模块有导出列表，只导出指定的变量
+            exported_vars = {}
+            for name in module_env.exports:
+                if name in module_env.values:
+                    exported_vars[name] = module_env.values[name]
+            module_env.values = exported_vars
 
-        env.define(alias, module_dict)
+        if stmt.is_from_import:
+            # "从 模块 导入 {项}" 语法：直接将项导入当前环境
+            for name in stmt.names:
+                if name not in module_env.values:
+                    raise 运行时错误(
+                        f"模块 '{stmt.module_path}' 中没有导出 '{name}'",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
+                env.define(name, module_env.values[name])
+        else:
+            # 普通 "导入 模块" 语法：将模块作为字典导入
+            alias = stmt.alias or stmt.module_path.split(".")[-1]
+            module_dict = {}
+            for name, value in module_env.values.items():
+                if not isinstance(value, (BuiltinFunction, InterpreterBuiltin)):
+                    module_dict[name] = value
+
+            env.define(alias, module_dict)
 
     # ========================
     # 解构赋值

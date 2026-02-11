@@ -429,8 +429,16 @@ class ImportStmt(Statement):
     """导入语句"""
 
     module_path: str = ""
-    names: list[str] = field(default_factory=list)
+    names: list[str] = field(default_factory=list)  # 选择性导入的名称列表
     alias: str | None = None
+    is_from_import: bool = False  # 是否是 "从 模块 导入 {项}" 语法
+
+
+@dataclass
+class ExportStmt(Statement):
+    """导出语句：导出 名称 / 导出 {名称1, 名称2}"""
+
+    names: list[str] = field(default_factory=list)
 
 
 # ========================
