@@ -378,3 +378,20 @@ class LexerReaders:
             return self._make_token(token_type, char, line, col)
 
         return None
+
+    def _read_logic_variable(self) -> Token:
+        """读取逻辑变量 (?变量名)"""
+        start_line = self.line
+        start_col = self.column
+        self.advance()  # 跳过 ?
+        
+        result = ["?"]
+        
+        # 读取变量名（标识符）
+        while self.current_char is not None and self._is_identifier_char(
+            self.current_char
+        ):
+            result.append(self.advance())
+        
+        word = "".join(result)
+        return self._make_token(TokenType.标识符, word, start_line, start_col)
