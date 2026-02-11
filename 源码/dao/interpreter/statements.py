@@ -19,6 +19,7 @@ from ..builtins import (
     get_builtins,
     get_interpreter_builtins,
 )
+from ..builtins.oop_types import DaoTrait
 from ..errors import (
     运行时错误,
     类型错误,
@@ -130,6 +131,8 @@ class StatementExecutor:
                 return self.exec_class_decl(stmt, env)
             case EnumDecl():
                 return self.exec_enum_decl(stmt, env)
+            case TraitDecl():
+                return self.exec_trait_decl(stmt, env)
             case MatchStmt():
                 return self.exec_match(stmt, env)
             case ImportStmt():
@@ -339,6 +342,31 @@ class StatementExecutor:
         enum_obj = DaoEnum(stmt.name, stmt.values)
         env.define(stmt.name, enum_obj)
 
+    def exec_trait_decl(self, stmt: TraitDecl, env: Environment) -> None:
+        """执行特征声明"""
+        methods = {}
+        static_methods = {}
+        for s in stmt.body:
+            if isinstance(s, FunctionDecl):
+                func = DaoFunction(
+                    name=s.name,
+                    params=s.params,
+                    default_values={
+                        k: self.eval_expression(v, env)
+                        for k, v in s.default_values.items()
+                    },
+                    body=s.body,
+                    closure_env=env,
+                    is_generator=self._has_yield(s.body),
+                )
+                if s.is_static:
+                    static_methods[s.name] = func
+                else:
+                    methods[s.name] = func
+
+        trait = DaoTrait(name=stmt.name, methods=methods, static_methods=static_methods)
+        env.define(stmt.name, trait)
+
     def exec_class_decl(self, stmt: ClassDecl, env: Environment) -> None:
         """执行类型声明"""
         parent = None
@@ -366,6 +394,7 @@ class StatementExecutor:
                     },
                     body=s.body,
                     closure_env=env,
+                    is_generator=self._has_yield(s.body),
                 )
                 if s.is_private:
                     private_names.add(s.name)
@@ -374,12 +403,37 @@ class StatementExecutor:
                 else:
                     methods[s.name] = func
 
+        implemented_traits = []
+        for trait_name in stmt.implemented_traits:
+            trait_obj = env.get(trait_name)
+            if not isinstance(trait_obj, DaoTrait):
+                raise 类型错误(
+                    f"'{trait_name}' 不是一个特征",
+                    stmt.line,
+                    stmt.column,
+                    self.source,
+                )
+
+            for method_name in trait_obj.methods:
+                if method_name not in methods and (
+                    not parent or not parent.find_method(method_name)
+                ):
+                    raise 类型错误(
+                        f"类型 '{stmt.name}' 必须实现特征 '{trait_name}' 中的方法 '{method_name}'",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
+
+            implemented_traits.append(trait_obj)
+
         klass = DaoClass(
             name=stmt.name,
             parent=parent,
             methods=methods,
             static_methods=static_methods,
             private_names=private_names,
+            implemented_traits=implemented_traits,
         )
         env.define(stmt.name, klass)
 

@@ -389,6 +389,26 @@ class MatchStmt(Statement):
     cases: list["MatchCase"] = field(default_factory=list)
 
 
+# ========================
+# 模式匹配（解构模式）
+# ========================
+
+
+@dataclass
+class ListPattern(Expression):
+    """列表模式：[x, y, ...rest]"""
+
+    elements: list[Expression] = field(default_factory=list)
+    has_spread: bool = False  # 是否有 ... 展开操作符
+
+
+@dataclass
+class DictPattern(Expression):
+    """字典模式：{键: 值}"""
+
+    pairs: list[tuple[Expression, Expression]] = field(default_factory=list)
+
+
 @dataclass
 class MatchCase(ASTNode):
     """匹配分支：情况 模式 [当 守卫]: 代码块"""

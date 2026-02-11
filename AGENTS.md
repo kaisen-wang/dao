@@ -156,7 +156,10 @@ class TestParserVariables:
 
 ## 注意事项
 
+- 请使用UTF-8编码
 - 所有用户可见的错误消息必须使用中文
 - 保持AST节点的不可变性(frozen=True或避免修改)
 - 新增语法特性时需同步更新：tokens.py, ast_nodes.py, lexer/, parser/, interpreter/, tests/
 - 测试覆盖率目标：每个新特性至少3个测试用例
+- 如果代码文件较大尝试拆分为多个文件或合并到一个目录下
+- 开发测试完成后请提交PR

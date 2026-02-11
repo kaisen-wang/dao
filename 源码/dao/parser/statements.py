@@ -35,6 +35,8 @@ from ..ast_nodes import (
     DestructureAssign,
     NullLiteral,
     ListLiteral,
+    ListPattern,
+    DictPattern,
     Identifier,
 )
 
@@ -394,8 +396,11 @@ class StatementParser:
             parent_name = parent_token.value
 
         implemented_traits = []
+
+        # 实现 clause can appear before or after newline/indent
+        # Check both current position and after newline/indent
         if self.match(TokenType.实现):
-            # 解析特征列表
+            # 解析特征列表 (出现在类声明同一行或下一行)
             while True:
                 trait_token = self.expect(TokenType.标识符, "'实现' 后需要特征名")
                 implemented_traits.append(trait_token.value)
@@ -431,7 +436,7 @@ class StatementParser:
 
     def parse_class_body(self) -> list[Statement]:
         """解析类体（缩进块，包含构造函数和方法）"""
-        self.expect(TokenType.缩进, "类型体需要缩进")
+        self.expect(TokenType.缩进, "类型类体需要缩进")
         statements = []
 
         while self.current.type not in (TokenType.回退, TokenType.文件结束):
@@ -448,6 +453,17 @@ class StatementParser:
             if self.current.type == TokenType.静态:
                 is_static = True
                 self.advance()
+
+            # 跳过实现语句（在类体中实现特征时）
+            if self.current.type == TokenType.实现:
+                self.advance()
+                while self.current.type == TokenType.标识符:
+                    self.advance()
+                    if not self.match(TokenType.逗号):
+                        break
+                # Skip any following newlines/indents/dedents before next statement
+                self.skip_newlines()
+                continue
 
             if self.current.type == TokenType.初始化:
                 # 构造函数：初始化(参数) ...
@@ -523,14 +539,23 @@ class StatementParser:
             self.advance()
             pattern = NullLiteral(line=line, column=col)
         else:
-            pattern = self.parse_expression()
+            # 检查是否是列表模式 [...]
+            if self.current.type == TokenType.左方括号:
+                pattern = self.parse_list_pattern()
+            # 检查是否是字典模式 {...}
+            elif self.current.type == TokenType.左花括号:
+                pattern = self.parse_dict_pattern()
+            else:
+                pattern = self.parse_expression()
 
         # 守卫条件
         guard = None
         if self.match(TokenType.当):
             guard = self.parse_expression()
 
-        self.expect(TokenType.冒号, "匹配分支需要 ':'")
+        # 冒号是可选的，如果有换行+缩进
+        if self.current.type != TokenType.换行 and self.current.type != TokenType.缩进:
+            self.expect(TokenType.冒号, "匹配分支需要 ':'")
         self.skip_newlines()
 
         # 单行或多行体

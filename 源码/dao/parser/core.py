@@ -89,6 +89,19 @@ class Parser(StatementParser, ExpressionParser):
         """跳过所有换行Token"""
         while self.current.type == TokenType.换行:
             self.advance()
+        # Also skip any INDENT tokens after newlines (e.g., after implements clause, or from empty lines)
+        while self.current.type == TokenType.缩进:
+            self.advance()
+            # Skip any newlines that followed the INDENT (for consecutive empty lines)
+            while self.current.type == TokenType.换行:
+                self.advance()
+        # Also skip any INDENT tokens after newlines (e.g., after implements clause, or from empty lines)
+        # Keep skipping INDENTs as long as they appear (empty lines at same indent level)
+        while self.current.type == TokenType.缩进:
+            self.advance()
+            # Skip any newlines that followed the INDENT (e.g., from empty lines)
+            while self.current.type == TokenType.换行:
+                self.advance()
 
     def _error(self, message: str) -> 语法错误:
         return 语法错误(message, self.current.line, self.current.column, self.source)
@@ -119,6 +132,13 @@ class Parser(StatementParser, ExpressionParser):
         self.expect(TokenType.缩进, "期望缩进块")
         statements = []
         while self.current.type not in (TokenType.回退, TokenType.文件结束):
+            self.skip_newlines()
+            # Also skip any INDENT tokens (caused by empty lines at same indent level)
+            while self.current.type == TokenType.缩进:
+                self.advance()
+                self.skip_newlines()
+            if self.current.type in (TokenType.回退, TokenType.文件结束):
+                break
             statements.append(self.parse_statement())
         self.expect(TokenType.回退, "期望回退")
         return statements

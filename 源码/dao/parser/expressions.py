@@ -9,13 +9,27 @@
 from ..tokens import TokenType
 from ..ast_nodes import (
     Expression,
-    NumberLiteral, StringLiteral, BooleanLiteral, NullLiteral,
-    ListLiteral, DictLiteral,
-    Identifier, MemberAccess, IndexAccess,
-    BinaryOp, UnaryOp, CompareOp,
-    FunctionCall, LambdaExpr, PipeExpr,
-    SelfExpr, SuperExpr,
-    TemplateLiteral, ReturnStmt,
+    NumberLiteral,
+    StringLiteral,
+    BooleanLiteral,
+    NullLiteral,
+    ListLiteral,
+    DictLiteral,
+    Identifier,
+    MemberAccess,
+    IndexAccess,
+    BinaryOp,
+    UnaryOp,
+    CompareOp,
+    FunctionCall,
+    LambdaExpr,
+    PipeExpr,
+    SelfExpr,
+    SuperExpr,
+    TemplateLiteral,
+    ReturnStmt,
+    ListPattern,
+    DictPattern,
 )
 
 
@@ -39,8 +53,7 @@ class ExpressionParser:
         left = self.parse_or()
         while self.match(TokenType.管道):
             right = self.parse_or()
-            left = PipeExpr(left=left, right=right,
-                            line=left.line, column=left.column)
+            left = PipeExpr(left=left, right=right, line=left.line, column=left.column)
         return left
 
     # ========================
@@ -52,8 +65,13 @@ class ExpressionParser:
         left = self.parse_and()
         while self.match(TokenType.或者):
             right = self.parse_and()
-            left = BinaryOp(left=left, operator="或者", right=right,
-                            line=left.line, column=left.column)
+            left = BinaryOp(
+                left=left,
+                operator="或者",
+                right=right,
+                line=left.line,
+                column=left.column,
+            )
         return left
 
     def parse_and(self) -> Expression:
@@ -61,16 +79,25 @@ class ExpressionParser:
         left = self.parse_not()
         while self.match(TokenType.并且):
             right = self.parse_not()
-            left = BinaryOp(left=left, operator="并且", right=right,
-                            line=left.line, column=left.column)
+            left = BinaryOp(
+                left=left,
+                operator="并且",
+                right=right,
+                line=left.line,
+                column=left.column,
+            )
         return left
 
     def parse_not(self) -> Expression:
         """解析 不是 表达式"""
         if self.match(TokenType.不是):
             operand = self.parse_not()
-            return UnaryOp(operator="不是", operand=operand,
-                           line=operand.line, column=operand.column)
+            return UnaryOp(
+                operator="不是",
+                operand=operand,
+                line=operand.line,
+                column=operand.column,
+            )
         return self.parse_comparison()
 
     # ========================
@@ -82,10 +109,14 @@ class ExpressionParser:
         left = self.parse_addition()
 
         compare_ops = {
-            TokenType.等于, TokenType.不等于,
-            TokenType.大于, TokenType.小于,
-            TokenType.大于等于, TokenType.小于等于,
-            TokenType.在, TokenType.不在,
+            TokenType.等于,
+            TokenType.不等于,
+            TokenType.大于,
+            TokenType.小于,
+            TokenType.大于等于,
+            TokenType.小于等于,
+            TokenType.在,
+            TokenType.不在,
         }
 
         if self.current.type in compare_ops:
@@ -98,12 +129,20 @@ class ExpressionParser:
                 operands.append(right)
 
             if len(operators) == 1:
-                return BinaryOp(left=operands[0], operator=operators[0],
-                                right=operands[1],
-                                line=left.line, column=left.column)
+                return BinaryOp(
+                    left=operands[0],
+                    operator=operators[0],
+                    right=operands[1],
+                    line=left.line,
+                    column=left.column,
+                )
             else:
-                return CompareOp(operands=operands, operators=operators,
-                                 line=left.line, column=left.column)
+                return CompareOp(
+                    operands=operands,
+                    operators=operators,
+                    line=left.line,
+                    column=left.column,
+                )
 
         return left
 
@@ -117,8 +156,13 @@ class ExpressionParser:
         while self.current.type in (TokenType.加, TokenType.减):
             op = self.advance()
             right = self.parse_multiplication()
-            left = BinaryOp(left=left, operator=op.value, right=right,
-                            line=left.line, column=left.column)
+            left = BinaryOp(
+                left=left,
+                operator=op.value,
+                right=right,
+                line=left.line,
+                column=left.column,
+            )
         return left
 
     def parse_multiplication(self) -> Expression:
@@ -127,8 +171,13 @@ class ExpressionParser:
         while self.current.type in (TokenType.乘, TokenType.除, TokenType.取余):
             op = self.advance()
             right = self.parse_power()
-            left = BinaryOp(left=left, operator=op.value, right=right,
-                            line=left.line, column=left.column)
+            left = BinaryOp(
+                left=left,
+                operator=op.value,
+                right=right,
+                line=left.line,
+                column=left.column,
+            )
         return left
 
     def parse_power(self) -> Expression:
@@ -136,8 +185,13 @@ class ExpressionParser:
         base = self.parse_unary()
         if self.match(TokenType.幂):
             exponent = self.parse_power()  # 右结合：递归调用自身
-            return BinaryOp(left=base, operator="**", right=exponent,
-                            line=base.line, column=base.column)
+            return BinaryOp(
+                left=base,
+                operator="**",
+                right=exponent,
+                line=base.line,
+                column=base.column,
+            )
         return base
 
     # ========================
@@ -149,8 +203,9 @@ class ExpressionParser:
         if self.current.type == TokenType.减:
             op = self.advance()
             operand = self.parse_unary()
-            return UnaryOp(operator="-", operand=operand,
-                           line=op.line, column=op.column)
+            return UnaryOp(
+                operator="-", operand=operand, line=op.line, column=op.column
+            )
         return self.parse_call()
 
     # ========================
@@ -168,8 +223,10 @@ class ExpressionParser:
                 kwargs = {}
                 while self.current.type != TokenType.右括号:
                     # 检查命名参数
-                    if (self.current.type == TokenType.标识符 and
-                            self.peek().type == TokenType.赋值):
+                    if (
+                        self.current.type == TokenType.标识符
+                        and self.peek().type == TokenType.赋值
+                    ):
                         name = self.advance().value
                         self.advance()  # 消费 =
                         value = self.parse_expression()
@@ -180,22 +237,29 @@ class ExpressionParser:
                         break
                 self.expect(TokenType.右括号, "函数调用需要 ')'")
                 expr = FunctionCall(
-                    callee=expr, arguments=args, keyword_args=kwargs,
-                    line=expr.line, column=expr.column,
+                    callee=expr,
+                    arguments=args,
+                    keyword_args=kwargs,
+                    line=expr.line,
+                    column=expr.column,
                 )
             elif self.match(TokenType.点):
                 # 成员访问（接受标识符和部分关键字作为成员名）
                 member_name = self._expect_member_name()
                 expr = MemberAccess(
-                    object=expr, member=member_name,
-                    line=expr.line, column=expr.column,
+                    object=expr,
+                    member=member_name,
+                    line=expr.line,
+                    column=expr.column,
                 )
             elif self.match(TokenType.左方括号):
                 index = self.parse_expression()
                 self.expect(TokenType.右方括号, "索引访问需要 ']'")
                 expr = IndexAccess(
-                    object=expr, index=index,
-                    line=expr.line, column=expr.column,
+                    object=expr,
+                    index=index,
+                    line=expr.line,
+                    column=expr.column,
                 )
             else:
                 break
@@ -206,7 +270,9 @@ class ExpressionParser:
         """期望一个成员名（标识符或允许作为成员名的关键字）"""
         # 允许某些关键字作为成员名（如 父对象.初始化()）
         MEMBER_KEYWORDS = {
-            TokenType.初始化, TokenType.类型, TokenType.标识符,
+            TokenType.初始化,
+            TokenType.类型,
+            TokenType.标识符,
         }
         if self.current.type in MEMBER_KEYWORDS:
             return self.advance().value
@@ -223,12 +289,16 @@ class ExpressionParser:
         # 数值字面量
         if token.type == TokenType.数值:
             self.advance()
-            return NumberLiteral(value=token.value, line=token.line, column=token.column)
+            return NumberLiteral(
+                value=token.value, line=token.line, column=token.column
+            )
 
         # 字符串字面量
         if token.type == TokenType.文本:
             self.advance()
-            return StringLiteral(value=token.value, line=token.line, column=token.column)
+            return StringLiteral(
+                value=token.value, line=token.line, column=token.column
+            )
 
         # 模板字符串
         if token.type == TokenType.模板文本:
@@ -291,8 +361,8 @@ class ExpressionParser:
         """解析模板字符串：`你好 {名字}，{年龄}岁`"""
         token = self.advance()  # 消费 模板文本 Token
         data = token.value  # {'parts': [...], 'exprs': [...]}
-        parts = data['parts']
-        expr_strings = data['exprs']
+        parts = data["parts"]
+        expr_strings = data["exprs"]
 
         # 将每个表达式源码字符串解析为 AST 表达式
         # 延迟导入，避免循环引用
@@ -335,8 +405,10 @@ class ExpressionParser:
         body = self.parse_expression()
 
         return LambdaExpr(
-            params=params, body=body,
-            line=token.line, column=token.column,
+            params=params,
+            body=body,
+            line=token.line,
+            column=token.column,
         )
 
     # ========================
@@ -371,3 +443,54 @@ class ExpressionParser:
 
         self.expect(TokenType.右花括号, "字典需要 '}'")
         return DictLiteral(pairs=pairs, line=token.line, column=token.column)
+
+    # ========================
+    # 模式解析
+    # ========================
+
+    def parse_list_pattern(self) -> ListPattern:
+        """解析列表模式：[x, y, ...rest]"""
+        token = self.advance()  # 消费 [
+        elements = []
+        has_spread = False
+        spread_var = None
+
+        while self.current.type != TokenType.右方括号:
+            if self.match(TokenType.展开):
+                has_spread = True
+                spread_var = self.expect(TokenType.标识符, "展开操作符后需要变量名")
+                elements.append(
+                    Identifier(
+                        name=spread_var.value,
+                        line=spread_var.line,
+                        column=spread_var.column,
+                    )
+                )
+            else:
+                elements.append(self.parse_expression())
+            if not self.match(TokenType.逗号):
+                break
+
+        self.expect(TokenType.右方括号, "列表模式需要 ']'")
+        return ListPattern(
+            elements=elements,
+            has_spread=has_spread,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_dict_pattern(self) -> DictPattern:
+        """解析字典模式：{键: 变量}"""
+        token = self.advance()  # 消费 {
+        pairs = []
+
+        while self.current.type != TokenType.右花括号:
+            key = self.parse_expression()
+            self.expect(TokenType.冒号, "字典模式需要 ':'")
+            value = self.parse_expression()
+            pairs.append((key, value))
+            if not self.match(TokenType.逗号):
+                break
+
+        self.expect(TokenType.右花括号, "字典模式需要 '}'")
+        return DictPattern(pairs=pairs, line=token.line, column=token.column)
