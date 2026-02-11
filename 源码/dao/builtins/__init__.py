@@ -24,6 +24,7 @@ from .oop_types import (
     SuperProxy,
     DaoGenerator,
     DaoTrait,
+    DaoError,
 )
 from .functions import get_builtins
 from .hof import get_interpreter_builtins
@@ -40,6 +41,7 @@ __all__ = [
     "SuperProxy",
     "DaoGenerator",
     "DaoTrait",
+    "DaoError",
     "get_builtins",
     "get_interpreter_builtins",
 ]

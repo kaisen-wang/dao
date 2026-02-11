@@ -323,8 +323,15 @@ class ExpressionEvaluator:
         if isinstance(callee, BoundMethod):
             return self._call_method(callee.instance, callee.method, args, kwargs, expr)
 
+        # 检查是否是 DaoError 子类（自定义异常类型）
+        from ..builtins.oop_types import DaoError
+        if isinstance(callee, type) and issubclass(callee, DaoError):
+            # 调用错误类的构造函数创建异常实例
+            error = callee(*args)
+            raise error
+
         if not isinstance(callee, DaoCallable):
-             raise 类型错误(f"'{callee}' 不是一个可调用的函数",
+            raise 类型错误(f"'{callee}' 不是一个可调用的函数",
                 expr.line, expr.column, self.source)
 
         if isinstance(callee, BuiltinFunction):

@@ -291,30 +291,39 @@ class StatementExecutor:
         """执行尝试-捕获-最终"""
         try:
             return self._exec_block(stmt.try_body, env)
-        except 运行时错误 as e:
-            if stmt.catch_body:
-                catch_env = env.create_child()
-                if stmt.catch_var:
-                    catch_env.define(
-                        stmt.catch_var,
-                        {
-                            "信息": e.message,
-                            "行": e.line,
-                            "列": e.column,
-                        },
-                    )
-                return self._exec_block(stmt.catch_body, catch_env)
         except Exception as e:
+            # 类型化捕获：检查是否指定了错误类型
             if stmt.catch_body:
-                catch_env = env.create_child()
-                if stmt.catch_var:
-                    catch_env.define(
-                        stmt.catch_var,
-                        {
-                            "信息": str(e),
-                        },
-                    )
-                return self._exec_block(stmt.catch_body, catch_env)
+                should_catch = False
+
+                # 如果指定了错误类型，检查异常是否匹配
+                if stmt.error_type:
+                    error_class = env.get(stmt.error_type)
+                    should_catch = isinstance(e, error_class)
+                else:
+                    # 没有指定错误类型，捕获所有异常
+                    should_catch = True
+
+                if should_catch:
+                    catch_env = env.create_child()
+                    if stmt.catch_var:
+                        # 对于 DaoError 及其子类，使用异常对象本身
+                        if isinstance(e, DaoError):
+                            catch_env.define(stmt.catch_var, e)
+                        else:
+                            # 对于 Python 异常，创建错误信息字典
+                            catch_env.define(
+                                stmt.catch_var,
+                                {
+                                    "信息": str(e),
+                                    "行": getattr(e, 'line', 0),
+                                    "列": getattr(e, 'column', 0),
+                                },
+                            )
+                    return self._exec_block(stmt.catch_body, catch_env)
+                else:
+                    # 不匹配的异常类型，重新抛出
+                    raise
         finally:
             if stmt.finally_body:
                 self._exec_block(stmt.finally_body, env)
@@ -324,7 +333,12 @@ class StatementExecutor:
         value = self.eval_expression(stmt.expression, env)
         if isinstance(value, str):
             raise 运行时错误(value, stmt.line, stmt.column, self.source)
-        raise 运行时错误(str(value, 0, 0, self.source), stmt.line, stmt.column)
+        # 检查是否是 DaoError 子类的实例
+        from ..builtins.oop_types import DaoError
+        if isinstance(value, DaoError):
+            raise value
+        else:
+            raise 运行时错误(str(value), stmt.line, stmt.column, self.source)
 
     def exec_assert(self, stmt: AssertStmt, env: Environment) -> None:
         """执行断言语句"""
@@ -372,15 +386,25 @@ class StatementExecutor:
     def exec_class_decl(self, stmt: ClassDecl, env: Environment) -> None:
         """执行类型声明"""
         parent = None
+        is_error_class = False
         if stmt.parent_name:
-            parent = env.get(stmt.parent_name)
-            if not isinstance(parent, DaoClass):
-                raise 类型错误(
-                    f"'{stmt.parent_name}' 不是一个类型，无法继承",
-                    stmt.line,
-                    stmt.column,
-                    self.source,
-                )
+            # 检查是否继承自 DaoError（自定义异常类型）
+            if stmt.parent_name == "错误":
+                is_error_class = True
+                from ..builtins.oop_types import DaoError
+                parent = DaoError
+            else:
+                parent = env.get(stmt.parent_name)
+                # 检查是否继承自 DaoError（自定义异常类型）
+                if isinstance(parent, DaoError):
+                    is_error_class = True
+                elif not isinstance(parent, DaoClass):
+                    raise 类型错误(
+                        f"'{stmt.parent_name}' 不是一个类型，无法继承",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
 
         methods = {}
         static_methods = {}
@@ -429,15 +453,26 @@ class StatementExecutor:
 
             implemented_traits.append(trait_obj)
 
-        klass = DaoClass(
-            name=stmt.name,
-            parent=parent,
-            methods=methods,
-            static_methods=static_methods,
-            private_names=private_names,
-            implemented_traits=implemented_traits,
-        )
-        env.define(stmt.name, klass)
+        # 如果是错误类，创建 DaoError 的子类
+        if is_error_class:
+            # 创建自定义错误类（继承自 DaoError）
+            class CustomError(DaoError):
+                def __init__(self, message: str = "发生错误"):
+                    super().__init__(message)
+
+            CustomError.__name__ = stmt.name
+            CustomError.类名 = stmt.name
+            env.define(stmt.name, CustomError)
+        else:
+            klass = DaoClass(
+                name=stmt.name,
+                parent=parent,
+                methods=methods,
+                static_methods=static_methods,
+                private_names=private_names,
+                implemented_traits=implemented_traits,
+            )
+            env.define(stmt.name, klass)
 
     # ========================
     # 模式匹配

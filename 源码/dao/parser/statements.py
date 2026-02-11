@@ -324,8 +324,13 @@ class StatementParser:
 
         self.skip_newlines()
         if self.match(TokenType.捕获):
+            error_type = None
+            # 检查是否是类型化捕获：捕获 异常: 错误类型
             if self.current.type == TokenType.标识符:
                 catch_var = self.advance().value
+                if self.match(TokenType.冒号):
+                    error_type_token = self.expect(TokenType.标识符, "期望错误类型名称")
+                    error_type = error_type_token.value
             self.expect(TokenType.换行, "'捕获' 后需要换行")
             catch_body = self.parse_block()
 
@@ -338,6 +343,7 @@ class StatementParser:
             try_body=try_body,
             catch_var=catch_var,
             catch_body=catch_body,
+            error_type=error_type,
             finally_body=finally_body,
             line=token.line,
             column=token.column,
@@ -406,6 +412,11 @@ class StatementParser:
         self.expect(TokenType.换行, "类型声明后需要换行")
 
         # 实现 clause can appear after newline/indent (in class body)
+        # 检查是否是错误类型（继承自 DaoError）
+        is_error_class = False
+        if parent_name == "错误":
+            is_error_class = True
+
         # Skip INDENT if present and check for '实现'
         has_indent = self.match(TokenType.缩进)
         if has_indent:
@@ -419,11 +430,15 @@ class StatementParser:
                         break
                 # Skip newline after implements clause
                 self.skip_newlines()
-            else:
-                # No implements clause, so we need to put back the indent
+            elif not is_error_class:
+                # 错误类型不需要类体，如果不是错误类型则放回缩进
                 self.pos -= 1  # Undo the match(TokenType.缩进)
 
-        body = self.parse_class_body(indent_consumed=has_indent)
+        # 错误类型不需要解析类体
+        if is_error_class:
+            body = []
+        else:
+            body = self.parse_class_body(indent_consumed=has_indent)
 
         return ClassDecl(
             name=name_token.value,
@@ -432,6 +447,7 @@ class StatementParser:
             body=body,
             line=token.line,
             column=token.column,
+            is_error_class=is_error_class,
         )
 
     def parse_trait_decl(self) -> TraitDecl:

@@ -300,6 +300,7 @@ class TryStmt(Statement):
     try_body: list[Statement] = field(default_factory=list)
     catch_var: str | None = None
     catch_body: list[Statement] = field(default_factory=list)
+    error_type: str | None = None  # 捕获的错误类型（类型化捕获）
     finally_body: list[Statement] = field(default_factory=list)
 
 
@@ -347,6 +348,7 @@ class ClassDecl(Statement):
     parent_name: str | None = None
     implemented_traits: list[str] = field(default_factory=list)
     body: list[Statement] = field(default_factory=list)
+    is_error_class: bool = False  # 是否是错误类（继承自 错误）
 
 
 @dataclass
