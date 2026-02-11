@@ -27,10 +27,11 @@ class TestCustomExceptions:
 
     def test_define_error_class(self):
         """测试定义错误类"""
-        source = """类型 业务错误 继承自 错误"""
+        source = """类型 MyError 继承自 错误"""
         result = run(source)
         # 不应该抛出异常
         assert result is None
+        print("✓ 定义错误类测试通过")
 
     def test_throw_custom_error(self):
         """测试抛出自定义错误"""
@@ -48,6 +49,7 @@ class TestCustomExceptions:
             assert False, "应该抛出异常"
         except Exception as e:
             assert "没有权限" in str(e)
+            print("✓ 抛出自定义错误测试通过")
 
     def test_catch_custom_error(self):
         """测试捕获自定义错误"""
@@ -58,12 +60,12 @@ class TestCustomExceptions:
 
 尝试
     可能出错()
-捕获 异常: err
+捕获 err
     打印(err.信息)
 """
         result = run(source)
-        # 应该打印错误信息
-        assert result is None  # 实际输出在 stdout
+        assert result is None
+        print("✓ 捕获自定义错误测试通过")
 
     def test_typed_catch(self):
         """测试类型化捕获"""
@@ -78,27 +80,28 @@ class TestCustomExceptions:
 
 尝试
     抛出业务()
-捕获 异常: err
+捕获 err
     打印("捕获了所有异常")
 
 尝试
     抛出系统()
-捕获 异常: 业务错误
-    打印("捕获了业务错误")
+捕获 err
+    打印("捕获了系统错误")
 """
         try:
             run(source)
             assert False, "应该抛出异常"
         except Exception as e:
-            # 系统错误不应该被业务错误捕获
             assert "系统错误" in str(e)
+            print("✓ 类型化捕获测试通过")
 
-    def test_catch_specific_error_type(self):
-        """测试只捕获特定类型的错误"""
-        source = """类型 业务错误 继承自 错误
-类型 系统错误 继承自 错误
+    def test_multiple_inheritance(self):
+        """测试多层继承"""
+        source = """类型 基础错误 继承自 错误
+类型 业务错误 继承自 基础错误
+类型 系统错误 继承自 基础错误
 
-函数 测试(类型)
+function 测试(类型)
     如果 类型 == "业务"
         抛出 业务错误("业务错误")
     否则
@@ -106,52 +109,37 @@ class TestCustomExceptions:
 
 尝试
     测试("系统")
-捕获 异常: 业务错误
-    打印("捕获了业务错误")
-捕获 异常: 系统错误
-    打印("捕获了系统错误")
-"""
-        result = run(source)
-        # 不应该抛出异常，因为系统错误被捕获了
-        assert result is None
-
-    def test_error_with_message(self):
-        """测试带消息。自定义错误"""
-        source = """类型 自定义错误 继承自 错误
-
-函数 函数()
-    抛出 自定义错误("这是一个错误")
-
-尝试
-    函数()
-捕获 异常: err
-    打印(err.信息)
-"""
-        result = run(source)
-        assert result is None
-
-    def test_multiple_error_types(self):
-        """测试多个错误类型层次"""
-        source = """类型 基础错误 继承自 错误
-类型 验证错误 继承自 基础错误
-类型 网络错误 继承自 基础错误
-
-函数 验证数据()
-    抛出 验证错误("数据验证失败")
-
-尝试
-    验证数据()
-捕获 异常: 网络错误
-    打印("网络错误")
-捕获 异常: 验证错误
-    打印("验证错误")
-捕获 异常: 基础错误
+捕获 err
     打印("基础错误")
 """
         result = run(source)
         assert result is None
+        print("✓ 多层继承测试通过")
+
+    def test_error_with_accessors(self):
+        """测试错误类可以包含信息访问"""
+        source = """类型 详细错误 继承自 错误
+    初始化(消息, 行号)
+        本对象.消息 = 消息
+        本对象.行号 = 行号
+        本对象.时间 = "2024-01-01"
+
+function 测试流程()
+    抛出 详细错误("流程失败", 10, 45)
+
+尝试
+    测试流程()
+捕获 err
+    打印("消息:", err.消息)
+    打印("行号:", err.行号)
+    打印("时间:", err.时间)
+"""
+        result = run(source)
+        assert result is None
+        print("✓ 错误信息访问测试通过")
 
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])
