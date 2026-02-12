@@ -56,6 +56,25 @@ dao/
     ├── functions.py    # 基础内置函数
     ├── oop_types.py    # OOP类型实现
     └── hof.py          # 高阶函数
+
+### Parser模块化结构
+```
+dao/parser/
+├── statements.py          # 主入口 (89行) - 语句解析器组合类
+├── modules/              # 语句解析模块目录
+│   ├── __init__.py      # 模块初始化
+│   ├── variable_decl.py  # 变量/常量声明
+│   ├── function_decl.py  # 函数/方法/运算符/属性
+│   ├── control_flow.py   # if/while/for/break/continue
+│   ├── exception_handling.py # try/catch/throw/assert
+│   ├── oop_decl.py     # 类/枚举/抽象/特征
+│   ├── pattern_matching.py  # 模式匹配
+│   ├── module_system.py # 导入/导出
+│   ├── expressions.py   # 表达式/赋值
+│   └── logic_programming.py # 逻辑编程
+```
+
+设计模式：使用Python混入类(Mixin)，每个模块定义解析方法，`StatementParser`通过多重继承组合所有功能。
 ```
 
 ### 导入风格
