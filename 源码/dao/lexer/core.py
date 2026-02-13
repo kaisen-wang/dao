@@ -6,8 +6,8 @@ Lexer 类：组合 LexerReaders 混入，
 提供初始化、字符流基础设施、主循环 tokenize() 以及缩进处理逻辑。
 """
 
-from ..tokens import Token, TokenType, KEYWORDS
 from ..errors import 词法错误
+from ..tokens import KEYWORDS, Token, TokenType
 from .readers import LexerReaders
 
 
@@ -136,9 +136,9 @@ class Lexer(LexerReaders):
                     continue
 
                 self._at_line_start = False
-                # 在括号内部时不处理缩进（支持多行表达式）
-                if self._bracket_depth == 0:
-                    self._handle_indentation(indent_level)
+                # 在任何情况下都处理缩进
+                # 这对于选择语句等需要在 { ... } 内部有缩进块的结构是必要的
+                self._handle_indentation(indent_level)
 
             char = self.current_char
 
@@ -189,7 +189,12 @@ class Lexer(LexerReaders):
 
             # 标识符 / 关键字
             if self._is_identifier_start(char):
-                self.tokens.append(self._read_identifier())
+                token = self._read_identifier()
+                if isinstance(token, tuple):
+                    # 处理返回多个 token 的情况（如 异步函数）
+                    self.tokens.extend(token)
+                else:
+                    self.tokens.append(token)
                 continue
 
             # 逻辑变量前缀 ?

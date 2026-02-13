@@ -294,9 +294,29 @@ class ExpressionParser:
         if token.type == TokenType.竞速:
             return self.parse_await_race_expr()
         if token.type == TokenType.通道:
-            return self.parse_channel_expr()
+            # 只有后面跟着左括号时才是通道表达式
+            if self.peek().type == TokenType.左括号:
+                return self.parse_channel_expr()
+            else:
+                # 否则，'通道' 应该被视为标识符
+                self.advance()
+                return Identifier(name="通道", line=token.line, column=token.column)
         if token.type == TokenType.接收:
-            return self.parse_receive_expr()
+            # 只有后面直接跟通道表达式且不是左括号时才是接收表达式
+            # 如果是左括号，说明是函数调用：接收(...)
+            if (
+                self.peek().type in (TokenType.标识符, TokenType.通道)
+                and self.peek(2).type != TokenType.左括号
+            ):
+                return self.parse_receive_expr()
+            else:
+                # 否则，'接收' 应该被视为标识符
+                self.advance()
+                return Identifier(name="接收", line=token.line, column=token.column)
+        if token.type == TokenType.发送:
+            # '发送' 作为函数名时应被视为标识符
+            self.advance()
+            return Identifier(name="发送", line=token.line, column=token.column)
 
         # 数值字面量
         if token.type == TokenType.数值:

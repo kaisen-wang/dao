@@ -208,9 +208,54 @@ def _builtin_原子布尔(initial_value=False):
     return AtomicBool(initial_value)
 
 
+def _builtin_开始事件循环():
+    """开始事件循环"""
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    return loop
+
+
+def _builtin_运行异步(func):
+    """运行异步函数"""
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+
+    # 使用完整的解释器实例，因为它继承了所有需要的功能
+    from dao.interpreter.core import Interpreter
+
+    interpreter = Interpreter()
+
+    if func is None:
+        return None
+    elif hasattr(func, "is_async") and func.is_async:
+        # 如果是 DaoAsyncFunction 类型
+        coro = interpreter.eval_async_function_call(func, [], {})
+        return loop.run_until_complete(coro)
+    elif hasattr(func, "__call__"):
+        # 如果是可调用对象，先调用获取 coroutine
+        result = func()
+        if hasattr(result, "__await__"):
+            return loop.run_until_complete(result)
+        return result
+    elif hasattr(func, "__await__"):
+        # 已经是 coroutine
+        return loop.run_until_complete(func)
+    else:
+        raise 类型错误(f"运行异步期望接收异步函数或协程，但收到: {type(func).__name__}")
+
+
 # ========================================================
 # 注册表
 # ========================================================
+
+
+def _builtin_睡眠(秒数):
+    """睡眠指定秒数"""
+    import time
+
+    time.sleep(秒数)
 
 
 def get_builtins() -> dict[str, BuiltinFunction]:
@@ -238,4 +283,7 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         "互斥锁": BuiltinFunction("互斥锁", _builtin_互斥锁, 0),
         "原子整数": BuiltinFunction("原子整数", _builtin_原子整数, 1),
         "原子布尔": BuiltinFunction("原子布尔", _builtin_原子布尔, 1),
+        "开始事件循环": BuiltinFunction("开始事件循环", _builtin_开始事件循环, 0),
+        "运行异步": BuiltinFunction("运行异步", _builtin_运行异步, 1),
+        "睡眠": BuiltinFunction("睡眠", _builtin_睡眠, 1),
     }

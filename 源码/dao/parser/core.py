@@ -6,11 +6,11 @@ Parser 类：组合 StatementParser 和 ExpressionParser 混入，
 提供初始化、基础设施方法、顶层解析入口和代码块解析。
 """
 
-from ..tokens import Token, TokenType
 from ..ast_nodes import Program, Statement
 from ..errors import 语法错误
-from .statements import StatementParser
+from ..tokens import Token, TokenType
 from .expressions import ExpressionParser
+from .statements import StatementParser
 
 
 class Parser(StatementParser, ExpressionParser):
@@ -95,12 +95,31 @@ class Parser(StatementParser, ExpressionParser):
             TokenType.真,
             TokenType.假,
             TokenType.空,
+            # 并发编程相关的关键字
+            TokenType.异步,
+            TokenType.等待,
+            TokenType.全部,
+            TokenType.竞速,
+            TokenType.并行,
+            TokenType.通道,
+            TokenType.发送,
+            TokenType.接收,
+            TokenType.选择,
+            TokenType.超时,
+            TokenType.互斥锁,
+            TokenType.同步,
         )
 
-        if self.current.type == TokenType.标识符 or self.current.type in allowed_keywords:
+        if (
+            self.current.type == TokenType.标识符
+            or self.current.type in allowed_keywords
+        ):
             return self.advance()
 
-        msg = message or f"期望标识符或关键字，但得到 {self.current.type.name} ('{self.current.value}')"
+        msg = (
+            message
+            or f"期望标识符或关键字，但得到 {self.current.type.name} ('{self.current.value}')"
+        )
         raise 语法错误(msg, self.current.line, self.current.column, self.source)
 
     def skip_newlines(self):

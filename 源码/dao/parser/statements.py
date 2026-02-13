@@ -87,12 +87,24 @@ class StatementParser(
             case TokenType.导出:
                 return self.parse_export_stmt()
             case TokenType.从:
-                self.advance()  # 消费 "从"
-                return self.parse_import_stmt(is_from_import=True)
+                # 只有在特定上下文中才是导入语句的 "从"，否则是 for 循环的 "从"
+                # 检查前面是否有导入或导出关键字，或者后面是否紧跟模块名
+                if self.peek().type == TokenType.标识符:
+                    self.advance()  # 消费 "从"
+                    return self.parse_import_stmt(is_from_import=True)
+                else:
+                    # 否则，这是 for 循环的一部分
+                    return self.parse_for_stmt()
             case TokenType.并行:
                 return self.parse_parallel_stmt()
             case TokenType.发送:
-                return self.parse_send_stmt()
+                # 只有后面不是左括号时才是发送语句
+                # 如果是左括号，说明是函数调用：发送(...)
+                if self.peek().type != TokenType.左括号:
+                    return self.parse_send_stmt()
+                else:
+                    # 否则，'发送' 应该被视为函数调用的一部分
+                    return self.parse_expression_or_assignment()
             case TokenType.选择:
                 return self.parse_select_stmt()
             case TokenType.同步:

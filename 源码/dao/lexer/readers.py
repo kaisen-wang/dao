@@ -13,8 +13,8 @@
 通过 Python mixin 模式，在运行时与 Lexer 组合。
 """
 
-from ..tokens import Token, TokenType, KEYWORDS
 from ..errors import 词法错误
+from ..tokens import KEYWORDS, Token, TokenType
 
 
 class LexerReaders:
@@ -27,29 +27,38 @@ class LexerReaders:
     def _skip_line_comment(self):
         """跳过单行注释 (// 或 注：)"""
         while self.current_char is not None and self.current_char != "\n":
-            self.advance()
+            if self.current_char == "/" and self.peek() == "/":
+                self.advance()
+                self.advance()
+                while self.current_char is not None and self.current_char != "\n":
+                    self.advance()
+            elif self.current_char == "注" and self.peek() == "：":
+                self.advance()
+                self.advance()
+                while self.current_char is not None and self.current_char != "\n":
+                    self.advance()
+            else:
+                break
 
     def _skip_block_comment(self):
         """跳过多行注释 /* ... */，支持嵌套"""
-        depth = 1
-        start_line = self.line
-        self.advance()  # 跳过 *
-        self.advance()  # 跳过下一字符
-
-        while self.current_char is not None and depth > 0:
-            if self.current_char == "/" and self.peek() == "*":
-                depth += 1
-                self.advance()
-                self.advance()
-            elif self.current_char == "*" and self.peek() == "/":
-                depth -= 1
-                self.advance()
-                self.advance()
-            else:
-                self.advance()
-
-        if depth > 0:
-            raise self._error(f"未闭合的多行注释，从第 {start_line} 行开始")
+        if self.current_char == "/" and self.peek() == "*":
+            depth = 1
+            self.advance()
+            self.advance()
+            while depth > 0:
+                if self.current_char is None:
+                    raise 词法错误("未闭合的多行注释")
+                elif self.current_char == "/" and self.peek() == "*":
+                    depth += 1
+                    self.advance()
+                    self.advance()
+                elif self.current_char == "*" and self.peek() == "/":
+                    depth -= 1
+                    self.advance()
+                    self.advance()
+                else:
+                    self.advance()
 
     # ========================
     # 字符串
@@ -86,12 +95,12 @@ class LexerReaders:
                     result.append(escape_map[self.current_char])
                     self.advance()
                 else:
-                    raise self._error(f"未知的转义序列: \\{self.current_char}")
+                    raise 词法错误(f"未知的转义序列: \\{self.current_char}")
             else:
                 result.append(self.advance())
 
         if self.current_char is None:
-            raise self._error(f"未闭合的字符串，从第 {start_line} 行开始")
+            raise 词法错误(f"未闭合的字符串，从第 {start_line} 行开始")
 
         self.advance()  # 跳过结束引号
         return self._make_token(TokenType.文本, "".join(result), start_line, start_col)
@@ -143,7 +152,7 @@ class LexerReaders:
                         expr_chars.append(self.advance())
 
                 if self.current_char != "}":
-                    raise self._error("模板字符串中的表达式未闭合")
+                    raise 词法错误("模板字符串中的表达式未闭合")
                 self.advance()  # 跳过 }
                 expr_strings.append("".join(expr_chars))
 
@@ -163,12 +172,12 @@ class LexerReaders:
                     current_part.append(escape_map[self.current_char])
                     self.advance()
                 else:
-                    raise self._error(f"未知的转义序列: \\{self.current_char}")
+                    raise 词法错误(f"未知的转义序列: \\{self.current_char}")
             else:
                 current_part.append(self.advance())
 
         if self.current_char is None:
-            raise self._error(f"未闭合的模板字符串，从第 {start_line} 行开始")
+            raise 词法错误(f"未闭合的模板字符串，从第 {start_line} 行开始")
 
         self.advance()  # 跳过结束的 `
         parts.append("".join(current_part))  # 添加最后一个字符串片段
@@ -219,6 +228,19 @@ class LexerReaders:
     # 标识符与关键字
     # ========================
 
+    def _is_identifier_start(self, char: str) -> bool:
+        """检查字符是否可以作为标识符的开头"""
+        return char.isalpha() or char == "_" or ("\u4e00" <= char <= "\u9fff")
+
+    def _is_identifier_char(self, char: str) -> bool:
+        """检查字符是否可以作为标识符的一部分"""
+        return (
+            char.isalpha()
+            or char.isdigit()
+            or char == "_"
+            or ("\u4e00" <= char <= "\u9fff")
+        )
+
     def _read_identifier(self) -> Token:
         """读取标识符或关键字"""
         start_line = self.line
@@ -231,6 +253,47 @@ class LexerReaders:
             result.append(self.advance())
 
         word = "".join(result)
+
+        # 特殊处理：异步函数（检查是否是异步函数声明）
+        if word == "异步函数":
+            return (
+                self._make_token(TokenType.异步, "异步", start_line, start_col),
+                self._make_token(TokenType.函数, "函数", start_line, start_col + 2),
+            )
+        elif word == "运行异步":
+            # 运行异步是内置函数名，作为标识符处理
+            return self._make_token(TokenType.标识符, word, start_line, start_col)
+        elif word == "异步":
+            # 向前看是否紧跟"函数"
+            saved_pos = self.pos
+            saved_line = self.line
+            saved_col = self.column
+
+            # 跳过空格
+            while self.current_char == " ":
+                self.advance()
+
+            if self.current_char is not None and self._is_identifier_start(
+                self.current_char
+            ):
+                next_chars = []
+                while self.current_char is not None and self._is_identifier_char(
+                    self.current_char
+                ):
+                    next_chars.append(self.advance())
+                next_word = "".join(next_chars)
+                if next_word == "函数":
+                    return (
+                        self._make_token(TokenType.异步, "异步", start_line, start_col),
+                        self._make_token(
+                            TokenType.函数, "函数", self.line, self.column
+                        ),
+                    )
+
+            # 回退
+            self.pos = saved_pos
+            self.line = saved_line
+            self.column = saved_col
 
         # 特殊处理：否则如果（两个词组合的关键字）
         if word == "否则":
@@ -266,29 +329,17 @@ class LexerReaders:
         token_type = KEYWORDS.get(word, TokenType.标识符)
         return self._make_token(token_type, word, start_line, start_col)
 
-    def _is_identifier_start(self, char: str | None) -> bool:
-        """判断字符是否可以作为标识符的开头"""
-        if char is None:
-            return False
-        return char.isalpha() or char == "_" or "\u4e00" <= char <= "\u9fff"
-
-    def _is_identifier_char(self, char: str | None) -> bool:
-        """判断字符是否可以作为标识符的一部分"""
-        if char is None:
-            return False
-        return self._is_identifier_start(char) or char.isdigit()
-
     # ========================
     # 运算符与标点
     # ========================
 
-    def _read_operator_or_punctuation(self) -> Token | None:
+    def _read_operator_or_punctuation(self) -> Token:
         """读取运算符或标点符号"""
         char = self.current_char
         line, col = self.line, self.column
 
         if char is None:
-            return None
+            raise 词法错误("未预期的文件结束")
 
         # 双字符运算符（先检查）
         two_chars = char + (self.peek() or "")
@@ -384,14 +435,14 @@ class LexerReaders:
         start_line = self.line
         start_col = self.column
         self.advance()  # 跳过 ?
-        
+
         result = ["?"]
-        
+
         # 读取变量名（标识符）
         while self.current_char is not None and self._is_identifier_char(
             self.current_char
         ):
             result.append(self.advance())
-        
+
         word = "".join(result)
         return self._make_token(TokenType.标识符, word, start_line, start_col)

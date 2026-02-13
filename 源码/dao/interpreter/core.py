@@ -98,6 +98,12 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         """
         kwargs = kwargs or {}
 
+    def _dispatch_statement(self, stmt, env):
+        """
+        调度语句执行（在并行线程中使用）
+        """
+        return self.exec_statement(stmt, env)
+
         if isinstance(func, BuiltinFunction):
             return func.call(args, kwargs)
 

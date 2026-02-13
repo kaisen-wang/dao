@@ -89,36 +89,51 @@ class Channel:
     def __init__(self):
         self.queue = Queue(maxsize=0)  # maxsize=0 表示无缓冲
         self.lock = Lock()
-        self.send_ready = Lock()
-        self.recv_ready = Lock()
+        self.send_ready = False
+        self.recv_ready = False
+        self.send_condition = asyncio.Condition()
+        self.recv_condition = asyncio.Condition()
 
     def send(self, value):
         """发送数据（阻塞直到被接收）"""
-        self.send_ready.acquire()
-        try:
+        with self.lock:
+            # 等待接收者准备好
+            while not self.recv_ready:
+                time.sleep(0.001)
+
             self.queue.put(value)
-            self.recv_ready.release()  # 通知接收者
+            self.recv_ready = False  # 重置接收者状态
+            # 通知接收者
+            time.sleep(0.001)
+
             # 等待接收者确认
             while not self.queue.empty():
                 time.sleep(0.001)
-        finally:
-            self.send_ready.release()
+
+            self.send_ready = False
 
     def receive(self):
         """接收数据（阻塞直到有数据）"""
-        self.recv_ready.acquire()
-        try:
+        with self.lock:
+            self.recv_ready = True
+
+            # 等待发送者发送数据
             while self.queue.empty():
-                time.sleep(0.001)  # 轮询等待
+                time.sleep(0.001)
+
             value = self.queue.get()
-            self.send_ready.release()  # 通知发送者
+
+            if value is None:
+                self.recv_ready = False
+                raise StopIteration("通道已关闭")
+
             return value
-        finally:
-            self.recv_ready.release()
 
     def close(self):
         """关闭通道"""
-        self.queue.put(None)  # 发送结束信号
+        with self.lock:
+            # 发送结束信号
+            self.queue.put(None)
 
 
 class BufferedChannel(Channel):
@@ -247,16 +262,6 @@ class ConcurrencyEvaluator:
 
     def __init__(self):
         # 解决循环导入问题 - 使用绝对路径导入
-        from dao.interpreter.expressions import ExpressionEvaluator
-        from dao.interpreter.statements import StatementExecutor
-
-        # 混入其他解释器类的功能
-        self.__class__.__bases__ = (
-            StatementExecutor,
-            ExpressionEvaluator,
-            ConcurrencyEvaluator,
-        )
-
         self.async_context = AsyncContext()
 
     # ========================
@@ -302,7 +307,7 @@ class ConcurrencyEvaluator:
             await getattr(self, handler_name)(stmt, env)
         else:
             # 调用同步版本的处理程序
-            self._dispatch_statement(stmt, env)
+            self.exec_statement(stmt, env)
 
     # ========================
     # 等待表达式

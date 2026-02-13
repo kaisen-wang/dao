@@ -498,10 +498,9 @@ class ExpressionEvaluator:
     def eval_await_all(self, expr: AwaitAllExpr, env: Environment) -> object:
         """求值全部等待表达式"""
         tasks = [self.eval_expression(e, env) for e in expr.expressions]
-        from ..interpreter.concurrency import ConcurrencyEvaluator
 
-        concurrency_eval = ConcurrencyEvaluator()
-        return concurrency_eval.run_async(self._run_all(tasks))
+        # 返回 coroutine，让调用者来运行它
+        return self._run_all(tasks)
 
     async def _run_all(self, tasks):
         """运行所有任务并返回结果（内部辅助方法）"""
@@ -528,10 +527,9 @@ class ExpressionEvaluator:
     def eval_await_race(self, expr: AwaitRaceExpr, env: Environment) -> object:
         """求值竞速等待表达式"""
         tasks = [self.eval_expression(e, env) for e in expr.expressions]
-        from ..interpreter.concurrency import ConcurrencyEvaluator
 
-        concurrency_eval = ConcurrencyEvaluator()
-        return concurrency_eval.run_async(self._run_race(tasks))
+        # 返回 coroutine，让调用者来运行它
+        return self._run_race(tasks)
 
     async def _run_race(self, tasks):
         """运行所有任务，返回第一个完成的结果（内部辅助方法）"""
@@ -546,7 +544,14 @@ class ExpressionEvaluator:
                 coros.append(task)
             else:
                 coros.append(self._wrap_in_coroutine(task))
-        done, pending = await wait(coros, return_when=FIRST_COMPLETED)
+
+        # 明确地创建任务对象
+        task_objects = []
+        loop = asyncio.get_running_loop()
+        for coro in coros:
+            task_objects.append(loop.create_task(coro))
+
+        done, pending = await wait(task_objects, return_when=FIRST_COMPLETED)
         for task in pending:
             task.cancel()
         return next(iter(done)).result()
@@ -573,8 +578,17 @@ class ExpressionEvaluator:
     def _handle_await_result(self, result):
         """处理等待的结果"""
         if hasattr(result, "__await__"):
-            from ..interpreter.concurrency import ConcurrencyEvaluator
+            # 检查事件循环是否已经在运行
+            import asyncio
 
-            concurrency_eval = ConcurrencyEvaluator()
-            return concurrency_eval.run_async(result)
+            try:
+                loop = asyncio.get_running_loop()
+                # 事件循环正在运行，直接返回 coroutine，让调用者来等待
+                return result
+            except RuntimeError:
+                # 如果事件循环没有在运行，创建一个新的
+                from ..interpreter.concurrency import ConcurrencyEvaluator
+
+                concurrency_eval = ConcurrencyEvaluator()
+                return concurrency_eval.run_async(result)
         return result

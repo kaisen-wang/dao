@@ -207,71 +207,87 @@ class ConcurrencyParser:
         token = self.advance()  # 消费 选择
 
         self.expect(TokenType.左花括号, "选择语句需要 '{'")
-        self = self.expect(TokenType.换行, "选择语句 '{' 后需要换行")
-        self.expect(TokenType.缩进, "选择语句体需要缩进")
 
         cases = []
-        while self.current.type not in (TokenType.回退, TokenType.文件结束):
+
+        # 解析所有情况语句，直到找到右花括号
+        while (
+            self.current.type != TokenType.右花括号
+            and self.current.type != TokenType.文件结束
+        ):
             self.skip_newlines()
-            if self.current.type in (TokenType.回退, TokenType.文件结束):
-                break
 
-            self.expect(TokenType.情况, "选择分支需要 '情况'")
+            if self.current.type == TokenType.情况:
+                self.advance()  # 消费 情况
 
-            # 解析选择分支类型
-            case_type = None
-            channel = None
-            variable = None
-            timeout_value = None
+                case_type = None
+                channel = None
+                variable = None
+                timeout_value = None
 
-            if self.current.type == TokenType.接收:
-                # 接收情况：情况 接收 通道 as 变量
-                case_type = "receive"
+                if self.current.type == TokenType.接收:
+                    # 接收情况：情况 接收 通道 as 变量
+                    case_type = "receive"
 
-                self.advance()  # 消费 接收
-                channel = self.parse_expression()
+                    self.advance()  # 消费 接收
+                    channel = self.parse_expression()
 
-                # 可选的 as 子句
-                if self.match(TokenType.作为):
-                    var_token = self.expect(TokenType.标识符, "'as' 后需要变量名")
-                    variable = var_token.value
+                    # 可选的 as 子句
+                    if self.match(TokenType.作为):
+                        var_token = self.expect(TokenType.标识符, "'as' 后需要变量名")
+                        variable = var_token.value
 
-            elif self.current.type == TokenType.超时:
-                # 超时情况：情况 超时(秒数)
-                case_type = "timeout"
+                elif self.current.type == TokenType.超时:
+                    # 超时情况：情况 超时(秒数)
+                    case_type = "timeout"
 
-                self.advance()  # 消费 超时
-                self.expect(TokenType.左括号, "超时() 需要 '('")
-                timeout_value = self.parse_expression()
-                self.expect(TokenType.右括号, "超时() 需要 ')'")
+                    self.advance()  # 消费 超时
+                    self.expect(TokenType.左括号, "超时() 需要 '('")
+                    timeout_value = self.parse_expression()
+                    self.expect(TokenType.右括号, "超时() 需要 ')'")
+
+                else:
+                    raise 语法错误(
+                        f"选择分支必须是 '接收' 或 '超时'，但得到 {self.current.type.name}",
+                        self.current.line,
+                        self.current.column,
+                        self.source,
+                    )
+
+                # 解析分支体
+                self.expect(TokenType.冒号, "选择分支需要 ':'")
+                # 可选的换行，接受缩进或直接解析
+                if not self.match(TokenType.换行):
+                    self.skip_newlines()
+
+                # 如果没有 INDENT token，尝试解析单个语句作为块
+                # 这将允许选择语句在没有明确缩进的情况下工作
+                if self.current.type == TokenType.缩进:
+                    body = self.parse_block()
+                else:
+                    # 解析单个语句作为块
+                    body = []
+                    stmt = self.parse_statement()
+                    if stmt:
+                        body.append(stmt)
+
+                # 创建 SelectCase 节点
+                select_case = SelectCase(
+                    type=case_type,
+                    channel=channel,
+                    variable=variable,
+                    timeout_value=timeout_value,
+                    body=body,
+                    line=token.line,
+                    column=token.column,
+                )
+                cases.append(select_case)
 
             else:
-                raise 语法错误(
-                    f"选择分支必须是 '接收' 或 '超时'，但得到 {self.current.type.name}",
-                    self.current.line,
-                    self.current.column,
-                    self.source,
-                )
+                # 跳过未知内容
+                self.advance()
 
-            # 解析分支体
-            self.expect(TokenType.冒号, "选择分支需要 ':'")
-            self.expect(TokenType.换行, "选择分支后需要换行")
-
-            body = self.parse_block()
-
-            # 创建 SelectCase 节点
-            select_case = SelectCase(
-                type=case_type,
-                channel=channel,
-                variable=variable,
-                timeout_value=timeout_value,
-                body=body,
-                line=token.line,
-                column=token.column,
-            )
-            cases.append(select_case)
-
-        self.match(TokenType.回退)
+        self.expect(TokenType.右花括号, "选择语句需要 '}'")
 
         return SelectStmt(
             cases=cases,

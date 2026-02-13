@@ -1,8 +1,8 @@
 """变量/常量声明解析混入"""
 
-from ...tokens import TokenType, Token
-from ...ast_nodes import VariableDecl, DestructureAssign, ListLiteral, Identifier
+from ...ast_nodes import DestructureAssign, Identifier, ListLiteral, VariableDecl
 from ...errors import 语法错误
+from ...tokens import Token, TokenType
 
 
 class VariableDeclParser:
@@ -21,7 +21,8 @@ class VariableDeclParser:
         name_token = self.expect(TokenType.标识符, "变量声明需要一个变量名")
         self.expect(TokenType.赋值, "变量声明需要 '=' 赋值")
         value = self.parse_expression()
-        self.expect(TokenType.换行, "语句末尾需要换行")
+        # 允许可选的换行符，不强制要求
+        self.match(TokenType.换行)
         return VariableDecl(
             name=name_token.value,
             value=value,
@@ -29,7 +30,6 @@ class VariableDeclParser:
             line=token.line,
             column=token.column,
         )
-
 
     def _parse_destructure_decl(self, token, is_constant: bool) -> DestructureAssign:
         """解析解构声明：定义 [甲, 乙] = [1, 2]"""
@@ -43,7 +43,8 @@ class VariableDeclParser:
         self.expect(TokenType.右方括号, "解构赋值需要 ']'")
         self.expect(TokenType.赋值, "解构赋值需要 '='")
         value = self.parse_expression()
-        self.expect(TokenType.换行, "语句末尾需要换行")
+        # 允许可选的换行符，不强制要求
+        self.match(TokenType.换行)
         return DestructureAssign(
             targets=targets,
             value=value,
