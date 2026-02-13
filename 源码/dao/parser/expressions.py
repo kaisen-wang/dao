@@ -6,31 +6,31 @@
 通过 Python mixin 模式，在运行时与 Parser 组合。
 """
 
-from ..tokens import TokenType
 from ..ast_nodes import (
-    Expression,
-    NumberLiteral,
-    StringLiteral,
-    BooleanLiteral,
-    NullLiteral,
-    ListLiteral,
-    DictLiteral,
-    Identifier,
-    MemberAccess,
-    IndexAccess,
     BinaryOp,
-    UnaryOp,
+    BooleanLiteral,
     CompareOp,
+    DictLiteral,
+    DictPattern,
+    Expression,
     FunctionCall,
+    Identifier,
+    IndexAccess,
     LambdaExpr,
+    ListLiteral,
+    ListPattern,
+    MemberAccess,
+    NullLiteral,
+    NumberLiteral,
     PipeExpr,
+    ReturnStmt,
     SelfExpr,
+    StringLiteral,
     SuperExpr,
     TemplateLiteral,
-    ReturnStmt,
-    ListPattern,
-    DictPattern,
+    UnaryOp,
 )
+from ..tokens import TokenType
 
 
 class ExpressionParser:
@@ -285,6 +285,18 @@ class ExpressionParser:
     def parse_primary(self) -> Expression:
         """解析基本表达式（最高优先级）"""
         token = self.current
+
+        # 并发编程相关表达式
+        if token.type == TokenType.等待:
+            return self.parse_await_expr()
+        if token.type == TokenType.全部:
+            return self.parse_await_all_expr()
+        if token.type == TokenType.竞速:
+            return self.parse_await_race_expr()
+        if token.type == TokenType.通道:
+            return self.parse_channel_expr()
+        if token.type == TokenType.接收:
+            return self.parse_receive_expr()
 
         # 数值字面量
         if token.type == TokenType.数值:

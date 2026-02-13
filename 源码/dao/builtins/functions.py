@@ -6,9 +6,9 @@
 这些函数在解释器初始化时注册到全局环境中。
 """
 
-from ..errors import 运行时错误, 类型错误
-from .callables import BuiltinFunction, InterpreterBuiltin, DaoFunction, DaoCallable
-from .oop_types import DaoClass, DaoInstance, BoundMethod
+from ..errors import 类型错误, 运行时错误
+from .callables import BuiltinFunction, DaoCallable, DaoFunction, InterpreterBuiltin
+from .oop_types import BoundMethod, DaoClass, DaoInstance
 
 
 def _builtin_打印(*args, **kwargs):
@@ -119,7 +119,7 @@ def _builtin_集合(*args):
     """创建集合"""
     if len(args) == 0:
         return set()
-    if len(args) == 1 and hasattr(args[0], '__iter__') and not isinstance(args[0], str):
+    if len(args) == 1 and hasattr(args[0], "__iter__") and not isinstance(args[0], str):
         return set(args[0])
     return set(args)
 
@@ -148,14 +148,14 @@ def _builtin_包含(collection, item):
 
 def _builtin_最大值(*args):
     """求最大值"""
-    if len(args) == 1 and hasattr(args[0], '__iter__'):
+    if len(args) == 1 and hasattr(args[0], "__iter__"):
         return max(args[0])
     return max(args)
 
 
 def _builtin_最小值(*args):
     """求最小值"""
-    if len(args) == 1 and hasattr(args[0], '__iter__'):
+    if len(args) == 1 and hasattr(args[0], "__iter__"):
         return min(args[0])
     return min(args)
 
@@ -183,12 +183,35 @@ def _builtin_下一个(iterator):
         return next(iterator)
     except StopIteration:
         from ..errors import 运行时错误
+
         raise 运行时错误("迭代器已耗尽")
+
+
+def _builtin_互斥锁():
+    """创建互斥锁"""
+    from ..interpreter.concurrency import Mutex
+
+    return Mutex()
+
+
+def _builtin_原子整数(initial_value=0):
+    """创建原子整数"""
+    from ..interpreter.concurrency import AtomicInt
+
+    return AtomicInt(initial_value)
+
+
+def _builtin_原子布尔(initial_value=False):
+    """创建原子布尔"""
+    from ..interpreter.concurrency import AtomicBool
+
+    return AtomicBool(initial_value)
 
 
 # ========================================================
 # 注册表
 # ========================================================
+
 
 def get_builtins() -> dict[str, BuiltinFunction]:
     """返回所有基础内置函数"""
@@ -212,4 +235,7 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         "绝对值": BuiltinFunction("绝对值", _builtin_绝对值, 1),
         "是实例": BuiltinFunction("是实例", _builtin_是实例, 2),
         "下一个": BuiltinFunction("下一个", _builtin_下一个, 1),
+        "互斥锁": BuiltinFunction("互斥锁", _builtin_互斥锁, 0),
+        "原子整数": BuiltinFunction("原子整数", _builtin_原子整数, 1),
+        "原子布尔": BuiltinFunction("原子布尔", _builtin_原子布尔, 1),
     }

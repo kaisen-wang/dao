@@ -44,6 +44,9 @@ class ConcurrencyParser:
             is_private = True
             self.advance()
 
+        # 期望函数关键字
+        self.expect(TokenType.函数, "异步函数声明需要 '函数' 关键字")
+
         # 解析函数名
         name_token = self.expect_identifier_or_keyword("异步函数声明需要函数名")
         self.expect(TokenType.左括号, "异步函数声明需要 '('")
@@ -52,7 +55,11 @@ class ConcurrencyParser:
         params, default_values = self._parse_param_list()
 
         self.expect(TokenType.右括号, "异步函数声明需要 ')'")
-        self.expect(TokenType.换行, "异步函数头部后需要换行")
+
+        # 跳过所有后续的换行符，但保留第一个 INDENT 作为函数体的开始
+        # 只跳过换行符，不跳过缩进
+        while self.current.type == TokenType.换行:
+            self.advance()
 
         # 解析函数体
         body = self.parse_block()

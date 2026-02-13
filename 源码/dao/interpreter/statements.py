@@ -105,6 +105,8 @@ class StatementExecutor:
                 return self.eval_expression(stmt.expression, env)
             case FunctionDecl():
                 return self.exec_function_decl(stmt, env)
+            case AsyncFunctionDecl():
+                return self.exec_async_function_decl(stmt, env)
             case ReturnStmt():
                 return self.exec_return(stmt, env)
             case YieldStmt():
@@ -143,11 +145,20 @@ class StatementExecutor:
                 return self.exec_import(stmt, env)
             case DestructureAssign():
                 return self.exec_destructure(stmt, env)
+            case ParallelStmt():
+                return self.exec_parallel_stmt(stmt, env)
+            case SendStmt():
+                return self.exec_send_stmt(stmt, env)
+            case SelectStmt():
+                return self.exec_select_stmt(stmt, env)
+            case SyncStmt():
+                return self.exec_sync_stmt(stmt, env)
             case _:
                 raise 运行时错误(
-                    f"未知的语句类型: {type(stmt, 0, 0, self.source).__name__}",
+                    f"未知的语句类型: {type(stmt).__name__}",
                     stmt.line,
                     stmt.column,
+                    self.source,
                 )
 
     # ========================
@@ -211,6 +222,25 @@ class StatementExecutor:
             body=stmt.body,
             closure_env=env,
             is_generator=self._has_yield(stmt.body),
+        )
+        env.define(stmt.name, func)
+
+    def exec_async_function_decl(
+        self, stmt: AsyncFunctionDecl, env: Environment
+    ) -> None:
+        """执行异步函数声明"""
+        from ..builtins.callables import DaoAsyncFunction
+
+        func = DaoAsyncFunction(
+            name=stmt.name,
+            params=stmt.params,
+            body=stmt.body,
+            closure_env=env,
+            default_values={
+                k: self.eval_expression(v, env) for k, v in stmt.default_values.items()
+            },
+            is_static=stmt.is_static,
+            is_private=stmt.is_private,
         )
         env.define(stmt.name, func)
 

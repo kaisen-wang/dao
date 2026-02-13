@@ -92,6 +92,28 @@ class DaoFunction(DaoCallable):
         return f"<函数 {self.name}>"
 
 
+class DaoAsyncFunction(DaoFunction):
+    """异步函数"""
+
+    def __init__(
+        self,
+        name: str,
+        params: list[str],
+        body: list,
+        closure_env,
+        default_values: dict = None,
+        is_static: bool = False,
+        is_private: bool = False,
+    ):
+        super().__init__(name, params, default_values or {}, body, closure_env)
+        self.is_async = True
+        self.is_static = is_static
+        self.is_private = is_private
+
+    def __repr__(self) -> str:
+        return f"<异步函数 {self.name}>"
+
+
 class CurriedFunction(DaoCallable):
     """柯里化后的函数"""
 

@@ -7,27 +7,28 @@ Interpreter 类：组合 StatementExecutor 和 ExpressionEvaluator 混入，
 """
 
 from ..ast_nodes import Program
-from ..environment import Environment
 from ..builtins import (
-    DaoCallable,
-    DaoFunction,
-    BuiltinFunction,
-    InterpreterBuiltin,
-    DaoClass,
-    DaoInstance,
     BoundMethod,
-    SuperProxy,
+    BuiltinFunction,
     CurriedFunction,
+    DaoCallable,
+    DaoClass,
+    DaoFunction,
     DaoGenerator,
+    DaoInstance,
+    InterpreterBuiltin,
+    SuperProxy,
     get_builtins,
     get_interpreter_builtins,
 )
-from ..errors import 运行时错误, 类型错误, 返回信号, 产出信号
-from .statements import StatementExecutor
+from ..environment import Environment
+from ..errors import 产出信号, 类型错误, 运行时错误, 返回信号
+from .concurrency import ConcurrencyEvaluator
 from .expressions import ExpressionEvaluator
+from .statements import StatementExecutor
 
 
-class Interpreter(StatementExecutor, ExpressionEvaluator):
+class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
     """
     "道"语言树遍历解释器
 
@@ -63,10 +64,26 @@ class Interpreter(StatementExecutor, ExpressionEvaluator):
         返回：最后一条语句的值
         """
         self.source = source
-        env = env or self.global_env
+        if env is None:
+            env = self.global_env
+        else:
+            # 检查 env 是否是 Environment 类型，避免因参数传递错误导致的问题
+            from ..environment import Environment
+
+            if not isinstance(env, Environment):
+                env = self.global_env
         result = None
         try:
             for stmt in program.statements:
+                print(f"=== 执行语句 ===")
+                print(f"stmt: {type(stmt).__name__}")
+                print(f"stmt: {vars(stmt)}")
+                print(f"env type: {type(env)}")
+                print(f"env: {repr(env)}")
+                if hasattr(env, "define"):
+                    print(f"env has define method")
+                else:
+                    print(f"env does NOT have define method")
                 result = self.exec_statement(stmt, env)
         except 运行时错误 as e:
             # 在全局层面，确保调用栈信息被保留

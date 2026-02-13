@@ -5,20 +5,21 @@
 这个文件将所有语句解析方法从各个模块导入，并通过多重继承组合到Parser类中。
 """
 
-from ..tokens import TokenType
 from ..ast_nodes import Statement
+from ..tokens import TokenType
 
 # 导入所有语句解析模块
 from .modules import (
-    VariableDeclParser,
-    FunctionDeclParser,
+    ConcurrencyParser,
     ControlFlowParser,
     ExceptionHandlingParser,
+    ExpressionAndAssignmentParser,
+    FunctionDeclParser,
+    LogicProgrammingParser,
+    ModuleSystemParser,
     OOPDeclParser,
     PatternMatchingParser,
-    ModuleSystemParser,
-    ExpressionAndAssignmentParser,
-    LogicProgrammingParser,
+    VariableDeclParser,
 )
 
 
@@ -32,6 +33,7 @@ class StatementParser(
     ModuleSystemParser,
     ExpressionAndAssignmentParser,
     LogicProgrammingParser,
+    ConcurrencyParser,
 ):
     """语句解析器 - 组合所有语句解析方法"""
 
@@ -46,6 +48,8 @@ class StatementParser(
                 return self.parse_variable_decl(is_constant=True)
             case TokenType.函数:
                 return self.parse_function_decl()
+            case TokenType.异步:
+                return self.parse_async_function_decl()
             case TokenType.抽象:
                 return self.parse_abstract_decl()
             case TokenType.类型:
@@ -85,5 +89,13 @@ class StatementParser(
             case TokenType.从:
                 self.advance()  # 消费 "从"
                 return self.parse_import_stmt(is_from_import=True)
+            case TokenType.并行:
+                return self.parse_parallel_stmt()
+            case TokenType.发送:
+                return self.parse_send_stmt()
+            case TokenType.选择:
+                return self.parse_select_stmt()
+            case TokenType.同步:
+                return self.parse_sync_stmt()
             case _:
                 return self.parse_expression_or_assignment()

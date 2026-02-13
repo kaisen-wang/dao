@@ -7,12 +7,18 @@
 """
 
 from ..ast_nodes import *
-from ..environment import Environment
 from ..builtins import (
-    DaoCallable, DaoFunction, BuiltinFunction, InterpreterBuiltin,
-    DaoClass, DaoInstance, BoundMethod, SuperProxy,
+    BoundMethod,
+    BuiltinFunction,
+    DaoCallable,
+    DaoClass,
+    DaoFunction,
+    DaoInstance,
+    InterpreterBuiltin,
+    SuperProxy,
 )
-from ..errors import 运行时错误, 类型错误, 名称错误, 索引错误
+from ..environment import Environment
+from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误
 
 
 class ExpressionEvaluator:
@@ -60,9 +66,22 @@ class ExpressionEvaluator:
                 return self.eval_lambda(expr, env)
             case PipeExpr():
                 return self.eval_pipe(expr, env)
+            case AwaitExpr():
+                return self.eval_await(expr, env)
+            case AwaitAllExpr():
+                return self.eval_await_all(expr, env)
+            case AwaitRaceExpr():
+                return self.eval_await_race(expr, env)
+            case ChannelExpr():
+                return self.eval_channel(expr, env)
+            case ReceiveExpr():
+                return self.eval_receive(expr, env)
             case _:
-                raise 运行时错误(f"未知的表达式类型: {type(expr).__name__}",
-                    expr.line, expr.column,
+                raise 运行时错误(
+                    f"未知的表达式类型: {type(expr).__name__}",
+                    expr.line,
+                    expr.column,
+                    self.source,
                 )
 
     # ========================
@@ -84,7 +103,7 @@ class ExpressionEvaluator:
                     result.append("真" if v else "假")
                 else:
                     result.append(str(v))
-        return ''.join(result)
+        return "".join(result)
 
     # ========================
     # 成员与索引访问
@@ -99,8 +118,12 @@ class ExpressionEvaluator:
             if expr.member in obj.klass.private_names:
                 # 检查是否在类方法内部（本对象可访问）
                 if not self._in_method_context(env, obj.klass):
-                    raise 运行时错误(f"无法访问类型 '{obj.klass.name}' 的私有成员 '{expr.member}'",
-                        expr.line, expr.column, self.source)
+                    raise 运行时错误(
+                        f"无法访问类型 '{obj.klass.name}' 的私有成员 '{expr.member}'",
+                        expr.line,
+                        expr.column,
+                        self.source,
+                    )
             # 先检查是否有 property getter
             getter_name = f"获取{expr.member}"
             getter = obj.klass.find_method(getter_name)
@@ -110,15 +133,20 @@ class ExpressionEvaluator:
             result = obj.get_field(expr.member)
             if result is not None:
                 return result
-            raise 名称错误(f"类型 '{obj.klass.name}' 的实例没有属性 '{expr.member}'",
-                expr.line, expr.column, self.source)
+            raise 名称错误(
+                f"类型 '{obj.klass.name}' 的实例没有属性 '{expr.member}'",
+                expr.line,
+                expr.column,
+                self.source,
+            )
 
         if isinstance(obj, SuperProxy):
             method = obj.parent_class.find_method(expr.member)
             if method:
                 return BoundMethod(obj.instance, method)
-            raise 名称错误(f"父类型中没有方法 '{expr.member}'",
-                expr.line, expr.column, self.source)
+            raise 名称错误(
+                f"父类型中没有方法 '{expr.member}'", expr.line, expr.column, self.source
+            )
 
         if isinstance(obj, DaoClass):
             # 先查找静态方法
@@ -128,8 +156,12 @@ class ExpressionEvaluator:
             method = obj.find_method(expr.member)
             if method:
                 return method
-            raise 名称错误(f"类型 '{obj.name}' 没有方法或静态方法 '{expr.member}'",
-                expr.line, expr.column, self.source)
+            raise 名称错误(
+                f"类型 '{obj.name}' 没有方法或静态方法 '{expr.member}'",
+                expr.line,
+                expr.column,
+                self.source,
+            )
 
         if isinstance(obj, dict) and expr.member in obj:
             return obj[expr.member]
@@ -139,8 +171,9 @@ class ExpressionEvaluator:
         if isinstance(obj, list):
             return self._get_list_method(obj, expr.member, expr)
 
-        raise 名称错误(f"对象没有属性 '{expr.member}'",
-            expr.line, expr.column, self.source)
+        raise 名称错误(
+            f"对象没有属性 '{expr.member}'", expr.line, expr.column, self.source
+        )
 
     def _get_str_method(self, s: str, name: str, expr) -> object:
         """获取字符串的内置方法"""
@@ -168,8 +201,12 @@ class ExpressionEvaluator:
             "长度": lambda: len(lst),
             "追加": BuiltinFunction("追加", lambda item: lst.append(item) or lst),
             "弹出": BuiltinFunction("弹出", lambda: lst.pop()),
-            "插入": BuiltinFunction("插入", lambda i, item: lst.insert(int(i), item) or lst),
-            "连接": BuiltinFunction("连接", lambda sep="": sep.join(str(x) for x in lst)),
+            "插入": BuiltinFunction(
+                "插入", lambda i, item: lst.insert(int(i), item) or lst
+            ),
+            "连接": BuiltinFunction(
+                "连接", lambda sep="": sep.join(str(x) for x in lst)
+            ),
         }
         if name in methods:
             result = methods[name]
@@ -186,24 +223,32 @@ class ExpressionEvaluator:
         if isinstance(obj, list):
             idx = int(index)
             if idx < -len(obj) or idx >= len(obj):
-                raise 索引错误(f"列表索引 {idx} 超出范围 (长度 {len(obj, 0, 0, self.source)})",
-                    expr.line, expr.column,
+                raise 索引错误(
+                    f"列表索引 {idx} 超出范围 (长度 {len(obj, 0, 0, self.source)})",
+                    expr.line,
+                    expr.column,
                 )
             return obj[idx]
         elif isinstance(obj, dict):
             if index not in obj:
-                raise 名称错误(f"字典中不存在键 '{index}'", expr.line, expr.column, self.source)
+                raise 名称错误(
+                    f"字典中不存在键 '{index}'", expr.line, expr.column, self.source
+                )
             return obj[index]
         elif isinstance(obj, str):
             idx = int(index)
             if idx < -len(obj) or idx >= len(obj):
-                raise 索引错误(f"字符串索引 {idx} 超出范围 (长度 {len(obj, 0, 0, self.source)})",
-                    expr.line, expr.column,
+                raise 索引错误(
+                    f"字符串索引 {idx} 超出范围 (长度 {len(obj, 0, 0, self.source)})",
+                    expr.line,
+                    expr.column,
                 )
             return obj[idx]
         else:
-            raise 类型错误(f"类型 '{type(obj, 0, 0, self.source).__name__}' 不支持索引访问",
-                expr.line, expr.column,
+            raise 类型错误(
+                f"类型 '{type(obj, 0, 0, self.source).__name__}' 不支持索引访问",
+                expr.line,
+                expr.column,
             )
 
     # ========================
@@ -239,60 +284,68 @@ class ExpressionEvaluator:
         right = self.eval_expression(expr.right, env)
 
         match expr.operator:
-            case '+':
+            case "+":
                 if isinstance(left, str) or isinstance(right, str):
                     return str(left) + str(right)
                 if isinstance(left, list) and isinstance(right, list):
                     return left + right
                 return left + right
-            case '-':
+            case "-":
                 return left - right
-            case '*':
+            case "*":
                 if isinstance(left, str) and isinstance(right, (int, float)):
                     return left * int(right)
                 if isinstance(right, str) and isinstance(left, (int, float)):
                     return right * int(left)
                 return left * right
-            case '/':
+            case "/":
                 if right == 0:
                     raise 运行时错误("除零错误", expr.line, expr.column, self.source)
                 return left / right
-            case '%':
+            case "%":
                 return left % right
-            case '**':
-                return left ** right
-            case '==':
+            case "**":
+                return left**right
+            case "==":
                 return left == right
-            case '!=':
+            case "!=":
                 return left != right
-            case '>':
+            case ">":
                 return left > right
-            case '<':
+            case "<":
                 return left < right
-            case '>=':
+            case ">=":
                 return left >= right
-            case '<=':
+            case "<=":
                 return left <= right
-            case '在':
+            case "在":
                 return left in right
-            case '不在':
+            case "不在":
                 return left not in right
             case _:
-                 raise 运行时错误(f"未知的运算符: '{expr.operator}'",
-                    expr.line, expr.column, self.source)
+                raise 运行时错误(
+                    f"未知的运算符: '{expr.operator}'",
+                    expr.line,
+                    expr.column,
+                    self.source,
+                )
 
     def eval_unary_op(self, expr: UnaryOp, env: Environment) -> object:
         """求值一元运算"""
         operand = self.eval_expression(expr.operand, env)
 
         match expr.operator:
-            case '-':
+            case "-":
                 return -operand
-            case '不是':
+            case "不是":
                 return not self._is_truthy(operand)
             case _:
-                 raise 运行时错误(f"未知的一元运算符: '{expr.operator}'",
-                    expr.line, expr.column, self.source)
+                raise 运行时错误(
+                    f"未知的一元运算符: '{expr.operator}'",
+                    expr.line,
+                    expr.column,
+                    self.source,
+                )
 
     def eval_compare_op(self, expr: CompareOp, env: Environment) -> bool:
         """求值链式比较"""
@@ -301,21 +354,21 @@ class ExpressionEvaluator:
         for i, op in enumerate(expr.operators):
             left, right = values[i], values[i + 1]
             match op:
-                case '==':
+                case "==":
                     result = left == right
-                case '!=':
+                case "!=":
                     result = left != right
-                case '>':
+                case ">":
                     result = left > right
-                case '<':
+                case "<":
                     result = left < right
-                case '>=':
+                case ">=":
                     result = left >= right
-                case '<=':
+                case "<=":
                     result = left <= right
-                case '在':
+                case "在":
                     result = left in right
-                case '不在':
+                case "不在":
                     result = left not in right
                 case _:
                     result = False
@@ -342,14 +395,16 @@ class ExpressionEvaluator:
 
         # 检查是否是 DaoError 子类（自定义异常类型）
         from ..builtins.oop_types import DaoError
+
         if isinstance(callee, type) and issubclass(callee, DaoError):
             # 调用错误类的构造函数创建异常实例
             error = callee(*args)
             raise error
 
         if not isinstance(callee, DaoCallable):
-            raise 类型错误(f"'{callee}' 不是一个可调用的函数",
-                expr.line, expr.column, self.source)
+            raise 类型错误(
+                f"'{callee}' 不是一个可调用的函数", expr.line, expr.column, self.source
+            )
 
         if isinstance(callee, BuiltinFunction):
             return callee.call(args, kwargs)
@@ -361,6 +416,7 @@ class ExpressionEvaluator:
             return self._call_dao_function(callee, args, kwargs, expr)
 
         from ..builtins import CurriedFunction
+
         if isinstance(callee, CurriedFunction):
             return callee.call(args, kwargs)
 
@@ -372,7 +428,9 @@ class ExpressionEvaluator:
             name="<匿名>",
             params=expr.params,
             default_values={},
-            body=[ReturnStmt(value=expr.body)] if isinstance(expr.body, Expression) else expr.body,
+            body=[ReturnStmt(value=expr.body)]
+            if isinstance(expr.body, Expression)
+            else expr.body,
             closure_env=env,
         )
 
@@ -382,13 +440,20 @@ class ExpressionEvaluator:
 
         if isinstance(expr.right, FunctionCall):
             callee = self.eval_expression(expr.right.callee, env)
-            args = [left_val] + [self.eval_expression(a, env) for a in expr.right.arguments]
-            kwargs = {k: self.eval_expression(v, env) for k, v in expr.right.keyword_args.items()}
+            args = [left_val] + [
+                self.eval_expression(a, env) for a in expr.right.arguments
+            ]
+            kwargs = {
+                k: self.eval_expression(v, env)
+                for k, v in expr.right.keyword_args.items()
+            }
 
             if isinstance(callee, DaoClass):
                 return self._instantiate_class(callee, args, kwargs, expr)
             if isinstance(callee, BoundMethod):
-                return self._call_method(callee.instance, callee.method, args, kwargs, expr)
+                return self._call_method(
+                    callee.instance, callee.method, args, kwargs, expr
+                )
             if isinstance(callee, BuiltinFunction):
                 return callee.call(args, kwargs)
             if isinstance(callee, InterpreterBuiltin):
@@ -401,5 +466,115 @@ class ExpressionEvaluator:
         if isinstance(callee, DaoCallable) or isinstance(callee, DaoClass):
             return self.call_function(callee, [left_val])
 
-        raise 类型错误("管道运算符 |> 右侧必须是函数",
-            expr.line, expr.column, self.source)
+        raise 类型错误(
+            "管道运算符 |> 右侧必须是函数", expr.line, expr.column, self.source
+        )
+
+    # ========================
+    # 并发编程相关表达式求值
+    # ========================
+
+    def eval_await(self, expr: AwaitExpr, env: Environment) -> object:
+        """求值等待表达式"""
+        from ..builtins.callables import DaoAsyncFunction
+        from ..interpreter.concurrency import ConcurrencyEvaluator
+
+        value = self.eval_expression(expr.expression, env)
+
+        # 如果是异步函数对象，直接调用
+        if isinstance(value, DaoAsyncFunction):
+            concurrency_eval = ConcurrencyEvaluator()
+            return concurrency_eval.run_async(
+                concurrency_eval.eval_async_function_call(value, [], {})
+            )
+
+        # 如果是可调用对象，先调用再等待
+        if hasattr(value, "__call__"):
+            result = value()
+            return self._handle_await_result(result)
+
+        return self._handle_await_result(value)
+
+    def eval_await_all(self, expr: AwaitAllExpr, env: Environment) -> object:
+        """求值全部等待表达式"""
+        tasks = [self.eval_expression(e, env) for e in expr.expressions]
+        from ..interpreter.concurrency import ConcurrencyEvaluator
+
+        concurrency_eval = ConcurrencyEvaluator()
+        return concurrency_eval.run_async(self._run_all(tasks))
+
+    async def _run_all(self, tasks):
+        """运行所有任务并返回结果（内部辅助方法）"""
+        import asyncio
+        from asyncio import gather
+
+        coros = []
+        for task in tasks:
+            if hasattr(task, "__call__"):
+                coros.append(task())
+            elif hasattr(task, "__await__"):
+                coros.append(task)
+            else:
+                coros.append(self._wrap_in_coroutine(task))
+        return await gather(*coros)
+
+    async def _wrap_in_coroutine(self, result):
+        """将结果包装在协程中（内部辅助方法）"""
+        import asyncio
+
+        await asyncio.sleep(0)
+        return result
+
+    def eval_await_race(self, expr: AwaitRaceExpr, env: Environment) -> object:
+        """求值竞速等待表达式"""
+        tasks = [self.eval_expression(e, env) for e in expr.expressions]
+        from ..interpreter.concurrency import ConcurrencyEvaluator
+
+        concurrency_eval = ConcurrencyEvaluator()
+        return concurrency_eval.run_async(self._run_race(tasks))
+
+    async def _run_race(self, tasks):
+        """运行所有任务，返回第一个完成的结果（内部辅助方法）"""
+        import asyncio
+        from asyncio import FIRST_COMPLETED, wait
+
+        coros = []
+        for task in tasks:
+            if hasattr(task, "__call__"):
+                coros.append(task())
+            elif hasattr(task, "__await__"):
+                coros.append(task)
+            else:
+                coros.append(self._wrap_in_coroutine(task))
+        done, pending = await wait(coros, return_when=FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        return next(iter(done)).result()
+
+    def eval_channel(self, expr: ChannelExpr, env: Environment) -> object:
+        """求值通道表达式"""
+        from ..interpreter.concurrency import BufferedChannel, Channel
+
+        if expr.capacity:
+            return BufferedChannel(int(expr.capacity))
+        return Channel()
+
+    def eval_receive(self, expr: ReceiveExpr, env: Environment) -> object:
+        """求值接收表达式"""
+        channel = self.eval_expression(expr.channel, env)
+        from ..interpreter.concurrency import BufferedChannel, Channel
+
+        if isinstance(channel, (Channel, BufferedChannel)):
+            return channel.receive()
+        raise 类型错误(
+            f"对象 '{channel}' 不是一个有效的通道", expr.line, expr.column, self.source
+        )
+
+    def _handle_await_result(self, result):
+        """处理等待的结果"""
+        if hasattr(result, "__await__"):
+            from ..interpreter.concurrency import ConcurrencyEvaluator
+
+            concurrency_eval = ConcurrencyEvaluator()
+            return concurrency_eval.run_async(result)
+        return result
