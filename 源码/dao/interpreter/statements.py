@@ -7,28 +7,28 @@
 """
 
 from ..ast_nodes import *
-from ..environment import Environment
 from ..builtins import (
-    DaoFunction,
-    DaoClass,
-    DaoInstance,
     BoundMethod,
-    SuperProxy,
     BuiltinFunction,
+    DaoClass,
+    DaoFunction,
+    DaoInstance,
     InterpreterBuiltin,
+    SuperProxy,
     get_builtins,
     get_interpreter_builtins,
 )
-from ..builtins.oop_types import DaoTrait
+from ..builtins.oop_types import DaoError, DaoTrait
+from ..environment import Environment
 from ..errors import (
-    运行时错误,
-    类型错误,
+    产出信号,
     名称错误,
     断言失败,
-    跳出信号,
+    类型错误,
     继续信号,
+    跳出信号,
+    运行时错误,
     返回信号,
-    产出信号,
 )
 
 
@@ -60,12 +60,12 @@ class StatementExecutor:
     def _has_yield(self, statements: list) -> bool:
         """检测语句列表中是否包含产出语句"""
         from ..ast_nodes import (
-            YieldStmt,
             ForInStmt,
             ForRangeStmt,
-            WhileStmt,
             IfStmt,
             TryStmt,
+            WhileStmt,
+            YieldStmt,
         )
 
         for stmt in statements:
@@ -165,7 +165,7 @@ class StatementExecutor:
 
         if isinstance(stmt.target, Identifier):
             env.set(stmt.target.name, value)
-        if isinstance(stmt.target, MemberAccess):
+        elif isinstance(stmt.target, MemberAccess):
             obj = self.eval_expression(stmt.target.object, env)
             if isinstance(obj, DaoInstance):
                 # 先检查是否有 property setter
@@ -325,8 +325,8 @@ class StatementExecutor:
                                 stmt.catch_var,
                                 {
                                     "信息": str(e),
-                                    "行": getattr(e, 'line', 0),
-                                    "列": getattr(e, 'column', 0),
+                                    "行": getattr(e, "line", 0),
+                                    "列": getattr(e, "column", 0),
                                 },
                             )
                     return self._exec_block(stmt.catch_body, catch_env)
@@ -344,6 +344,7 @@ class StatementExecutor:
             raise 运行时错误(value, stmt.line, stmt.column, self.source)
         # 检查是否是 DaoError 子类的实例
         from ..builtins.oop_types import DaoError
+
         if isinstance(value, DaoError):
             raise value
         else:
@@ -561,7 +562,7 @@ class StatementExecutor:
 
     def _match_pattern(self, pattern, subject, env: Environment) -> bool:
         """匹配模式与主体"""
-        from ..ast_nodes import ListPattern, DictPattern, Identifier
+        from ..ast_nodes import DictPattern, Identifier, ListPattern
 
         # 列表模式
         if isinstance(pattern, ListPattern):

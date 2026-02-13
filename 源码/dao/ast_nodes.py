@@ -559,3 +559,96 @@ class LogicConstraint(Expression):
     variable: str = ""
     operator: str = ""  # "在范围"
     bounds: tuple[int, int] = (0, 0)
+
+
+# ========================
+# 并发编程
+# ========================
+
+
+@dataclass
+class AsyncFunctionDecl(Statement):
+    """异步函数声明：异步 函数 名字(参数) ..."""
+
+    name: str = ""
+    params: list[str] = field(default_factory=list)
+    default_values: dict[str, Expression] = field(default_factory=dict)
+    body: list[Statement] = field(default_factory=list)
+    is_static: bool = False
+    is_private: bool = False
+
+
+@dataclass
+class AwaitExpr(Expression):
+    """等待表达式：等待 表达式"""
+
+    expression: Expression = field(default_factory=lambda: NullLiteral())
+
+
+@dataclass
+class AwaitAllExpr(Expression):
+    """全部等待表达式：全部(任务1, 任务2, ...)"""
+
+    expressions: list[Expression] = field(default_factory=list)
+
+
+@dataclass
+class AwaitRaceExpr(Expression):
+    """竞速等待表达式：竞速(任务1, 任务2, ...)"""
+
+    expressions: list[Expression] = field(default_factory=list)
+
+
+@dataclass
+class ParallelStmt(Statement):
+    """并行块：并行 { ... }"""
+
+    body: list[Statement] = field(default_factory=list)
+
+
+@dataclass
+class ChannelExpr(Expression):
+    """通道表达式：通道() 或 通道(容量)"""
+
+    capacity: int | None = None
+
+
+@dataclass
+class SendStmt(Statement):
+    """发送语句：发送 通道 值"""
+
+    channel: Expression = field(default_factory=lambda: NullLiteral())
+    value: Expression = field(default_factory=lambda: NullLiteral())
+
+
+@dataclass
+class ReceiveExpr(Expression):
+    """接收表达式：接收 通道"""
+
+    channel: Expression = field(default_factory=lambda: NullLiteral())
+
+
+@dataclass
+class SelectStmt(Statement):
+    """选择语句：选择 { 情况 接收 ch as val: ... 情况 超时(秒数): ... }"""
+
+    cases: list[Expression] = field(default_factory=list)  # SelectCase 节点
+
+
+@dataclass
+class SelectCase(ASTNode):
+    """选择分支：情况 接收通道 as var 或 情况 超时(秒数)"""
+
+    type: str = ""  # "receive" 或 "timeout"
+    channel: Expression | None = None  # 接收情况的通道
+    variable: str | None = None  # 接收情况绑定的变量
+    timeout_value: Expression | None = None  # 超时情况的时间值
+    body: list[Statement] = field(default_factory=list)
+
+
+@dataclass
+class SyncStmt(Statement):
+    """同步块：同步 锁 { ... }"""
+
+    mutex: Expression = field(default_factory=lambda: NullLiteral())
+    body: list[Statement] = field(default_factory=list)

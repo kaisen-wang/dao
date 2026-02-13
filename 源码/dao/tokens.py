@@ -6,8 +6,8 @@
 词法分析器（lexer）将源代码转换为这些Token的序列。
 """
 
-from enum import Enum, auto
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Any
 
 
@@ -142,6 +142,24 @@ class TokenType(Enum):
     剪枝 = auto()  # cut - 剪枝操作符
 
     # ========================
+    # 并发编程关键字
+    # ========================
+    异步 = auto()  # async - 异步函数
+    等待 = auto()  # await - 等待异步操作
+    全部 = auto()  # all - 并发等待所有
+    竞速 = auto()  # race - 竞速等待
+    并行 = auto()  # parallel - 启动协程
+    通道 = auto()  # channel - 通道
+    发送 = auto()  # send - 发送数据
+    接收 = auto()  # receive - 接收数据
+    选择 = auto()  # select - 选择器
+    超时 = auto()  # timeout - 超时
+    互斥锁 = auto()  # mutex - 互斥锁
+    原子整数 = auto()  # atomic_int - 原子整数
+    原子布尔 = auto()  # atomic_bool - 原子布尔
+    同步 = auto()  # sync - 同步块
+
+    # ========================
     # 缩进控制（由词法分析器生成）
     # ========================
     缩进 = auto()  # INDENT - 缩进增加
@@ -235,4 +253,19 @@ KEYWORDS: dict[str, TokenType] = {
     "规则": TokenType.规则,
     "查询": TokenType.查询,
     "剪枝": TokenType.剪枝,
+    # 并发编程
+    "异步": TokenType.异步,
+    "等待": TokenType.等待,
+    "全部": TokenType.全部,
+    "竞速": TokenType.竞速,
+    "并行": TokenType.并行,
+    "通道": TokenType.通道,
+    "发送": TokenType.发送,
+    "接收": TokenType.接收,
+    "选择": TokenType.选择,
+    "超时": TokenType.超时,
+    "互斥锁": TokenType.互斥锁,
+    "原子整数": TokenType.原子整数,
+    "原子布尔": TokenType.原子布尔,
+    "同步": TokenType.同步,
 }

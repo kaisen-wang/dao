@@ -1,7 +1,7 @@
 """异常处理解析混入"""
 
+from ...ast_nodes import AssertStmt, ThrowStmt, TryStmt
 from ...tokens import TokenType
-from ...ast_nodes import TryStmt, ThrowStmt, AssertStmt
 
 
 class ExceptionHandlingParser:
@@ -16,10 +16,10 @@ class ExceptionHandlingParser:
         catch_var = None
         catch_body = []
         finally_body = []
+        error_type = None
 
         self.skip_newlines()
         if self.match(TokenType.捕获):
-            error_type = None
             # 检查是否是类型化捕获：捕获 异常: 错误类型
             if self.current.type == TokenType.标识符:
                 catch_var = self.advance().value
@@ -44,13 +44,11 @@ class ExceptionHandlingParser:
             column=token.column,
         )
 
-
     def parse_throw_stmt(self) -> ThrowStmt:
         token = self.advance()  # 消费 抛出
         expr = self.parse_expression()
         self.match(TokenType.换行)
         return ThrowStmt(expression=expr, line=token.line, column=token.column)
-
 
     def parse_assert_stmt(self) -> AssertStmt:
         token = self.advance()  # 消费 断言
@@ -67,4 +65,3 @@ class ExceptionHandlingParser:
         )
 
     # OOP 解析
-
