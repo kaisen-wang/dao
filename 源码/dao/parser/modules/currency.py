@@ -301,20 +301,48 @@ class ConcurrencyParser:
                 cases.append(select_case)
 
             elif self.current.type == TokenType.当:
-                # 旧语法风格：当 消息 = 接收 通道1
+                # 语法风格支持两种：
+                # 1. 当 变量 = 接收 通道 （接收消息）
+                # 2. 当 条件 （直接条件判断）
                 self.advance()  # 消费 当
 
-                case_type = "receive"
+                # 检查是否是 "当 超时(秒数)" 语法
+                if (
+                    self.current.type == TokenType.超时
+                    and self.peek().type == TokenType.左括号
+                ):
+                    # 语法3：当 超时(秒数)
+                    case_type = "timeout"
+                    variable = None
+                    channel = None
 
-                # 解析变量 = 接收 通道
-                var_token = self.expect(TokenType.标识符, "需要变量名")
-                variable = var_token.value
+                    self.advance()  # 消费 超时
+                    self.expect(TokenType.左括号, "超时() 需要 '('")
+                    timeout_value = self.parse_expression()
+                    self.expect(TokenType.右括号, "超时() 需要 ')'")
+                elif (
+                    self.current.type == TokenType.标识符
+                    and self.peek().type == TokenType.赋值
+                    and self.peek(2).type == TokenType.接收
+                ):
+                    # 语法1：当 变量 = 接收 通道
+                    case_type = "receive"
 
-                self.expect(TokenType.赋值, "需要 '='")
+                    # 解析变量 = 接收 通道
+                    var_token = self.expect(TokenType.标识符, "需要变量名")
+                    variable = var_token.value
 
-                self.expect(TokenType.接收, "需要 '接收'")
+                    self.expect(TokenType.赋值, "需要 '='")
 
-                channel = self.parse_expression()
+                    self.expect(TokenType.接收, "需要 '接收'")
+
+                    channel = self.parse_expression()
+                else:
+                    # 语法2：当 条件
+                    case_type = "condition"
+                    variable = None
+                    channel = None
+                    condition = self.parse_expression()
 
                 self.skip_newlines()
 
@@ -333,11 +361,17 @@ class ConcurrencyParser:
                     type=case_type,
                     channel=channel,
                     variable=variable,
-                    timeout_value=None,
+                    timeout_value=timeout_value
+                    if "timeout_value" in locals()
+                    else None,
                     body=body,
                     line=token.line,
                     column=token.column,
                 )
+                # 如果是条件判断，我们需要存储条件信息
+                if case_type == "condition":
+                    setattr(select_case, "condition", condition)
+
                 cases.append(select_case)
 
             elif self.current.type == TokenType.默认:
