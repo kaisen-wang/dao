@@ -491,7 +491,54 @@ class ConcurrencyEvaluator:
     # 选择器
     # ========================
 
-    async def exec_select_stmt(self, node: SelectStmt, env: Environment):
+    def exec_select_stmt(self, node: SelectStmt, env: Environment):
+        """执行选择语句（同步版本）"""
+        # 首先检查是否有超时情况
+        timeout_case = next((c for c in node.cases if c.type == "timeout"), None)
+        timeout = None
+        if timeout_case:
+            timeout = self.eval_expression(timeout_case.timeout_value, env)
+
+        # 首先处理条件判断的情况
+        for case in node.cases:
+            if case.type == "condition":
+                # 检查条件是否满足
+                if hasattr(case, "condition"):
+                    condition_value = self.eval_expression(case.condition, env)
+                    if condition_value:
+                        # 条件满足，直接执行该情况的代码块
+                        case_env = env.create_child()
+                        if case.variable:
+                            case_env.set(case.variable, condition_value)
+                        self._exec_block(case.body, case_env)
+                        return
+
+        # 处理接收和超时情况
+        # 对于同步执行，我们使用简单的轮询方式，避免使用 asyncio 任务
+        for case in node.cases:
+            if case.type == "receive":
+                try:
+                    channel = self.eval_expression(case.channel, env)
+                    if isinstance(channel, Channel) or isinstance(
+                        channel, BufferedChannel
+                    ):
+                        # 尝试立即接收（超时时间短）
+                        value = channel.receive()
+                        case_env = env.create_child()
+                        if case.variable:
+                            case_env.set(case.variable, value)
+                        self._exec_block(case.body, case_env)
+                        return
+                except Exception:
+                    continue  # 超时，继续下一个情况
+
+        if timeout_case:
+            import time
+
+            time.sleep(timeout)
+            self._exec_block(timeout_case.body, env)
+
+    async def exec_select_stmt_async(self, node: SelectStmt, env: Environment):
         """执行选择语句（异步版本）"""
         # 首先检查是否有超时情况
         timeout_case = next((c for c in node.cases if c.type == "timeout"), None)
@@ -499,7 +546,21 @@ class ConcurrencyEvaluator:
         if timeout_case:
             timeout = self.eval_expression(timeout_case.timeout_value, env)
 
-        # 创建任务列表
+        # 首先处理条件判断的情况
+        for case in node.cases:
+            if case.type == "condition":
+                # 检查条件是否满足
+                if hasattr(case, "condition"):
+                    condition_value = self.eval_expression(case.condition, env)
+                    if condition_value:
+                        # 条件满足，直接执行该情况的代码块
+                        case_env = env.create_child()
+                        if case.variable:
+                            case_env.set(case.variable, condition_value)
+                        await self._exec_async_block(case.body, case_env)
+                        return
+
+        # 处理接收和超时情况
         tasks = []
 
         for case in node.cases:
