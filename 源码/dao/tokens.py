@@ -45,11 +45,13 @@ class TokenType(Enum):
     否则 = auto()
     当 = auto()  # while
     遍历 = auto()  # for
+    对于 = auto()  # for (alias)
     在 = auto()  # in
     从 = auto()  # from (range)
     到 = auto()  # to (range)
     步长 = auto()  # step
     跳出 = auto()  # break
+    默认 = auto()  # default
     继续 = auto()  # continue
     匹配 = auto()  # match
     情况 = auto()  # case
@@ -243,11 +245,13 @@ KEYWORDS: dict[str, TokenType] = {
     "否则": TokenType.否则,
     "当": TokenType.当,
     "遍历": TokenType.遍历,
+    "对于": TokenType.对于,
     "在": TokenType.在,
     "从": TokenType.从,
     "到": TokenType.到,
     "步长": TokenType.步长,
     "跳出": TokenType.跳出,
+    "默认": TokenType.默认,
     "继续": TokenType.继续,
     "匹配": TokenType.匹配,
     "情况": TokenType.情况,

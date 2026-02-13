@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-运行极简单通道测试程序
+运行简单通道测试程序
 """
 
 import os
@@ -15,11 +15,11 @@ from dao.lexer import Lexer
 from dao.parser import Parser
 
 
-def run_very_simple_test():
-    """运行极简单通道测试程序"""
-    test_file = "测试极简单通道.道"
+def run_simple_channel_test():
+    """运行简单通道测试程序"""
+    test_file = "测试简单通道.道"
 
-    print("=== 道语言极简单通道测试 ===\n")
+    print("=== 道语言简单通道测试 ===\n")
 
     try:
         with open(test_file, "r", encoding="utf-8") as f:
@@ -54,4 +54,4 @@ def run_very_simple_test():
 
 
 if __name__ == "__main__":
-    run_very_simple_test()
+    run_simple_channel_test()

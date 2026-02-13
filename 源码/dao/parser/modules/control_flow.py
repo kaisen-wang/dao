@@ -1,7 +1,14 @@
 """控制流解析混入"""
 
+from ...ast_nodes import (
+    BreakStmt,
+    ContinueStmt,
+    ForInStmt,
+    ForRangeStmt,
+    IfStmt,
+    WhileStmt,
+)
 from ...tokens import TokenType
-from ...ast_nodes import IfStmt, WhileStmt, ForInStmt, ForRangeStmt, BreakStmt, ContinueStmt
 
 
 class ControlFlowParser:
@@ -38,7 +45,6 @@ class ControlFlowParser:
             column=token.column,
         )
 
-
     def parse_while_stmt(self) -> WhileStmt:
         """解析当循环"""
         token = self.advance()  # 消费 当
@@ -52,10 +58,9 @@ class ControlFlowParser:
             column=token.column,
         )
 
-
     def parse_for_stmt(self) -> ForInStmt | ForRangeStmt:
-        """解析遍历循环（遍历...在... 或 遍历...从...到...）"""
-        token = self.advance()  # 消费 遍历
+        """解析遍历循环（遍历...在... 或 遍历...从...到... 或 对于...）"""
+        token = self.advance()  # 消费 遍历 或 对于
         var_token = self.expect(TokenType.标识符, "遍历需要一个循环变量名")
 
         if self.match(TokenType.在):
@@ -92,12 +97,10 @@ class ControlFlowParser:
         else:
             raise self._error("遍历后需要 '在' 或 '从'")
 
-
     def parse_break_stmt(self) -> BreakStmt:
         token = self.advance()
         self.match(TokenType.换行)
         return BreakStmt(line=token.line, column=token.column)
-
 
     def parse_continue_stmt(self) -> ContinueStmt:
         token = self.advance()
@@ -105,4 +108,3 @@ class ControlFlowParser:
         return ContinueStmt(line=token.line, column=token.column)
 
     # 错误处理
-

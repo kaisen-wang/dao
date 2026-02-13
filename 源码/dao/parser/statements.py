@@ -65,8 +65,20 @@ class StatementParser(
             case TokenType.如果:
                 return self.parse_if_stmt()
             case TokenType.当:
-                return self.parse_while_stmt()
-            case TokenType.遍历:
+                # 这里需要判断上下文：如果是在选择语句中，不应该解析为 while 循环
+                # 简单的判断方法：查看前面的 token 是否是选择
+                # 这里我们可以通过一个简单的启发式方法：如果 "当" 后面紧跟的是标识符和赋值号，则可能是选择语句的条件
+                if (
+                    self.peek().type == TokenType.标识符
+                    and self.peek(2).type == TokenType.赋值
+                ):
+                    # 不应该解析为 while 循环
+                    raise Exception(
+                        "在选择语句中使用 '当' 关键字需要由选择语句解析器处理"
+                    )
+                else:
+                    return self.parse_while_stmt()
+            case TokenType.遍历 | TokenType.对于:
                 return self.parse_for_stmt()
             case TokenType.跳出:
                 return self.parse_break_stmt()

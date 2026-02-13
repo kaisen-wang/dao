@@ -203,21 +203,38 @@ class ConcurrencyParser:
         )
 
     def parse_select_stmt(self) -> SelectStmt:
-        """解析选择语句：选择 { 情况 接收 ch as val: ... 情况 超时(秒数): ... }"""
+        """解析选择语句：支持两种语法风格
+        1. 选择 { 情况 接收 ch as val: ... 情况 超时(秒数): ... }
+        2. 选择
+            当 消息 = 接收 通道1
+                打印("通道1 获胜:", 消息)
+            默认
+                打印("无消息")
+        """
         token = self.advance()  # 消费 选择
 
-        self.expect(TokenType.左花括号, "选择语句需要 '{'")
+        # 左花括号变为可选
+        has_braces = self.match(TokenType.左花括号)
 
         cases = []
 
-        # 解析所有情况语句，直到找到右花括号
-        while (
-            self.current.type != TokenType.右花括号
-            and self.current.type != TokenType.文件结束
-        ):
+        # 解析所有情况语句
+        while True:
             self.skip_newlines()
 
+            if has_braces and self.current.type == TokenType.右花括号:
+                break
+            elif not has_braces and (
+                self.current.type == TokenType.文件结束
+                or (
+                    self.current.type == TokenType.回退
+                    and self.current.value == str(token.column - 1)
+                )
+            ):
+                break
+
             if self.current.type == TokenType.情况:
+                # 新语法风格：情况 接收 通道 作为 变量:
                 self.advance()  # 消费 情况
 
                 case_type = None
@@ -283,11 +300,94 @@ class ConcurrencyParser:
                 )
                 cases.append(select_case)
 
-            else:
-                # 跳过未知内容
-                self.advance()
+            elif self.current.type == TokenType.当:
+                # 旧语法风格：当 消息 = 接收 通道1
+                self.advance()  # 消费 当
 
-        self.expect(TokenType.右花括号, "选择语句需要 '}'")
+                case_type = "receive"
+
+                # 解析变量 = 接收 通道
+                var_token = self.expect(TokenType.标识符, "需要变量名")
+                variable = var_token.value
+
+                self.expect(TokenType.赋值, "需要 '='")
+
+                self.expect(TokenType.接收, "需要 '接收'")
+
+                channel = self.parse_expression()
+
+                self.skip_newlines()
+
+                # 解析分支体（缩进块）
+                if self.current.type == TokenType.缩进:
+                    body = self.parse_block()
+                else:
+                    # 解析单个语句作为块
+                    body = []
+                    stmt = self.parse_statement()
+                    if stmt:
+                        body.append(stmt)
+
+                # 创建 SelectCase 节点
+                select_case = SelectCase(
+                    type=case_type,
+                    channel=channel,
+                    variable=variable,
+                    timeout_value=None,
+                    body=body,
+                    line=token.line,
+                    column=token.column,
+                )
+                cases.append(select_case)
+
+            elif self.current.type == TokenType.默认:
+                # 旧语法风格：默认
+                self.advance()  # 消费 默认
+
+                case_type = "timeout"
+                variable = None
+                channel = None
+                timeout_value = None  # 无限超时
+
+                self.skip_newlines()
+
+                # 解析分支体（缩进块）
+                if self.current.type == TokenType.缩进:
+                    body = self.parse_block()
+                else:
+                    # 解析单个语句作为块
+                    body = []
+                    stmt = self.parse_statement()
+                    if stmt:
+                        body.append(stmt)
+
+                # 创建 SelectCase 节点
+                select_case = SelectCase(
+                    type=case_type,
+                    channel=channel,
+                    variable=variable,
+                    timeout_value=timeout_value,
+                    body=body,
+                    line=token.line,
+                    column=token.column,
+                )
+                cases.append(select_case)
+
+            else:
+                # 如果是回退 token，说明选择语句块结束
+                if self.current.type == TokenType.回退:
+                    break
+                else:
+                    raise 语法错误(
+                        f"选择分支必须是 '情况'、'当' 或 '默认'，但得到 {self.current.type.name}",
+                        self.current.line,
+                        self.current.column,
+                        self.source,
+                    )
+
+        # 匹配可选的右花括号
+        if has_braces:
+            self.expect(TokenType.右花括号, "选择语句需要 '}'")
 
         return SelectStmt(
             cases=cases,

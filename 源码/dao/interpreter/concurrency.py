@@ -12,7 +12,7 @@ import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
 from queue import Empty, Queue
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 
 from ..ast_nodes import (
@@ -79,6 +79,30 @@ class AsyncContext:
         self.executor.shutdown()
         self.loop.close()
 
+        """异步接收数据"""
+        loop = asyncio.get_event_loop()
+
+        def sync_receive():
+            with self.lock:
+                self.recv_ready = True
+
+                timeout = 0
+                while self.queue.empty() and timeout < 1000:
+                    time.sleep(0.001)
+                    timeout += 1
+
+                if self.queue.empty():
+                    self.recv_ready = False
+                    raise 运行时错误("接收超时")
+
+                value = self.queue.get()
+
+                if value is None:
+                    self.recv_ready = False
+                    raise StopIteration("通道已关闭")
+
+                return value
+
 
 class Channel:
     """无缓冲通道（类似 Go 语言的通道）
@@ -87,78 +111,129 @@ class Channel:
     """
 
     def __init__(self):
-        self.queue = Queue(maxsize=0)  # maxsize=0 表示无缓冲
-        self.lock = Lock()
-        self.send_ready = False
-        self.recv_ready = False
-        self.send_condition = asyncio.Condition()
-        self.recv_condition = asyncio.Condition()
+        self.value_queue = Queue(maxsize=1)  # 无缓冲，队列大小为1
+        self.send_event = Event()
+        self.recv_event = Event()
+        self.closed = False
 
     def send(self, value):
         """发送数据（阻塞直到被接收）"""
-        with self.lock:
-            # 等待接收者准备好
-            while not self.recv_ready:
-                time.sleep(0.001)
+        if self.closed:
+            raise 运行时错误("发送到已关闭的通道")
 
-            self.queue.put(value)
-            self.recv_ready = False  # 重置接收者状态
-            # 通知接收者
-            time.sleep(0.001)
+        self.value_queue.put(value)
+        self.send_event.set()
 
-            # 等待接收者确认
-            while not self.queue.empty():
-                time.sleep(0.001)
+        # 增加超时时间到15秒，减少无缓冲通道的超时问题
+        self.recv_event.wait(timeout=15.0)
+        if not self.recv_event.is_set():
+            # 尝试回收资源
+            try:
+                self.value_queue.get_nowait()
+            except Exception:
+                pass
+            self.send_event.clear()
+            raise 运行时错误("发送超时")
 
-            self.send_ready = False
+        self.recv_event.clear()
+
+    async def send_async(self, value):
+        """异步发送数据"""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.send, value)
 
     def receive(self):
         """接收数据（阻塞直到有数据）"""
-        with self.lock:
-            self.recv_ready = True
+        if self.closed and self.value_queue.empty():
+            raise StopIteration("通道已关闭")
 
-            # 等待发送者发送数据
-            while self.queue.empty():
-                time.sleep(0.001)
+        # 增加超时时间到15秒
+        self.send_event.wait(timeout=15.0)
+        if not self.send_event.is_set():
+            raise 运行时错误("接收超时")
 
-            value = self.queue.get()
+        self.send_event.clear()
 
-            if value is None:
-                self.recv_ready = False
-                raise StopIteration("通道已关闭")
+        value = self.value_queue.get()
 
-            return value
+        if value is None:
+            self.closed = True
+            raise StopIteration("通道已关闭")
+
+        self.recv_event.set()
+
+        return value
+
+    async def receive_async(self):
+        """异步接收数据"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.receive)
 
     def close(self):
         """关闭通道"""
-        with self.lock:
-            # 发送结束信号
-            self.queue.put(None)
+        self.closed = True
+        if self.value_queue.empty():
+            self.value_queue.put(None)
 
 
-class BufferedChannel(Channel):
+class BufferedChannel:
     """缓冲通道
 
     有固定容量的缓冲区，缓冲区满时发送者阻塞，缓冲区空时接收者阻塞。
     """
 
     def __init__(self, capacity):
-        super().__init__()
         self.queue = Queue(maxsize=capacity)
+        self.closed = False
 
     def send(self, value):
         """发送数据（阻塞直到缓冲区有空间）"""
+        if self.closed:
+            raise 运行时错误("发送到已关闭的通道")
+
         try:
-            self.queue.put(value, block=True, timeout=10)
+            self.queue.put(value, block=True, timeout=15)
         except Exception as e:
             raise 运行时错误(f"发送到通道时出错: {e}")
 
+    async def send_async(self, value):
+        """异步发送数据（缓冲版本）"""
+        if self.closed:
+            raise 运行时错误("发送到已关闭的通道")
+
+        while True:
+            try:
+                # 尝试非阻塞地发送
+                self.queue.put_nowait(value)
+                return
+            except Exception as e:
+                await asyncio.sleep(0.001)
+
     def receive(self):
         """接收数据（阻塞直到有数据）"""
+        if self.closed and self.queue.empty():
+            raise StopIteration("通道已关闭")
+
         try:
-            return self.queue.get(block=True, timeout=10)
+            return self.queue.get(block=True, timeout=15)
         except Empty:
             raise 运行时错误("通道接收超时")
+
+    async def receive_async(self):
+        """异步接收数据（缓冲版本）"""
+        if self.closed and self.queue.empty():
+            raise StopIteration("通道已关闭")
+
+        while True:
+            try:
+                # 尝试非阻塞地接收
+                return self.queue.get_nowait()
+            except Empty:
+                await asyncio.sleep(0.001)
+
+    def close(self):
+        """关闭通道"""
+        self.closed = True
 
 
 class Mutex:
@@ -416,30 +491,73 @@ class ConcurrencyEvaluator:
     # 选择器
     # ========================
 
-    def exec_select_stmt(self, node: SelectStmt, env: Environment):
-        """执行选择语句"""
+    async def exec_select_stmt(self, node: SelectStmt, env: Environment):
+        """执行选择语句（异步版本）"""
+        # 首先检查是否有超时情况
+        timeout_case = next((c for c in node.cases if c.type == "timeout"), None)
+        timeout = None
+        if timeout_case:
+            timeout = self.eval_expression(timeout_case.timeout_value, env)
+
+        # 创建任务列表
+        tasks = []
+
         for case in node.cases:
             if case.type == "receive":
-                try:
-                    # 尝试接收
-                    channel = self.eval_expression(case.channel, env)
-                    if isinstance(channel, Channel) or isinstance(
-                        channel, BufferedChannel
-                    ):
-                        value = channel.receive()
-                        case_env = env.create_child()
-                        if case.variable:
-                            case_env.set(case.variable, value)
-                        self._exec_block(case.body, case_env)
-                        return
-                except Empty:
-                    continue  # 超时，继续下一个情况
+                channel = self.eval_expression(case.channel, env)
+                if isinstance(channel, Channel) or isinstance(channel, BufferedChannel):
+                    # 为每个接收操作创建一个任务
+                    task = asyncio.create_task(self._await_receive(channel, case, env))
+                    tasks.append(task)
 
-            elif case.type == "timeout":
-                timeout = self.eval_expression(case.timeout_value, env)
-                time.sleep(timeout)
-                self._exec_block(case.body, env)
-                return
+        if timeout_case:
+            # 创建超时任务
+            timeout_task = asyncio.create_task(
+                self._await_timeout(timeout, timeout_case, env)
+            )
+            tasks.append(timeout_task)
+
+        try:
+            # 等待第一个完成的任务
+            done, pending = await asyncio.wait(
+                tasks,
+                timeout=timeout if timeout_case else None,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # 取消所有未完成的任务
+            for task in pending:
+                task.cancel()
+
+            if done:
+                # 获取并返回第一个完成的任务结果
+                return await next(iter(done))
+            else:
+                # 所有任务都超时了，执行默认超时处理
+                if timeout_case:
+                    await self._exec_async_block(timeout_case.body, env)
+
+        except asyncio.TimeoutError:
+            if timeout_case:
+                await self._exec_async_block(timeout_case.body, env)
+
+    async def _await_receive(self, channel, case, env):
+        """异步接收操作"""
+        try:
+            value = await channel.receive_async()
+            case_env = env.create_child()
+            if case.variable:
+                case_env.set(case.variable, value)
+            await self._exec_async_block(case.body, case_env)
+            return True
+        except Exception as e:
+            return False
+
+    async def _await_timeout(self, timeout, case, env):
+        """异步超时操作"""
+        await asyncio.sleep(timeout)
+        await self._exec_async_block(case.body, env)
+        return False
 
     # ========================
     # 同步块
