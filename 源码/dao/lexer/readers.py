@@ -453,7 +453,7 @@ class LexerReaders:
         start_col = self.column
         self.advance()  # 跳过 $
 
-        result = ["$"]
+        result = []
 
         # 读取变量名（标识符）
         while self.current_char is not None and self._is_identifier_char(
@@ -461,5 +461,5 @@ class LexerReaders:
         ):
             result.append(self.advance())
 
-        word = "".join(result)
-        return self._make_token(TokenType.标识符, word, start_line, start_col)
+        var_name = "".join(result)
+        return self._make_token(TokenType.美元注入, var_name, start_line, start_col)

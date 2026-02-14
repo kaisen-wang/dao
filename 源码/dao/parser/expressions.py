@@ -304,13 +304,35 @@ class ExpressionParser:
         # 宏系统相关表达式
         if token.type == TokenType.感叹号 and self.peek().type == TokenType.标识符:
             return self.parse_macro_call()
-        if token.type == TokenType.引述:
+        if token.type == TokenType.引述 or token.type == TokenType.引用:
             return self.parse_quote_block()
         if token.type == TokenType.注入:
             return self.parse_unquote_expr()
+        if token.type == TokenType.美元注入:
+            from ..ast_nodes import UnquoteExpr
 
-        # 检查是否是块表达式（如 { ... }）
+            self.advance()
+            return UnquoteExpr(
+                expression=Identifier(
+                    line=token.line, column=token.column, name=token.value
+                ),
+                line=token.line,
+                column=token.column,
+            )
+
+        # 检查是否是字典字面量（如 { "a": 1 } 或 { a: 1 }）
         if token.type == TokenType.左花括号:
+            # 检查下一个token是否是标识符、字符串或数字，且后面紧跟冒号
+            if (
+                self.pos + 1 < len(self.tokens)
+                and self.tokens[self.pos + 1].type
+                in (TokenType.标识符, TokenType.文本, TokenType.数值)
+                and self.pos + 2 < len(self.tokens)
+                and self.tokens[self.pos + 2].type == TokenType.冒号
+            ):
+                return self.parse_dict_literal()
+
+            # 否则，解析为块表达式（如 { 语句 }）
             self.advance()  # 消费左花括号
 
             # 找到匹配的右花括号

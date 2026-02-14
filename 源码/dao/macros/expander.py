@@ -219,6 +219,9 @@ class MacroExpander:
                         print(
                             f"  绑定参数 '{param_name}' -> {default_value[1:-1]} (默认值)"
                         )
+                    # 对于名为 '块' 的参数，如果没有传入实参且没有默认值，不应设置默认值
+                    elif param_name == "块":
+                        print(f"  参数 '{param_name}' 未传入且无默认值，保留原样")
                     else:
                         # 默认值解析失败
                         print(
@@ -227,7 +230,11 @@ class MacroExpander:
                         replacements[param_name] = NumberLiteral(value=0)
                 except Exception as e:
                     print(f"解析默认值时出错：{e}")
-                    replacements[param_name] = NumberLiteral(value=0)
+                    # 对于名为 '块' 的参数，如果解析失败，保留原样
+                    if param_name == "块":
+                        print(f"  参数 '{param_name}' 解析失败，保留原样")
+                    else:
+                        replacements[param_name] = NumberLiteral(value=0)
 
         # 处理返回值的情况
         target_body = body

@@ -149,7 +149,9 @@ class TokenType(Enum):
     # ========================
     定义宏 = auto()  # define_macro - 宏定义
     引述 = auto()  # quote - 引述块
+    引用 = auto()  # quote - 引用块（同义词）
     注入 = auto()  # unquote - 注入表达式
+    美元注入 = auto()  # $ - 美元符号注入表达式
 
     # ========================
     # 并发编程关键字
@@ -251,6 +253,7 @@ KEYWORDS: dict[str, TokenType] = {
     # 宏系统
     "定义宏": TokenType.定义宏,
     "引述": TokenType.引述,
+    "引用": TokenType.引用,
     "注入": TokenType.注入,
     # 控制流
     "定义": TokenType.定义,

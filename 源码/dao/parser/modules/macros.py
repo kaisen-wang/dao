@@ -98,12 +98,12 @@ class MacroParser:
         )
 
     def parse_quote_block(self) -> QuoteBlock:
-        """解析引述块：引述 { ... } 或 引述 ..."""
-        if self.current.type == TokenType.引述:
-            token = self.advance()  # 消费 "引述"
+        """解析引述块：引述 { ... } 或 引用 { ... } 或 引述 ... 或 引用 ..."""
+        if self.current.type == TokenType.引述 or self.current.type == TokenType.引用:
+            token = self.advance()  # 消费 "引述" 或 "引用"
         else:
             raise 语法错误(
-                "引述块需要以'引述'关键字开头",
+                "引述块需要以'引述'或'引用'关键字开头",
                 self.current.line,
                 self.current.column,
                 self.source,
@@ -203,14 +203,33 @@ class MacroParser:
             self.advance()  # 消费右括号
 
         print(f"After parsing macro call: pos={self.pos}, arguments={len(arguments)}")
-        if self.pos < len(self.tokens):
-            print(
-                f"Current token: {self.tokens[self.pos].type.name} -> '{self.tokens[self.pos].value}'"
-            )
+        print(f"Tokens around pos:")
+        for i in range(max(0, self.pos - 3), min(len(self.tokens), self.pos + 3)):
+            type_name = self.tokens[i].type.name
+            value = self.tokens[i].value
+            prefix = "→" if i == self.pos else " "
+            print(f"  {prefix}[{i:2d}] {type_name:12} : {repr(value)}")
 
-        # 检查是否有块参数
-        if self.pos < len(self.tokens) and self.current.type == TokenType.左花括号:
-            self.advance()  # 消费左花括号
+        if self.pos < len(self.tokens):
+            print(f"Current token: {self.current.type.name} -> '{self.current.value}'")
+
+        # 检查是否有块参数（作为参数列表后的可选块）
+        # 跳过任何可能的换行
+        while self.pos < len(self.tokens) and self.current.type == TokenType.换行:
+            self.advance()
+
+        # 问题分析：pos=41 但左花括号在 pos=40，说明位置计算有误
+        # 尝试向后检查一个位置
+        check_pos = self.pos
+        if check_pos > 0 and self.tokens[check_pos - 1].type == TokenType.左花括号:
+            check_pos = self.pos - 1
+
+        if (
+            check_pos < len(self.tokens)
+            and self.tokens[check_pos].type == TokenType.左花括号
+        ):
+            print(f"Block argument found at pos={check_pos}")
+            self.pos = check_pos + 1  # 移动到左花括号之后
 
             # 找到匹配的右花括号
             depth = 1
@@ -256,10 +275,18 @@ class MacroParser:
         ):
             return self.parse_macro_call()
 
-        if self.current.type == TokenType.引述:
+        if self.current.type == TokenType.引述 or self.current.type == TokenType.引用:
             return self.parse_quote_block()
 
         if self.current.type == TokenType.注入:
             return self.parse_unquote_expr()
+
+        if self.current.type == TokenType.美元注入:
+            token = self.advance()  # 消费 $注入 Token
+            return UnquoteExpr(
+                expression=Identifier(token.value, token.line, token.column),
+                line=token.line,
+                column=token.column,
+            )
 
         return None
