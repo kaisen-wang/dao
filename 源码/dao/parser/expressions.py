@@ -309,6 +309,36 @@ class ExpressionParser:
         if token.type == TokenType.注入:
             return self.parse_unquote_expr()
 
+        # 检查是否是块表达式（如 { ... }）
+        if token.type == TokenType.左花括号:
+            self.advance()  # 消费左花括号
+
+            # 找到匹配的右花括号
+            depth = 1
+            block_end = self.pos
+            while block_end < len(self.tokens):
+                if self.tokens[block_end].type == TokenType.左花括号:
+                    depth += 1
+                elif self.tokens[block_end].type == TokenType.右花括号:
+                    depth -= 1
+                    if depth == 0:
+                        break
+                block_end += 1
+
+            if block_end < len(self.tokens):
+                from ..ast_nodes import BlockExpr
+
+                block_body = []
+
+                while self.pos < block_end:
+                    stmt = self.parse_statement()
+                    if stmt:
+                        block_body.append(stmt)
+
+                self.pos = block_end + 1  # 消费右花括号
+
+                return BlockExpr(body=block_body)
+
         # 并发编程相关表达式
         if token.type == TokenType.等待:
             return self.parse_await_expr()

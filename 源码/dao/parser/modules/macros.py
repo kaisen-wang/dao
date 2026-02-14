@@ -208,13 +208,8 @@ class MacroParser:
                 f"Current token: {self.tokens[self.pos].type.name} -> '{self.tokens[self.pos].value}'"
             )
 
-        # 检查是否有块参数（pos 可能需要减 1 来指向左花括号）
-        if (
-            self.pos > 0
-            and self.pos < len(self.tokens)
-            and self.tokens[self.pos - 1].type == TokenType.左花括号
-        ):
-            self.pos -= 1
+        # 检查是否有块参数
+        if self.pos < len(self.tokens) and self.current.type == TokenType.左花括号:
             self.advance()  # 消费左花括号
 
             # 找到匹配的右花括号
