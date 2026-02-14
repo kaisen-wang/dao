@@ -108,12 +108,13 @@ class Channel:
     """无缓冲通道（类似 Go 语言的通道）
 
     发送者会阻塞直到有接收者，接收者会阻塞直到有发送者。
+    使用队列实现简单的同步。
     """
 
     def __init__(self):
-        self.value_queue = Queue(maxsize=1)  # 无缓冲，队列大小为1
-        self.send_event = Event()
-        self.recv_event = Event()
+        from queue import Queue
+
+        self._queue = Queue(maxsize=1)
         self.closed = False
 
     def send(self, value):
@@ -121,21 +122,10 @@ class Channel:
         if self.closed:
             raise 运行时错误("发送到已关闭的通道")
 
-        self.value_queue.put(value)
-        self.send_event.set()
-
-        # 增加超时时间到15秒，减少无缓冲通道的超时问题
-        self.recv_event.wait(timeout=15.0)
-        if not self.recv_event.is_set():
-            # 尝试回收资源
-            try:
-                self.value_queue.get_nowait()
-            except Exception:
-                pass
-            self.send_event.clear()
+        try:
+            self._queue.put(value, block=True, timeout=30.0)
+        except:
             raise 运行时错误("发送超时")
-
-        self.recv_event.clear()
 
     async def send_async(self, value):
         """异步发送数据"""
@@ -144,25 +134,15 @@ class Channel:
 
     def receive(self):
         """接收数据（阻塞直到有数据）"""
-        if self.closed and self.value_queue.empty():
+        if self.closed and self._queue.empty():
             raise StopIteration("通道已关闭")
 
-        # 增加超时时间到15秒
-        self.send_event.wait(timeout=15.0)
-        if not self.send_event.is_set():
+        try:
+            return self._queue.get(block=True, timeout=30.0)
+        except:
+            if self.closed:
+                raise StopIteration("通道已关闭")
             raise 运行时错误("接收超时")
-
-        self.send_event.clear()
-
-        value = self.value_queue.get()
-
-        if value is None:
-            self.closed = True
-            raise StopIteration("通道已关闭")
-
-        self.recv_event.set()
-
-        return value
 
     async def receive_async(self):
         """异步接收数据"""
@@ -172,8 +152,6 @@ class Channel:
     def close(self):
         """关闭通道"""
         self.closed = True
-        if self.value_queue.empty():
-            self.value_queue.put(None)
 
 
 class BufferedChannel:
@@ -446,16 +424,18 @@ class ConcurrencyEvaluator:
 
     def exec_parallel_stmt(self, node: ParallelStmt, env: Environment):
         """执行并行块"""
-        # 使用线程执行并行块
+        # 使用简单的线程执行并行块
+        import threading
+
         threads = []
-
         for stmt in node.body:
-            thread = Thread(target=self._dispatch_statement, args=(stmt, env))
-            thread.start()
-            threads.append(thread)
+            t = threading.Thread(target=self._dispatch_statement, args=(stmt, env))
+            t.start()
+            threads.append(t)
 
-        for thread in threads:
-            thread.join()
+        # 等待所有线程完成
+        for t in threads:
+            t.join(timeout=30.0)
 
     # ========================
     # 通道
