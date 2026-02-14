@@ -153,6 +153,8 @@ class StatementExecutor:
                 return self.exec_select_stmt(stmt, env)
             case SyncStmt():
                 return self.exec_sync_stmt(stmt, env)
+            case LogicBlock():
+                return self.exec_logic_block(stmt, env)
             case _:
                 raise 运行时错误(
                     f"未知的语句类型: {type(stmt).__name__}",
@@ -189,6 +191,12 @@ class StatementExecutor:
                 obj.set_field(stmt.target.member, value)
             elif isinstance(obj, dict):
                 obj[stmt.target.member] = value
+            elif hasattr(obj, "set_field"):
+                # 处理 ErrorInstanceWrapper 类型的对象
+                obj.set_field(stmt.target.member, value)
+            elif hasattr(obj, "__setattr__"):
+                # 处理其他具有 __setattr__ 方法的对象
+                setattr(obj, stmt.target.member, value)
             else:
                 raise 类型错误(
                     f"无法给类型 '{type(obj).__name__}' 设置属性",
@@ -331,38 +339,51 @@ class StatementExecutor:
         try:
             return self._exec_block(stmt.try_body, env)
         except Exception as e:
-            # 类型化捕获：检查是否指定了错误类型
-            if stmt.catch_body:
+            # 检查每个捕获块
+            for catch in stmt.catches:
                 should_catch = False
+                error_type = catch.get("error_type")
+                catch_var = catch.get("catch_var")
+                catch_body = catch.get("catch_body")
 
                 # 如果指定了错误类型，检查异常是否匹配
-                if stmt.error_type:
-                    error_class = env.get(stmt.error_type)
-                    should_catch = isinstance(e, error_class)
+                if error_type:
+                    if error_type == "异常":
+                        # '异常' 类型表示捕获所有类型的错误
+                        should_catch = True
+                    else:
+                        # 其他类型需要在环境中查找
+                        error_class = env.get(error_type)
+                        # 对于 DaoError 类型，检查 e.类型 == error_class
+                        if isinstance(e, DaoError):
+                            should_catch = e.类型 == error_class
+                        else:
+                            # 对于 Python 异常，检查 isinstance
+                            should_catch = isinstance(e, error_class)
                 else:
                     # 没有指定错误类型，捕获所有异常
                     should_catch = True
 
-                if should_catch:
+                if should_catch and catch_body:
                     catch_env = env.create_child()
-                    if stmt.catch_var:
+                    if catch_var:
                         # 对于 DaoError 及其子类，使用异常对象本身
                         if isinstance(e, DaoError):
-                            catch_env.define(stmt.catch_var, e)
+                            catch_env.define(catch_var, e)
                         else:
                             # 对于 Python 异常，创建错误信息字典
                             catch_env.define(
-                                stmt.catch_var,
+                                catch_var,
                                 {
                                     "信息": str(e),
                                     "行": getattr(e, "line", 0),
                                     "列": getattr(e, "column", 0),
                                 },
                             )
-                    return self._exec_block(stmt.catch_body, catch_env)
-                else:
-                    # 不匹配的异常类型，重新抛出
-                    raise
+                    return self._exec_block(catch_body, catch_env)
+
+            # 没有匹配到任何捕获块，重新抛出异常
+            raise
         finally:
             if stmt.finally_body:
                 self._exec_block(stmt.finally_body, env)
@@ -452,7 +473,16 @@ class StatementExecutor:
             else:
                 parent = env.get(stmt.parent_name)
                 # 检查是否继承自 DaoError（自定义异常类型）
-                if isinstance(parent, DaoError):
+                # 需要检查 parent 是否是 DaoClass 且继承自 DaoError，或者本身就是 DaoError
+                if isinstance(parent, DaoClass):
+                    # 检查继承链是否包含 DaoError
+                    check_parent = parent
+                    while check_parent:
+                        if check_parent == DaoError:
+                            is_error_class = True
+                            break
+                        check_parent = check_parent.parent
+                elif parent == DaoError:
                     is_error_class = True
                 elif not isinstance(parent, DaoClass):
                     raise 类型错误(
@@ -540,14 +570,18 @@ class StatementExecutor:
 
         # 如果是错误类，创建 DaoError 的子类
         if is_error_class:
-            # 创建自定义错误类（继承自 DaoError）
-            class CustomError(DaoError):
-                def __init__(self, message: str = "发生错误"):
-                    super().__init__(message)
-
-            CustomError.__name__ = stmt.name
-            CustomError.类名 = stmt.name
-            env.define(stmt.name, CustomError)
+            # 所有错误类都创建为普通的 DaoClass，这样它们可以被正常继承
+            klass = DaoClass(
+                name=stmt.name,
+                parent=DaoError,
+                methods=methods,
+                static_methods=static_methods,
+                private_names=private_names,
+                implemented_traits=implemented_traits,
+                is_abstract=stmt.is_abstract,
+                abstract_methods=abstract_methods,
+            )
+            env.define(stmt.name, klass)
         else:
             klass = DaoClass(
                 name=stmt.name,
@@ -755,6 +789,61 @@ class StatementExecutor:
     # ========================
     # 解构赋值
     # ========================
+
+    def exec_logic_block(self, stmt: LogicBlock, env: Environment) -> None:
+        """执行逻辑块：创建知识库并添加事实和规则"""
+        from ..logic.core import KnowledgeBase, LogicStruct, normalize_term
+        from ..logic.solver import Solver
+
+        # 创建知识库
+        kb = KnowledgeBase(stmt.name)
+
+        # 添加事实
+        for fact in stmt.facts:
+            # 求值事实的参数
+            evaluated_args = [self.eval_expression(arg, env) for arg in fact.arguments]
+            # 标准化为逻辑项
+            normalized_args = [normalize_term(arg) for arg in evaluated_args]
+            # 创建逻辑结构
+            logic_fact = LogicStruct(fact.predicate, normalized_args)
+            kb.add_fact(logic_fact)
+
+        # 添加规则
+        for rule in stmt.rules:
+            # 求值规则头的参数
+            head_args = [self.eval_expression(arg, env) for arg in rule.head.arguments]
+            normalized_head_args = [normalize_term(arg) for arg in head_args]
+            rule_head = LogicStruct(rule.head.predicate, normalized_head_args)
+
+            # 求值规则体的参数
+            rule_body = []
+            for body_expr in rule.body:
+                if isinstance(body_expr, FunctionCall):
+                    # 解析函数调用作为逻辑事实
+                    predicate = body_expr.callee.name
+                    body_args = [
+                        self.eval_expression(arg, env) for arg in body_expr.arguments
+                    ]
+                    normalized_body_args = [normalize_term(arg) for arg in body_args]
+                    rule_body.append(LogicStruct(predicate, normalized_body_args))
+                elif isinstance(body_expr, LogicFact):
+                    body_args = [
+                        self.eval_expression(arg, env) for arg in body_expr.arguments
+                    ]
+                    normalized_body_args = [normalize_term(arg) for arg in body_args]
+                    rule_body.append(
+                        LogicStruct(body_expr.predicate, normalized_body_args)
+                    )
+                else:
+                    # 对于其他类型的表达式，直接求值
+                    rule_body.append(self.eval_expression(body_expr, env))
+
+            kb.add_rule(rule_head, rule_body)
+
+        # 将知识库和求解器存入环境中
+        solver = Solver(kb)
+        env.define(stmt.name, kb)
+        env.define(f"{stmt.name}_求解器", solver)
 
     def exec_destructure(self, stmt, env: Environment) -> None:
         """执行解构赋值"""

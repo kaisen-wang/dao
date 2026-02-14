@@ -196,11 +196,10 @@ class ConcurrencyParser:
         )
 
     def parse_select_stmt(self) -> SelectStmt:
-        """解析选择语句：选择 { 情况 接收 ch as val: ... 情况 超时(秒数): ... }"""
+        """解析选择语句：选择 ..."""
         token = self.advance()  # 消费 选择
 
-        self.expect(TokenType.左花括号, "选择语句需要 '{'")
-        self = self.expect(TokenType.换行, "选择语句 '{' 后需要换行")
+        self.expect(TokenType.换行, "选择语句后需要换行")
         self.expect(TokenType.缩进, "选择语句体需要缩进")
 
         cases = []
@@ -273,14 +272,13 @@ class ConcurrencyParser:
         )
 
     def parse_sync_stmt(self) -> SyncStmt:
-        """解析同步块：同步 锁 { ... }"""
+        """解析同步块：同步 锁 ..."""
         token = self.advance()  # 消费 同步
 
         # 解析互斥锁表达式
         mutex = self.parse_expression()
 
-        self.expect(TokenType.左花括号, "同步块需要 '{'")
-        self.expect(TokenType.换行, "同步块 '{' 后需要换行")
+        self.expect(TokenType.换行, "同步块后需要换行")
 
         # 解析同步块体
         body = self.parse_block()

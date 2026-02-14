@@ -19,6 +19,8 @@ from ..ast_nodes import (
     LambdaExpr,
     ListLiteral,
     ListPattern,
+    LogicQuery,
+    LogicVariable,
     MemberAccess,
     NullLiteral,
     NumberLiteral,
@@ -216,8 +218,20 @@ class ExpressionParser:
         """解析函数调用和成员/索引访问"""
         expr = self.parse_primary()
 
+        # 如果是逻辑变量，直接返回，不解析成函数调用
+        if (
+            isinstance(expr, Identifier)
+            and expr.name.startswith("?")
+            or isinstance(expr, LogicVariable)
+        ):
+            return expr
+
         while True:
             if self.match(TokenType.左括号):
+                # 如果 expr 是逻辑变量，返回 expr，不解析函数调用
+                if isinstance(expr, Identifier) and expr.name.startswith("?"):
+                    return expr
+
                 # 函数调用
                 args = []
                 kwargs = {}
@@ -272,6 +286,7 @@ class ExpressionParser:
         MEMBER_KEYWORDS = {
             TokenType.初始化,
             TokenType.类型,
+            TokenType.查询,
             TokenType.标识符,
         }
         if self.current.type in MEMBER_KEYWORDS:
@@ -349,9 +364,15 @@ class ExpressionParser:
             self.advance()
             return NullLiteral(line=token.line, column=token.column)
 
-        # 标识符
+        # 标识符 (包括逻辑变量)
         if token.type == TokenType.标识符:
             self.advance()
+            if token.value.startswith("?"):
+                from ..ast_nodes import LogicVariable
+
+                return LogicVariable(
+                    name=token.value, line=token.line, column=token.column
+                )
             return Identifier(name=token.value, line=token.line, column=token.column)
 
         # 本对象 (this/self)
@@ -364,6 +385,11 @@ class ExpressionParser:
             self.advance()
             return SuperExpr(line=token.line, column=token.column)
 
+        # 允许类型关键字作为标识符
+        if token.type == TokenType.类型:
+            self.advance()
+            return Identifier(name="类型", line=token.line, column=token.column)
+
         # 匿名函数：函数(x) => x * 2
         if token.type == TokenType.函数:
             return self.parse_lambda()
@@ -371,6 +397,13 @@ class ExpressionParser:
         # 括号表达式
         if token.type == TokenType.左括号:
             self.advance()
+            # 如果下一个 token 是标识符且是逻辑变量，直接返回该变量，不解析括号表达式
+            if self.current.type == TokenType.标识符 and self.current.value.startswith(
+                "?"
+            ):
+                expr = self.parse_primary()
+                return expr
+            # 否则，解析括号内的表达式
             expr = self.parse_expression()
             self.expect(TokenType.右括号, "括号表达式需要 ')'")
             return expr
@@ -378,6 +411,10 @@ class ExpressionParser:
         # 列表字面量 [...]
         if token.type == TokenType.左方括号:
             return self.parse_list_literal()
+
+        # 查询表达式
+        if token.type == TokenType.查询:
+            return self.parse_logic_query()
 
         # 字典字面量 {...}
         if token.type == TokenType.左花括号:
@@ -388,6 +425,32 @@ class ExpressionParser:
     # ========================
     # 模板字符串
     # ========================
+
+    def parse_logic_query(self) -> LogicQuery:
+        """解析查询表达式：查询(知识库, 目标)"""
+        token = self.advance()  # 消费 查询
+
+        # 期望左括号
+        self.expect(TokenType.左括号, "查询表达式需要左括号")
+
+        # 解析知识库
+        knowledge_base = self.parse_expression()
+
+        # 期望逗号
+        self.expect(TokenType.逗号, "查询表达式需要逗号")
+
+        # 解析查询目标
+        goal = self.parse_expression()
+
+        # 期望右括号
+        self.expect(TokenType.右括号, "查询表达式需要右括号")
+
+        return LogicQuery(
+            knowledge_base=knowledge_base,
+            goal=goal,
+            line=token.line,
+            column=token.column,
+        )
 
     def parse_template_literal(self) -> TemplateLiteral:
         """解析模板字符串：`你好 {名字}，{年龄}岁`"""

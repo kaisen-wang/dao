@@ -41,6 +41,10 @@ class StatementParser(
         """解析一条语句 - 根据当前token类型分派到相应的解析方法"""
         token = self.current
 
+        # 处理边界情况：如果是回退token，说明块结束，不解析任何内容
+        if token.type == TokenType.回退:
+            return None
+
         match token.type:
             case TokenType.定义:
                 return self.parse_variable_decl(is_constant=False)
@@ -48,6 +52,8 @@ class StatementParser(
                 return self.parse_variable_decl(is_constant=True)
             case TokenType.函数:
                 return self.parse_function_decl()
+            case TokenType.初始化:
+                return self.parse_constructor()
             case TokenType.异步:
                 return self.parse_async_function_decl()
             case TokenType.抽象:

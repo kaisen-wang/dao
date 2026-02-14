@@ -1,13 +1,17 @@
 """逻辑编程解析混入"""
 
-from ...tokens import TokenType
 from ...ast_nodes import (
+    BooleanLiteral,
+    FunctionCall,
+    Identifier,
     LogicBlock,
     LogicFact,
     LogicRule,
-    Identifier,
-    FunctionCall,
+    NumberLiteral,
+    StringLiteral,
 )
+from ...errors import 语法错误
+from ...tokens import TokenType
 
 
 class LogicProgrammingParser:
@@ -49,7 +53,6 @@ class LogicProgrammingParser:
             column=token.column,
         )
 
-
     def parse_logic_fact(self) -> LogicFact:
         """解析事实声明：事实: 父母("张三", "小明")"""
         token = self.advance()  # 消费 事实
@@ -57,17 +60,28 @@ class LogicProgrammingParser:
         # 消费冒号
         self.match(TokenType.冒号)
 
-        # 解析谓词
-        predicate_expr = self.parse_expression()
+        # 解析整个事实表达式
+        fact_expr = self.parse_expression()
         predicate = ""
         arguments = []
 
-        if isinstance(predicate_expr, Identifier):
-            predicate = predicate_expr.name
-        elif isinstance(predicate_expr, CallExpr):
-            if isinstance(predicate_expr.callee, Identifier):
-                predicate = predicate_expr.callee.name
-            arguments = predicate_expr.arguments
+        if isinstance(fact_expr, Identifier):
+            predicate = fact_expr.name
+        elif isinstance(fact_expr, FunctionCall):
+            if isinstance(fact_expr.callee, Identifier):
+                # 确保谓词不是逻辑变量
+                if fact_expr.callee.name.startswith("?"):
+                    raise 语法错误(f"谓词不能是逻辑变量 '{fact_expr.callee.name}'")
+                predicate = fact_expr.callee.name
+            arguments = fact_expr.arguments
+            # 检查参数是否有效
+            for arg in arguments:
+                if isinstance(arg, Identifier) and arg.name.startswith("?"):
+                    continue  # 逻辑变量是有效的参数
+                elif isinstance(arg, (StringLiteral, NumberLiteral, BooleanLiteral)):
+                    continue  # 字面量是有效的参数
+                else:
+                    raise 语法错误(f"无效的参数类型: {type(arg).__name__}")
 
         return LogicFact(
             predicate=predicate,
@@ -76,30 +90,38 @@ class LogicProgrammingParser:
             column=token.column,
         )
 
-
     def parse_logic_rule(self) -> LogicRule:
-        """解析规则声明：规则: 祖父母(?祖, ?孙) 如果 父母(?祖, ?父) 并且 父母(?父, ?孙)"""
+        """解析规则声明：规则: 祖父母(?祖, "小明") 如果 父母(?祖, "小明")"""
         token = self.advance()  # 消费 规则
 
         # 消费冒号
         self.match(TokenType.冒号)
 
         # 解析规则头
-        head = self.parse_logic_fact()
+        # 期望函数调用
+        head = self.parse_expression()
+        if not isinstance(head, FunctionCall):
+            raise 语法错误("规则头必须是函数调用")
 
-        # 检查是否有"如果"
+        # 解析规则体
         body = []
         if self.match(TokenType.如果):
             # 解析规则体
             while not self.current.type in (TokenType.换行, TokenType.右花括号):
                 if self.current.type == TokenType.标识符:
                     body.append(self.parse_expression())
-                    self.match(TokenType.并且)
+                    # 检查是否有"并且"关键字，如果有则消费
+                    if self.current.type == TokenType.并且:
+                        self.advance()
 
         return LogicRule(
-            head=head,
+            head=LogicFact(
+                predicate=head.callee.name,
+                arguments=head.arguments,
+                line=token.line,
+                column=token.column,
+            ),
             body=body,
             line=token.line,
             column=token.column,
         )
-

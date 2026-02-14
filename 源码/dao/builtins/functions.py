@@ -269,6 +269,7 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         "整数": BuiltinFunction("整数", _builtin_整数, 1),
         "小数": BuiltinFunction("小数", _builtin_小数, 1),
         "文本": BuiltinFunction("文本", _builtin_文本, 1),
+        "str": BuiltinFunction("str", _builtin_文本, 1),
         "交集": BuiltinFunction("交集", _builtin_交集, 2),
         "并集": BuiltinFunction("并集", _builtin_并集, 2),
         "集合": BuiltinFunction("集合", _builtin_集合),

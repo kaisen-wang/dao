@@ -1,35 +1,43 @@
 """面向对象声明解析混入"""
 
-from ...tokens import TokenType, Token
 from ...ast_nodes import (
-    Statement,
-    ClassDecl,
     AbstractDecl,
+    ClassDecl,
     EnumDecl,
-    TraitDecl,
     FunctionDecl,
+    Statement,
+    TraitDecl,
 )
 from ...errors import 语法错误
+from ...tokens import Token, TokenType
 
 
 class OOPDeclParser:
     """面向对象声明解析方法集"""
 
     def parse_enum_decl(self) -> EnumDecl:
-        """解析枚举声明：枚举 名字 { 枚举值1, 枚举值2, ... }"""
+        """解析枚举声明：枚举 名字 ..."""
 
         token = self.advance()  # 消费 枚举
         name_token = self.expect(TokenType.标识符, "枚举声明需要一个枚举名")
 
-        self.expect(TokenType.左花括号, "枚举声明需要 '{'")
+        self.expect(TokenType.换行, "枚举声明后需要换行")
+        self.expect(TokenType.缩进, "枚举值需要缩进块")
 
         values = []
-        while not self.match(TokenType.右花括号):
+        while self.current.type not in (TokenType.回退, TokenType.文件结束):
+            self.skip_newlines()
+            if self.current.type in (TokenType.回退, TokenType.文件结束):
+                break
+
             value_token = self.expect(TokenType.标识符, "枚举值需要是标识符")
             values.append(value_token.value)
 
             # 逗号是可选的
             self.match(TokenType.逗号)
+            self.skip_newlines()
+
+        self.expect(TokenType.回退, "枚举声明需要回退")
 
         return EnumDecl(
             name=name_token.value,
@@ -37,7 +45,6 @@ class OOPDeclParser:
             line=token.line,
             column=token.column,
         )
-
 
     def parse_abstract_decl(self) -> AbstractDecl:
         """解析抽象类型声明：抽象 类型 名字 [继承自 父类] ..."""
@@ -61,7 +68,6 @@ class OOPDeclParser:
             line=token.line,
             column=token.column,
         )
-
 
     def parse_class_decl(self) -> ClassDecl:
         """解析类型声明：类型 名字 [继承自 父类] [实现 特征1, 特征2] ..."""
@@ -101,9 +107,13 @@ class OOPDeclParser:
                 # 错误类型不需要类体，如果不是错误类型则放回缩进
                 self.pos -= 1  # Undo the match(TokenType.缩进)
 
-        # 错误类型不需要解析类体
+        # 错误类型可能有类体，也可能没有类体
         if is_error_class:
-            body = []
+            # 检查是否有缩进块，如果没有则不解析类体
+            if has_indent or (self.current.type == TokenType.缩进):
+                body = self.parse_class_body(indent_consumed=has_indent)
+            else:
+                body = []
         else:
             body = self.parse_class_body(indent_consumed=has_indent)
 
@@ -117,7 +127,6 @@ class OOPDeclParser:
             is_error_class=is_error_class,
             is_abstract=is_abstract,
         )
-
 
     def parse_trait_decl(self) -> TraitDecl:
         """解析特征声明：特征 名字 ..."""
@@ -134,11 +143,15 @@ class OOPDeclParser:
             column=token.column,
         )
 
-
     def parse_class_body(self, indent_consumed: bool = False) -> list[Statement]:
         """解析类体（缩进块，包含构造函数和方法）"""
+        # 允许空类体：检查是否有缩进，如果没有，则返回空语句列表
         if not indent_consumed:
-            self.expect(TokenType.缩进, "类型类体需要缩进")
+            # 检查下一个 token 是否是缩进，如果不是，则返回空类体
+            if self.current.type != TokenType.缩进:
+                return []
+            # 如果有缩进，则继续解析
+            self.advance()
         statements = []
 
         while self.current.type not in (TokenType.回退, TokenType.文件结束):
@@ -190,11 +203,15 @@ class OOPDeclParser:
                 statements.append(func)
             elif self.current.type == TokenType.获取:
                 # 属性 getter：获取 属性名()
-                func = self._parse_property_accessor(is_static, is_private, is_getter=True)
+                func = self._parse_property_accessor(
+                    is_static, is_private, is_getter=True
+                )
                 statements.append(func)
             elif self.current.type == TokenType.设置:
                 # 属性 setter：设置 属性名(value)
-                func = self._parse_property_accessor(is_static, is_private, is_getter=False)
+                func = self._parse_property_accessor(
+                    is_static, is_private, is_getter=False
+                )
                 statements.append(func)
             else:
                 # 其他语句（如类级别的属性声明）
@@ -202,7 +219,6 @@ class OOPDeclParser:
 
         self.match(TokenType.回退)
         return statements
-
 
     def parse_constructor(self) -> FunctionDecl:
         """解析构造函数：初始化(参数) ..."""

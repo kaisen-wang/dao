@@ -2,20 +2,24 @@
 枚举类型测试
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from dao.interpreter import Interpreter
 from dao.lexer import Lexer
 from dao.parser import Parser
-from dao.interpreter import Interpreter
 
 
 def test_enum_basic():
     """测试基础枚举类型"""
     source = """// 测试基础枚举
-枚举 颜色 { 红, 绿, 蓝, 黄 }
+枚举 颜色
+    红
+    绿
+    蓝
+    黄
 
 打印(颜色)
 """
@@ -30,7 +34,11 @@ def test_enum_basic():
 def test_enum_member_access():
     """测试枚举成员访问"""
     source = """// 测试枚举成员访问
-枚举 方向 { 北, 南, 东, 西 }
+枚举 方向
+    北
+    南
+    东
+    西
 
 打印(方向)
 """

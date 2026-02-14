@@ -230,6 +230,10 @@ KEYWORDS: dict[str, TokenType] = {
     "互斥锁": TokenType.互斥锁,
     "同步": TokenType.同步,
     "运行异步": TokenType.标识符,  # 运行异步是函数名而非关键字
+    # OOP
+    "类型": TokenType.类型,
+    "抽象": TokenType.抽象,
+    "枚举": TokenType.枚举,
     # 逻辑编程
     "逻辑": TokenType.逻辑,
     "事实": TokenType.事实,

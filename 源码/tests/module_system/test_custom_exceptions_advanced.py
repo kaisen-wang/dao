@@ -2,14 +2,14 @@
 自定义异常高级测试
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from dao.interpreter import Interpreter
 from dao.lexer import Lexer
 from dao.parser import Parser
-from dao.interpreter import Interpreter
 
 
 def run(source: str):
@@ -51,6 +51,8 @@ class TestAdvancedExceptionFeatures:
 
 函数 测试()
     抛出 自定义错误("测试消息")
+
+测试()
 """
         try:
             run(source)
@@ -68,6 +70,8 @@ class TestAdvancedExceptionFeatures:
 
 函数 测试()
     抛出 三层错误("三层错误消息")
+
+测试()
 """
         try:
             run(source)
@@ -163,9 +167,9 @@ class TestAdvancedExceptionFeatures:
 
 尝试
     测试()
-捕获 一层错误 as err
+捕获 一层错误: err
     打印("捕获到一层错误")
-捕获 二层错误 as err
+捕获 二层错误: err
     打印("捕获到二层错误")
 """
         result = run(source)
@@ -174,4 +178,5 @@ class TestAdvancedExceptionFeatures:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

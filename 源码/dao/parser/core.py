@@ -95,6 +95,7 @@ class Parser(StatementParser, ExpressionParser):
             TokenType.真,
             TokenType.假,
             TokenType.空,
+            TokenType.类型,
             # 并发编程相关的关键字
             TokenType.异步,
             TokenType.等待,
@@ -108,6 +109,7 @@ class Parser(StatementParser, ExpressionParser):
             TokenType.超时,
             TokenType.互斥锁,
             TokenType.同步,
+            TokenType.查询,
         )
 
         if (
@@ -156,6 +158,10 @@ class Parser(StatementParser, ExpressionParser):
             stmt = self.parse_statement()
             if stmt:
                 program.statements.append(stmt)
+            else:
+                # 如果返回 None，说明遇到回退 token，直接跳过
+                if self.current.type == TokenType.回退:
+                    self.advance()
             self.skip_newlines()
 
         return program

@@ -14,7 +14,6 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # ========================
 # 基类
 # ========================
@@ -303,9 +302,9 @@ class TryStmt(Statement):
     """尝试-捕获-最终"""
 
     try_body: list[Statement] = field(default_factory=list)
-    catch_var: str | None = None
-    catch_body: list[Statement] = field(default_factory=list)
-    error_type: str | None = None  # 捕获的错误类型（类型化捕获）
+    catches: list[dict] = field(
+        default_factory=list
+    )  # 多个捕获块，每个包含 catch_var、catch_body、error_type
     finally_body: list[Statement] = field(default_factory=list)
 
 
@@ -515,6 +514,7 @@ class LogicRule(Expression):
     body: list[Expression] = field(default_factory=list)  # 规则体中的逻辑表达式
 
 
+@dataclass
 @dataclass
 class LogicVariable(Expression):
     """逻辑变量：?变量名"""

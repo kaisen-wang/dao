@@ -45,6 +45,10 @@ class ExpressionEvaluator:
                     for k, v in expr.pairs
                 }
             case Identifier():
+                if expr.name.startswith("?"):
+                    from ..logic.core import LogicVariable
+
+                    return LogicVariable(expr.name)
                 return env.get(expr.name)
             case SelfExpr():
                 return env.get("本对象")
@@ -76,6 +80,18 @@ class ExpressionEvaluator:
                 return self.eval_channel(expr, env)
             case ReceiveExpr():
                 return self.eval_receive(expr, env)
+            case LogicQuery():
+                return self.eval_logic_query(expr, env)
+            case LogicVariable():
+                return self.eval_logic_variable(expr, env)
+            case LogicPredicate():
+                return self.eval_logic_predicate(expr, env)
+            case LogicNegation():
+                return self.eval_logic_negation(expr, env)
+            case LogicCut():
+                return self.eval_logic_cut(expr, env)
+            case LogicConstraint():
+                return self.eval_logic_constraint(expr, env)
             case _:
                 raise 运行时错误(
                     f"未知的表达式类型: {type(expr).__name__}",
@@ -140,13 +156,106 @@ class ExpressionEvaluator:
                 self.source,
             )
 
+        # 处理所有错误类型实例的成员访问
+        from ..builtins.oop_types import DaoError
+        from ..errors import 道错误
+
+        if isinstance(obj, (DaoError, 道错误)):
+            # 检查对象是否直接有该属性
+            if hasattr(obj, expr.member):
+                return getattr(obj, expr.member)
+
+            # 对于 道错误 子类（如运行时错误），直接返回属性
+            if isinstance(obj, 道错误):
+                # 道错误 有 message, line, column, source, stack 属性
+                if expr.member in ["message", "行", "列", "source", "stack"]:
+                    if expr.member == "行":
+                        return obj.line
+                    elif expr.member == "列":
+                        return obj.column
+                    elif expr.member == "信息":
+                        return str(obj)  # 返回格式化的错误信息
+                    return getattr(obj, expr.member)
+
+            # 对于 DaoError 类型，也支持访问 '信息' 属性
+            if isinstance(obj, DaoError):
+                if expr.member == "信息":
+                    return str(obj)  # 对于 DaoError 实例，信息就是其字符串表示
+                if expr.member == "消息":
+                    return obj.message  # 直接访问 message 属性
+
+            # 检查错误类型是否有该属性的 getter 方法
+            from ..builtins.oop_types import DaoClass
+
+            if hasattr(obj, "类型") and isinstance(obj.类型, DaoClass):
+                getter_name = f"获取{expr.member}"
+                getter = obj.类型.find_method(getter_name)
+                if getter and getter.is_getter:
+                    # 我们需要创建一个临时的 DaoInstance 来调用方法
+                    class ErrorInstanceWrapper:
+                        def __init__(self, error_obj, klass):
+                            self.error = error_obj
+                            self.klass = klass
+                            self.fields = {}
+
+                        def get_field(self, name):
+                            return getattr(self.error, name, None)
+
+                        def set_field(self, name, value):
+                            setattr(self.error, name, value)
+
+                    temp_instance = ErrorInstanceWrapper(obj, obj.类型)
+                    return self._call_method(temp_instance, getter, [], {}, expr)
+
+            raise 名称错误(
+                f"类型 '{obj.类型.name if hasattr(obj, '类型') and obj.类型 else type(obj).__name__}' 的实例没有属性 '{expr.member}'",
+                expr.line,
+                expr.column,
+                self.source,
+            )
+
         if isinstance(obj, SuperProxy):
-            method = obj.parent_class.find_method(expr.member)
-            if method:
-                return BoundMethod(obj.instance, method)
+            # 检查 parent_class 是否是 DaoClass 实例（即是否有 find_method 方法）
+            if hasattr(obj.parent_class, "find_method"):
+                method = obj.parent_class.find_method(expr.member)
+                if method:
+                    return BoundMethod(obj.instance, method)
+
+            # 对于继承自 DaoError 的类型，处理特殊情况
+            from ..builtins.oop_types import DaoError
+
+            if obj.parent_class == DaoError:
+                # DaoError 是 Python 类，不是 DaoClass 实例
+                if expr.member == "初始化":
+                    # 返回一个可以设置消息的内置方法
+                    from ..builtins.callables import BuiltinFunction
+
+                    def initialize_method(消息):
+                        obj.instance.消息 = 消息
+
+                    return BuiltinFunction("初始化", initialize_method)
+
+                if (
+                    expr.member == "消息"
+                    or expr.member == "line"
+                    or expr.member == "column"
+                ):
+                    # 直接返回属性值
+                    if hasattr(obj.instance, expr.member):
+                        return getattr(obj.instance, expr.member)
+
+                raise 名称错误(
+                    f"父类型 'DaoError' 没有方法 '{expr.member}'",
+                    expr.line,
+                    expr.column,
+                    self.source,
+                )
+
             raise 名称错误(
                 f"父类型中没有方法 '{expr.member}'", expr.line, expr.column, self.source
             )
+
+        from ..builtins.oop_types import DaoClass
 
         if isinstance(obj, DaoClass):
             # 先查找静态方法
@@ -574,6 +683,74 @@ class ExpressionEvaluator:
         raise 类型错误(
             f"对象 '{channel}' 不是一个有效的通道", expr.line, expr.column, self.source
         )
+
+    def eval_logic_query(self, expr: LogicQuery, env: Environment) -> object:
+        """求值逻辑查询：查询(知识库, 目标)"""
+        from ..ast_nodes import FunctionCall
+        from ..logic.core import LogicStruct, normalize_term
+        from ..logic.solver import Solver
+
+        # 获取知识库
+        if isinstance(expr.knowledge_base, str):
+            kb = env.get(expr.knowledge_base)
+        else:
+            kb = self.eval_expression(expr.knowledge_base, env)
+
+        # 求值查询目标
+        goal = expr.goal
+        if isinstance(goal, FunctionCall):
+            # 如果是函数调用，解析为逻辑谓词
+            predicate_name = goal.callee.name
+            evaluated_args = [self.eval_expression(arg, env) for arg in goal.arguments]
+            normalized_args = [normalize_term(arg) for arg in evaluated_args]
+            normalized_goal = LogicStruct(predicate_name, normalized_args)
+        else:
+            # 否则直接求值
+            goal_value = self.eval_expression(goal, env)
+            normalized_goal = normalize_term(goal_value)
+
+        # 创建求解器
+        solver = Solver(kb)
+        # 求解查询
+        results = solver.solve(normalized_goal)
+        # 将结果转换为字典列表
+        return [result.to_dict() for result in results]
+
+    def eval_logic_variable(self, expr: LogicVariable, env: Environment) -> object:
+        """求值逻辑变量：?变量名"""
+        from ..logic.core import LogicVariable
+
+        return LogicVariable(expr.name)
+
+    def eval_logic_predicate(self, expr: LogicPredicate, env: Environment) -> object:
+        """求值逻辑谓词：谓词(?x, ?y)"""
+        from ..logic.core import LogicStruct, normalize_term
+
+        # 求值谓词参数
+        evaluated_args = [self.eval_expression(arg, env) for arg in expr.arguments]
+        normalized_args = [normalize_term(arg) for arg in evaluated_args]
+        return LogicStruct(expr.predicate, normalized_args)
+
+    def eval_logic_negation(self, expr: LogicNegation, env: Environment) -> object:
+        """求值逻辑否定：非 已封禁(?用户)"""
+        from ..logic.core import normalize_term
+        from ..logic.solver import Solver
+
+        # 求值被否定的表达式
+        negated_expr = self.eval_expression(expr.expression, env)
+        normalized_negated = normalize_term(negated_expr)
+
+        # 这里我们需要上下文信息来知道当前的知识库，
+        # 暂时返回否定表达式本身，由求解器处理
+        return ("非", normalized_negated)
+
+    def eval_logic_cut(self, expr: LogicCut, env: Environment) -> object:
+        """求值剪枝操作符：剪枝"""
+        return "剪枝"
+
+    def eval_logic_constraint(self, expr: LogicConstraint, env: Environment) -> object:
+        """求值约束表达式：?x 在范围 1..10"""
+        return ("约束", expr.variable, expr.operator, expr.bounds)
 
     def _handle_await_result(self, result):
         """处理等待的结果"""

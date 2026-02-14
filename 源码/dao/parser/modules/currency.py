@@ -203,18 +203,11 @@ class ConcurrencyParser:
         )
 
     def parse_select_stmt(self) -> SelectStmt:
-        """解析选择语句：支持两种语法风格
-        1. 选择 { 情况 接收 ch as val: ... 情况 超时(秒数): ... }
-        2. 选择
-            当 消息 = 接收 通道1
-                打印("通道1 获胜:", 消息)
-            默认
-                打印("无消息")
-        """
+        """解析选择语句：选择 ..."""
         token = self.advance()  # 消费 选择
 
-        # 左花括号变为可选
-        has_braces = self.match(TokenType.左花括号)
+        # 道语言不支持花括号语法，只支持缩进块语法
+        has_braces = False
 
         cases = []
 
@@ -430,14 +423,13 @@ class ConcurrencyParser:
         )
 
     def parse_sync_stmt(self) -> SyncStmt:
-        """解析同步块：同步 锁 { ... }"""
+        """解析同步块：同步 锁 ..."""
         token = self.advance()  # 消费 同步
 
         # 解析互斥锁表达式
         mutex = self.parse_expression()
 
-        self.expect(TokenType.左花括号, "同步块需要 '{'")
-        self.expect(TokenType.换行, "同步块 '{' 后需要换行")
+        self.expect(TokenType.换行, "同步块后需要换行")
 
         # 解析同步块体
         body = self.parse_block()

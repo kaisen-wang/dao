@@ -75,15 +75,6 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         result = None
         try:
             for stmt in program.statements:
-                print(f"=== 执行语句 ===")
-                print(f"stmt: {type(stmt).__name__}")
-                print(f"stmt: {vars(stmt)}")
-                print(f"env type: {type(env)}")
-                print(f"env: {repr(env)}")
-                if hasattr(env, "define"):
-                    print(f"env has define method")
-                else:
-                    print(f"env does NOT have define method")
                 result = self.exec_statement(stmt, env)
         except 运行时错误 as e:
             # 在全局层面，确保调用栈信息被保留
@@ -97,12 +88,6 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         统一的函数调用接口（供高阶内置函数使用）
         """
         kwargs = kwargs or {}
-
-    def _dispatch_statement(self, stmt, env):
-        """
-        调度语句执行（在并行线程中使用）
-        """
-        return self.exec_statement(stmt, env)
 
         if isinstance(func, BuiltinFunction):
             return func.call(args, kwargs)
@@ -124,13 +109,19 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
 
         raise 类型错误(f"'{func}' 不是可调用的函数", 0, 0, self.source)
 
+    def _dispatch_statement(self, stmt, env):
+        """
+        调度语句执行（在并行线程中使用）
+        """
+        return self.exec_statement(stmt, env)
+
     # ========================
     # OOP 核心方法
     # ========================
 
-    def _instantiate_class(
-        self, klass: DaoClass, args: list, kwargs: dict, call_expr
-    ) -> DaoInstance:
+    def _instantiate_class(self, klass: DaoClass, args: list, kwargs: dict, call_expr):
+        from ..builtins.oop_types import DaoError
+
         """创建类型实例"""
         # 检查是否为抽象类（抽象类不能被实例化）
         if klass.is_abstract:
@@ -143,19 +134,85 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
                 self.source,
             )
 
-        instance = DaoInstance(klass)
+        # 检查是否是错误类（继承自 DaoError）
+        is_error_class = False
+        check_parent = klass
+        while check_parent:
+            if check_parent == DaoError:
+                is_error_class = True
+                break
+            # 防止无限循环，如果 check_parent 不再变化
+            if check_parent == check_parent.parent:
+                break
+            check_parent = check_parent.parent
 
-        init_method = klass.find_method("初始化")
-        if init_method:
-            self._call_method(instance, init_method, args, kwargs, call_expr)
-        elif args:
-            line = call_expr.line if call_expr else 0
-            col = call_expr.column if call_expr else 0
-            raise 运行时错误(
-                f"类型 '{klass.name}' 没有构造函数，不接受参数", line, col, self.source
-            )
+        if is_error_class:
+            # 错误类的特殊处理 - 创建 DaoError 实例
+            message = args[0] if args else "发生错误"
+            error = DaoError(message)
+            # 存储错误类型信息
+            error.类型 = klass
+            # 处理其他参数和初始化方法
+            if "初始化" in klass.methods:
+                # 直接在 DaoError 实例上调用初始化方法
+                # 我们需要创建一个包装器，让 DaoError 实例能够像 DaoInstance 一样工作
+                # 为 DaoError 添加必要的属性和方法
+                class ErrorInstanceWrapper:
+                    def __init__(self, error_obj):
+                        self.error = error_obj
+                        self.klass = klass
+                        self.fields = {}  # 用于存储实例字段
 
-        return instance
+                    def get_field(self, name):
+                        # 先检查是否有实例字段
+                        if name in self.fields:
+                            return self.fields[name]
+                        # 再检查是否是对象的属性
+                        if hasattr(self.error, name):
+                            return getattr(self.error, name)
+                        return None
+
+                    def set_field(self, name, value):
+                        print(
+                            f"DEBUG: Setting field '{name}' to '{value}' on error: {self.error}"
+                        )
+                        # 直接存储到错误对象上
+                        setattr(self.error, name, value)
+                        # 同时也保存到实例字段中，保持一致性
+                        self.fields[name] = value
+
+                temp_instance = ErrorInstanceWrapper(error)
+                print(f"DEBUG: Calling initialize method: {klass.methods['初始化']}")
+                print(f"DEBUG: Args: {args}, Kwargs: {kwargs}")
+                self._call_method(
+                    temp_instance, klass.methods["初始化"], args, kwargs, call_expr
+                )
+                print(f"DEBUG: After initialization - error: {error}")
+                print(f"DEBUG: Has line number: {hasattr(error, '行号')}")
+                if hasattr(error, "行号"):
+                    print(f"DEBUG: Line number: {error.行号}")
+                print(f"DEBUG: Has time: {hasattr(error, '时间')}")
+                if hasattr(error, "时间"):
+                    print(f"DEBUG: Time: {error.时间}")
+                # 保存类型信息，以便在 eval_member_access 中访问
+                error.类型 = klass
+            return error
+        else:
+            # 普通类型的初始化
+            instance = DaoInstance(klass)
+            init_method = klass.find_method("初始化")
+            if init_method:
+                self._call_method(instance, init_method, args, kwargs, call_expr)
+            elif args:
+                line = call_expr.line if call_expr else 0
+                col = call_expr.column if call_expr else 0
+                raise 运行时错误(
+                    f"类型 '{klass.name}' 没有构造函数，不接受参数",
+                    line,
+                    col,
+                    self.source,
+                )
+            return instance
 
     def _call_method(
         self,
@@ -200,7 +257,22 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
             func_env.pop_frame()
             raise new_error
         except Exception as e:
-            # 对于非道语言异常，创建运行时错误包装
+            # 对于 DaoError 类型的异常，直接重新抛出
+            from ..builtins.oop_types import DaoError
+
+            if isinstance(e, DaoError):
+                func_env.pop_frame()
+                raise e
+            func_env.pop_frame()
+            raise e
+        except Exception as e:
+            # 对于 DaoError 类型的异常，直接重新抛出
+            from ..builtins.oop_types import DaoError
+
+            if isinstance(e, DaoError):
+                func_env.pop_frame()
+                raise e
+            # 对于其他异常，创建运行时错误包装
             new_error = 运行时错误(
                 str(e), 0, 0, getattr(self, "source", ""), func_env.get_stack()
             )
@@ -219,6 +291,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
     def _call_dao_function(
         self, func: DaoFunction, args: list, kwargs: dict, call_expr
     ) -> object:
+        from ..builtins.oop_types import DaoError
+
         """调用用户自定义函数"""
         func_env = func.closure_env.create_child()
         self._bind_params(func, args, kwargs, func_env, call_expr)
@@ -255,8 +329,12 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
             )
             func_env.pop_frame()
             raise new_error
+        except DaoError as e:
+            # 对于 DaoError 类型的异常，直接重新抛出
+            func_env.pop_frame()
+            raise e
         except Exception as e:
-            # 对于非道语言异常，创建运行时错误包装
+            # 对于其他异常，创建运行时错误包装
             new_error = 运行时错误(
                 str(e), 0, 0, getattr(self, "source", ""), func_env.get_stack()
             )
