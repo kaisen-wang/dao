@@ -40,10 +40,11 @@ class LogicProgrammingParser:
             elif self.current.type == TokenType.规则:
                 rule = self.parse_logic_rule()
                 rules.append(rule)
+            elif self.current.type == TokenType.换行:
+                self.advance()
             else:
-                # 跳过其他内容或换行
-                if self.current.type != TokenType.换行:
-                    self.advance()
+                # 跳过其他内容
+                self.advance()
 
         return LogicBlock(
             name=name,

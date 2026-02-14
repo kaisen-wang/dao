@@ -20,12 +20,22 @@ from ..builtins import (
 from ..environment import Environment
 from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误
 
+# 导入逻辑编程相关类型
+from ..logic.core import LogicVariable
+
 
 class ExpressionEvaluator:
     """表达式求值方法集（混入类）"""
 
     def eval_expression(self, expr: Expression, env: Environment) -> object:
         """分派并求值一个表达式"""
+        from ..ast_nodes import LogicVariable as ASTLogicVariable
+
+        if isinstance(expr, ASTLogicVariable):
+            from ..logic.core import LogicVariable
+
+            return LogicVariable(expr.name)
+
         match expr:
             case NumberLiteral():
                 return expr.value

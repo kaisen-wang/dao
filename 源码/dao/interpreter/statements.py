@@ -815,28 +815,85 @@ class StatementExecutor:
             normalized_head_args = [normalize_term(arg) for arg in head_args]
             rule_head = LogicStruct(rule.head.predicate, normalized_head_args)
 
-            # 求值规则体的参数
+            # 解析规则体，不进行求值
             rule_body = []
             for body_expr in rule.body:
                 if isinstance(body_expr, FunctionCall):
                     # 解析函数调用作为逻辑事实
                     predicate = body_expr.callee.name
-                    body_args = [
-                        self.eval_expression(arg, env) for arg in body_expr.arguments
-                    ]
-                    normalized_body_args = [normalize_term(arg) for arg in body_args]
-                    rule_body.append(LogicStruct(predicate, normalized_body_args))
+                    body_args = []
+                    for arg in body_expr.arguments:
+                        if isinstance(arg, Identifier) and arg.name.startswith("?"):
+                            from ..logic.core import LogicVariable
+
+                            body_args.append(LogicVariable(arg.name))
+                        elif isinstance(arg, StringLiteral):
+                            from ..logic.core import LogicAtom
+
+                            body_args.append(LogicAtom(arg.value))
+                        elif isinstance(arg, NumberLiteral):
+                            from ..logic.core import LogicAtom
+
+                            body_args.append(LogicAtom(arg.value))
+                        elif isinstance(arg, BooleanLiteral):
+                            from ..logic.core import LogicAtom
+
+                            body_args.append(LogicAtom(arg.value))
+                        elif isinstance(arg, ListLiteral):
+                            from ..logic.core import LogicAtom
+
+                            elements = [
+                                self.eval_expression(e, env) for e in arg.elements
+                            ]
+                            body_args.append(LogicAtom(elements))
+                        elif isinstance(arg, DictLiteral):
+                            from ..logic.core import LogicAtom
+
+                            pairs = {
+                                self.eval_expression(k, env): self.eval_expression(
+                                    v, env
+                                )
+                                for k, v in arg.pairs
+                            }
+                            body_args.append(LogicAtom(pairs))
+                    rule_body.append(LogicStruct(predicate, body_args))
                 elif isinstance(body_expr, LogicFact):
-                    body_args = [
-                        self.eval_expression(arg, env) for arg in body_expr.arguments
-                    ]
-                    normalized_body_args = [normalize_term(arg) for arg in body_args]
-                    rule_body.append(
-                        LogicStruct(body_expr.predicate, normalized_body_args)
-                    )
-                else:
-                    # 对于其他类型的表达式，直接求值
-                    rule_body.append(self.eval_expression(body_expr, env))
+                    body_args = []
+                    for arg in body_expr.arguments:
+                        if isinstance(arg, Identifier) and arg.name.startswith("?"):
+                            from ..logic.core import LogicVariable
+
+                            body_args.append(LogicVariable(arg.name))
+                        elif isinstance(arg, StringLiteral):
+                            from ..logic.core import LogicAtom
+
+                            body_args.append(LogicAtom(arg.value))
+                        elif isinstance(arg, NumberLiteral):
+                            from ..logic.core import LogicAtom
+
+                            body_args.append(LogicAtom(arg.value))
+                        elif isinstance(arg, BooleanLiteral):
+                            from ..logic.core import LogicAtom
+
+                            body_args.append(LogicAtom(arg.value))
+                        elif isinstance(arg, ListLiteral):
+                            from ..logic.core import LogicAtom
+
+                            elements = [
+                                self.eval_expression(e, env) for e in arg.elements
+                            ]
+                            body_args.append(LogicAtom(elements))
+                        elif isinstance(arg, DictLiteral):
+                            from ..logic.core import LogicAtom
+
+                            pairs = {
+                                self.eval_expression(k, env): self.eval_expression(
+                                    v, env
+                                )
+                                for k, v in arg.pairs
+                            }
+                            body_args.append(LogicAtom(pairs))
+                    rule_body.append(LogicStruct(body_expr.predicate, body_args))
 
             kb.add_rule(rule_head, rule_body)
 
