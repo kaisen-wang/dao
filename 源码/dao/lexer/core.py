@@ -202,6 +202,11 @@ class Lexer(LexerReaders):
                 self.tokens.append(self._read_logic_variable())
                 continue
 
+            # 宏注入前缀 $
+            if char == "$":
+                self.tokens.append(self._read_macro_injection())
+                continue
+
             # 运算符和标点
             token = self._read_operator_or_punctuation()
             if token:

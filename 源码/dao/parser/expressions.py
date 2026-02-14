@@ -301,6 +301,14 @@ class ExpressionParser:
         """解析基本表达式（最高优先级）"""
         token = self.current
 
+        # 宏系统相关表达式
+        if token.type == TokenType.感叹号 and self.peek().type == TokenType.标识符:
+            return self.parse_macro_call()
+        if token.type == TokenType.引述:
+            return self.parse_quote_block()
+        if token.type == TokenType.注入:
+            return self.parse_unquote_expr()
+
         # 并发编程相关表达式
         if token.type == TokenType.等待:
             return self.parse_await_expr()
@@ -368,11 +376,31 @@ class ExpressionParser:
         if token.type == TokenType.标识符:
             self.advance()
             if token.value.startswith("?"):
-                from ..ast_nodes import LogicVariable
+                from ..ast_nodes import LogicVariable, UnquoteExpr
+
+                if token.value.startswith("$"):
+                    return UnquoteExpr(
+                        expression=Identifier(
+                            line=token.line, column=token.column, name=token.value[1:]
+                        ),
+                        line=token.line,
+                        column=token.column,
+                    )
 
                 return LogicVariable(
                     name=token.value, line=token.line, column=token.column
                 )
+            if token.value.startswith("$"):
+                from ..ast_nodes import UnquoteExpr
+
+                return UnquoteExpr(
+                    expression=Identifier(
+                        line=token.line, column=token.column, name=token.value[1:]
+                    ),
+                    line=token.line,
+                    column=token.column,
+                )
+
             return Identifier(name=token.value, line=token.line, column=token.column)
 
         # 本对象 (this/self)
@@ -418,7 +446,14 @@ class ExpressionParser:
 
         # 字典字面量 {...}
         if token.type == TokenType.左花括号:
-            return self.parse_dict_literal()
+            # 只有当后面紧跟标识符和冒号时才解析为字典字面量
+            if (
+                self.pos + 1 < len(self.tokens)
+                and self.tokens[self.pos + 1].type == TokenType.标识符
+                and self.pos + 2 < len(self.tokens)
+                and self.tokens[self.pos + 2].type == TokenType.冒号
+            ):
+                return self.parse_dict_literal()
 
         raise self._error(f"无法解析的表达式: '{token.value}' ({token.type.name})")
 

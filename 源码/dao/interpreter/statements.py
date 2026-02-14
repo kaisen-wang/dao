@@ -155,6 +155,11 @@ class StatementExecutor:
                 return self.exec_sync_stmt(stmt, env)
             case LogicBlock():
                 return self.exec_logic_block(stmt, env)
+            case MacroDefinition():
+                try:
+                    return self.exec_macro_definition(stmt, env)
+                except 返回信号:
+                    return None
             case _:
                 raise 运行时错误(
                     f"未知的语句类型: {type(stmt).__name__}",
@@ -943,3 +948,13 @@ class StatementExecutor:
                 stmt.column,
                 self.source,
             )
+
+    def exec_macro_definition(self, stmt: MacroDefinition, env: Environment) -> object:
+        """执行宏定义：将宏添加到当前环境"""
+        from dao.macros.registry import register_macro
+
+        try:
+            register_macro(stmt)
+        except 返回信号:
+            pass
+        return None

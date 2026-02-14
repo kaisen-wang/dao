@@ -5,7 +5,7 @@
 这个文件将所有语句解析方法从各个模块导入，并通过多重继承组合到Parser类中。
 """
 
-from ..ast_nodes import Statement
+from ..ast_nodes import MacroDefinition, Statement
 from ..tokens import TokenType
 
 # 导入所有语句解析模块
@@ -39,10 +39,23 @@ class StatementParser(
 
     def parse_statement(self) -> Statement:
         """解析一条语句 - 根据当前token类型分派到相应的解析方法"""
+        # 先跳过所有换行和缩进token，确保当前token是有效语句开头
+        while self.current.type in (TokenType.换行, TokenType.缩进):
+            self.advance()
+
         token = self.current
 
         # 处理边界情况：如果是回退token，说明块结束，不解析任何内容
         if token.type == TokenType.回退:
+            return None
+
+        # 如果是右花括号，表示块结束，返回 None，并向前移动 pos
+        if token.type == TokenType.右花括号:
+            self.pos += 1
+            return None
+
+        # 如果是文件结束，返回 None
+        if token.type == TokenType.文件结束:
             return None
 
         match token.type:
@@ -50,6 +63,8 @@ class StatementParser(
                 return self.parse_variable_decl(is_constant=False)
             case TokenType.常量:
                 return self.parse_variable_decl(is_constant=True)
+            case TokenType.设:
+                return self.parse_variable_decl(is_constant=False)
             case TokenType.函数:
                 return self.parse_function_decl()
             case TokenType.初始化:
@@ -98,6 +113,64 @@ class StatementParser(
                 return self.parse_assert_stmt()
             case TokenType.匹配:
                 return self.parse_match_stmt()
+            case TokenType.定义宏:
+                print(
+                    f"=== parse_macro_definition 调用 === pos={self.pos} token={self.current}"
+                )
+                macro = self.parse_macro_definition()
+
+                # 修正：使用直接的方法查找匹配的右花括号
+                print(
+                    f"Macro body after parse: {len(macro.body) if hasattr(macro, 'body') else 'no body'}"
+                )
+
+                # 查找函数定义对应的左花括号的位置
+                function_body_start = -1
+                i = self.pos
+                while i >= 0:
+                    if self.tokens[i].type == TokenType.左花括号 and i < len(
+                        self.tokens
+                    ):
+                        # 需要找到与函数定义对应的左花括号，而不是其他可能的左括号
+                        # 我们可以使用简单的深度匹配
+                        depth = 1
+                        j = i + 1
+                        while j < len(self.tokens):
+                            if self.tokens[j].type == TokenType.左花括号:
+                                depth += 1
+                            elif self.tokens[j].type == TokenType.右花括号:
+                                depth -= 1
+                                if depth == 0:
+                                    print(f"找到了匹配的函数体边界: {i} -> {j}")
+                                    function_body_start = i
+                                    matching_right_brace_pos = j
+                                    break
+                            j += 1
+                        if function_body_start != -1:
+                            break
+                    i -= 1
+
+                if function_body_start != -1 and (
+                    macro.body is None or len(macro.body) == 0
+                ):
+                    print(f"手动解析函数体 pos={self.pos}")
+                    # 手动解析函数体
+                    body = []
+
+                    self.pos = function_body_start + 1
+
+                    while self.pos < matching_right_brace_pos:
+                        if self.current.type in (TokenType.换行, TokenType.缩进):
+                            self.advance()
+                            continue
+                        stmt = self.parse_statement()
+                        if stmt:
+                            body.append(stmt)
+
+                    self.pos = matching_right_brace_pos + 1
+                    macro.body = body
+
+                return macro
             case TokenType.逻辑:
                 return self.parse_logic_block()
             case TokenType.导入:

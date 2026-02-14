@@ -10,10 +10,12 @@ from ..ast_nodes import Program, Statement
 from ..errors import 语法错误
 from ..tokens import Token, TokenType
 from .expressions import ExpressionParser
+from .modules.logic_programming import LogicProgrammingParser
+from .modules.macros import MacroParser
 from .statements import StatementParser
 
 
-class Parser(StatementParser, ExpressionParser):
+class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingParser):
     """
     语法分析器
 
@@ -171,17 +173,109 @@ class Parser(StatementParser, ExpressionParser):
     # ========================
 
     def parse_block(self) -> list[Statement]:
-        """解析缩进代码块"""
-        self.expect(TokenType.缩进, "期望缩进块")
-        statements = []
-        while self.current.type not in (TokenType.回退, TokenType.文件结束):
-            self.skip_newlines()
-            # Also skip any INDENT tokens (caused by empty lines at same indent level)
-            while self.current.type == TokenType.缩进:
-                self.advance()
-                self.skip_newlines()
-            if self.current.type in (TokenType.回退, TokenType.文件结束):
-                break
-            statements.append(self.parse_statement())
-        self.expect(TokenType.回退, "期望回退")
-        return statements
+        """解析代码块 - 支持缩进块或花括号块"""
+        if self.match(TokenType.左花括号):
+            # 花括号块 - 支持左花括号后直接跟着语句而不需要换行
+            statements = []
+            self.advance()  # 消费左花括号
+
+            print(
+                f"parse_block 开始解析，pos={self.pos}, current token: {self.tokens[self.pos].type.name} -> '{self.tokens[self.pos].value}'"
+            )
+
+            while (
+                not self.match(TokenType.右花括号)
+                and self.current.type != TokenType.文件结束
+            ):
+                # 跳过换行或缩进
+                if self.current.type in (TokenType.换行, TokenType.缩进):
+                    print(f"parse_block 跳过换行/缩进，pos={self.pos}")
+                    self.advance()
+                    continue
+
+                if (
+                    self.match(TokenType.右花括号)
+                    or self.current.type == TokenType.文件结束
+                ):
+                    break
+
+                # 特别处理 $块 标识符，确保它被正确解析
+                if (
+                    self.current.type == TokenType.标识符
+                    and self.current.value == "$块"
+                ):
+                    print(f"parse_block 找到 $块，pos={self.pos}")
+                    from ..ast_nodes import ExpressionStmt
+
+                    expr = self.parse_primary()
+                    stmt = ExpressionStmt(
+                        expression=expr,
+                        line=self.current.line,
+                        column=self.current.column,
+                    )
+                    statements.append(stmt)
+                    print(f"parse_block 添加 $块 语句，type={type(stmt).__name__}")
+                    continue
+
+                # 处理其他以 $ 开头的标识符
+                elif (
+                    self.current.type == TokenType.标识符
+                    and self.current.value.startswith("$")
+                ):
+                    print(
+                        f"parse_block 找到 $ 标识符，value={self.current.value}, pos={self.pos}"
+                    )
+                    from ..ast_nodes import ExpressionStmt
+
+                    expr = self.parse_primary()
+                    stmt = ExpressionStmt(
+                        expression=expr,
+                        line=self.current.line,
+                        column=self.current.column,
+                    )
+                    statements.append(stmt)
+
+                else:
+                    print(
+                        f"parse_block 解析语句，pos={self.pos}, type={self.current.type.name}"
+                    )
+                    stmt = self.parse_statement()
+                    if stmt:
+                        statements.append(stmt)
+                        print(f"parse_block 添加语句，type={type(stmt).__name__}")
+                    else:
+                        print(f"parse_block 跳过无效语句，pos={self.pos}")
+                        self.advance()
+
+            print(f"parse_block 结束解析，共 {len(statements)} 个语句")
+            self.advance()  # 消费右花括号
+            return statements
+        else:
+            # 检查是否在引号块中（通过调用堆栈）
+            import inspect
+
+            is_in_quote_block = False
+            for frame in inspect.stack():
+                if "parse_quote_block" in frame.function:
+                    is_in_quote_block = True
+                    break
+
+            if is_in_quote_block:
+                # 在引号块中接受单行语句作为块
+                statement = self.parse_statement()
+                return [statement] if statement else []
+            else:
+                # 缩进块（正常情况）
+                self.expect(TokenType.缩进, "期望缩进块")
+                statements = []
+                while self.current.type not in (TokenType.回退, TokenType.文件结束):
+                    self.skip_newlines()
+                    # 跳过同一缩进级别的空行导致的额外缩进标记
+                    while self.current.type == TokenType.缩进:
+                        self.advance()
+                        self.skip_newlines()
+                    if self.current.type in (TokenType.回退, TokenType.文件结束):
+                        break
+                    statements.append(self.parse_statement())
+                self.expect(TokenType.回退, "期望回退")
+                return statements

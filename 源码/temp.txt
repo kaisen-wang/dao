@@ -1,0 +1,232 @@
+"""
+宏展开器
+========
+
+宏展开器是道语言宏系统的核心组件，负责：
+1. 找到代码中的宏调用
+2. 替换为对应的引述块
+3. 注入表达式值
+4. 处理递归宏调用
+5. 防止无限递归
+
+主要功能：
+- 编译期宏执行
+- 递归宏展开
+- 高级错误恢复
+- 宏展开跟踪
+
+展开过程：
+1. 识别宏调用（!前缀）
+2. 查找对应的宏定义
+3. 应用参数绑定
+4. 展开引述块
+5. 处理注入表达式
+6. 递归处理结果中的宏调用
+"""
+
+from typing import List, Optional, Union
+
+from ..ast_nodes import (
+    BooleanLiteral,
+    Expression,
+    MacroCall,
+    NullLiteral,
+    NumberLiteral,
+    QuoteBlock,
+    Statement,
+    StringLiteral,
+    UnquoteExpr,
+)
+from ..tokens import TokenType
+from .hygiene import HygieneProcessor
+from .registry import MacroInfo, MacroRegistry
+from .scope import MacroScope
+
+
+class MacroExpander:
+    """宏展开器核心类"""
+
+    def __init__(self):
+        self.registry = MacroRegistry()
+        self.hygiene_processor = HygieneProcessor()
+        self.max_recursion = 100  # 防止无限递归的最大深度
+        self.trace_expansion = False  # 是否跟踪展开过程
+
+    def expand(
+        self, node: Union[Expression, Statement, List], recursion_depth: int = 0
+    ):
+        """
+        展开代码中的宏调用
+
+        Args:
+            node: 要展开的AST节点
+            recursion_depth: 当前递归深度
+
+        Returns:
+            展开后的节点
+        """
+        if recursion_depth >= self.max_recursion:
+            return node
+
+        # 处理节点列表
+        if isinstance(node, list):
+            return [self.expand(n, recursion_depth) for n in node]
+
+        # 处理宏调用
+        if isinstance(node, MacroCall):
+            return self._expand_macro_call(node, recursion_depth)
+
+        # 处理引述块
+        if isinstance(node, QuoteBlock):
+            return self._expand_quote_block(node, recursion_depth)
+
+        # 处理注入表达式
+        if isinstance(node, UnquoteExpr):
+            return self._expand_unquote_expr(node, recursion_depth)
+
+        # 处理其他类型的节点
+        return self._expand_other_nodes(node, recursion_depth)
+
+    def _expand_macro_call(self, call: MacroCall, recursion_depth: int):
+        """处理宏调用"""
+        # 查找宏定义
+        macro_info = self.registry.find_macro(call.name)
+        if not macro_info:
+            return call
+
+        if self.trace_expansion:
+            print(f"展开宏调用: !{call.name}{call.arguments}")
+
+        # 评估宏参数
+        evaluated_args = [self.expand(arg, recursion_depth) for arg in call.arguments]
+
+        # 应用参数绑定
+        expanded_body = self._apply_macro_parameters(
+            macro_info.body, macro_info.parameters, evaluated_args
+        )
+
+        # 递归展开结果中的宏调用
+        expanded = self.expand(expanded_body, recursion_depth + 1)
+
+        if self.trace_expansion:
+            print(f"宏调用结果: {expanded}")
+
+        return expanded
+
+    def _expand_quote_block(self, block: QuoteBlock, recursion_depth: int):
+        """处理引述块"""
+        # 引述块内的代码在宏展开阶段保持原样
+        return QuoteBlock(body=block.body.copy())
+
+    def _expand_unquote_expr(self, expr: UnquoteExpr, recursion_depth: int):
+        """处理注入表达式"""
+        # 注入表达式需要被评估
+        expanded = self.expand(expr.expression, recursion_depth)
+        return expanded
+
+    def _expand_other_nodes(
+        self, node: Union[Expression, Statement], recursion_depth: int
+    ):
+        """处理其他类型的节点"""
+        import inspect
+
+        # 获取节点的属性
+        for attr_name in dir(node):
+            if not attr_name.startswith("__"):
+                attr = getattr(node, attr_name)
+
+                # 如果属性是可迭代对象，递归处理
+                if isinstance(attr, list):
+                    new_value = [self.expand(item, recursion_depth) for item in attr]
+                    setattr(node, attr_name, new_value)
+                elif isinstance(attr, (Expression, Statement)):
+                    new_value = self.expand(attr, recursion_depth)
+                    setattr(node, attr_name, new_value)
+
+        return node
+
+    def _apply_macro_parameters(
+        self, body: Expression, parameters: List[str], arguments: List[Expression]
+    ):
+        """应用宏参数绑定"""
+        from ..ast_nodes import Identifier, UnquoteExpr, QuoteBlock, ReturnStmt
+        from .ast_ops import ASTOperations
+
+        if len(parameters) != len(arguments):
+            return body
+
+        # 创建替换字典
+        replacements = dict(zip(parameters, arguments))
+        print("=== 替换字典 ===")
+        for key, value in replacements.items():
+            print(f"  {key}: {value}")
+
+        print("=== 处理传入的 body ===")
+        print(f"  body类型: {type(body)}")
+        
+        # 处理返回值的情况
+        target_body = body
+        
+        if isinstance(body, list) and len(body) == 1 and isinstance(body[0], ReturnStmt):
+            # 处理 return 语句的情况
+            target_body = body[0].value
+            print("  找到了 ReturnStmt，提取返回值")
+        
+        # 优化后的参数替换实现
+        def replace_node(node):
+            # 处理 UnquoteExpr 中的 Identifier
+            if isinstance(node, UnquoteExpr):
+                print(f"    找到 UnquoteExpr，表达式: {node.expression}")
+                
+                if isinstance(node.expression, Identifier):
+                    param_name = node.expression.name
+                    print(f"      参数名称: {param_name}")
+                    
+                    if param_name in replacements:
+                        replaced = UnquoteExpr(expression=replacements[param_name])
+                        print(f"      替换为: {replaced}")
+                        return replaced
+                else:
+                    node.expression = replace_node(node.expression)
+                    
+            # 处理 Identifier
+            elif isinstance(node, Identifier):
+                if node.name in replacements:
+                    return replacements[node.name]
+                    
+            # 递归处理其他类型的节点
+            if hasattr(node, "__dict__"):
+                for attr_name in dir(node):
+                    if not attr_name.startswith("__") and hasattr(node, attr_name):
+                        attr_value = getattr(node, attr_name)
+                        
+                        if isinstance(attr_value, list):
+                            new_value = [replace_node(n) for n in attr_value]
+                            setattr(node, attr_name, new_value)
+                        elif hasattr(attr_value, "__dict__"):
+                            new_value = replace_node(attr_value)
+                            setattr(node, attr_name, new_value)
+                        
+            return node
+
+        result = replace_node(target_body)
+        print(f"=== 替换结果 ===")
+        print(f"  返回类型: {type(result)}")
+        
+        return result
+        print("  body不是列表，直接处理")
+        return replace_node(body)
+
+    def set_trace(self, enabled: bool):
+        """设置是否跟踪展开过程"""
+        self.trace_expansion = enabled
+
+    def register_builtin_macros(self):
+        """注册内置宏"""
+        from ..ast_nodes import NumberLiteral, QuoteBlock, UnquoteExpr
+
+        # 这里可以添加内置宏的示例
+        pass
+
+    def __repr__(self):
+        return f"MacroExpander(注册表={self.registry})"

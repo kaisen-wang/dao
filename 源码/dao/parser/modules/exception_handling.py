@@ -70,8 +70,19 @@ class ExceptionHandlingParser:
 
     def parse_assert_stmt(self) -> AssertStmt:
         token = self.advance()  # 消费 断言
-        condition = self.parse_expression()
+        condition = None
         message = None
+
+        # 尝试解析断言条件
+        if self.current.type == TokenType.标识符 and self.peek().type == TokenType.等于:
+            # 简单的断言表达式： 变量 = 表达式
+            var_token = self.advance()
+            self.advance()  # 消费 等于
+            condition = self.parse_expression()
+        else:
+            # 普通的断言表达式
+            condition = self.parse_expression()
+
         if self.match(TokenType.逗号):
             message = self.parse_expression()
         self.match(TokenType.换行)

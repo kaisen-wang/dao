@@ -116,6 +116,13 @@ class IndexAccess(Expression):
     index: Expression = field(default_factory=lambda: NumberLiteral())
 
 
+@dataclass
+class BlockExpr(Expression):
+    """块表达式：将一系列语句包装为表达式"""
+
+    body: list[Statement] = field(default_factory=list)
+
+
 # ========================
 # 运算表达式
 # ========================
@@ -652,3 +659,39 @@ class SyncStmt(Statement):
 
     mutex: Expression = field(default_factory=lambda: NullLiteral())
     body: list[Statement] = field(default_factory=list)
+
+
+# ========================
+# 宏系统
+# ========================
+
+
+@dataclass
+class MacroDefinition(Statement):
+    """宏定义：定义宏 名称(参数) { 引述块 }"""
+
+    name: str = ""
+    parameters: list[str] = field(default_factory=list)
+    body: Expression = field(default_factory=lambda: NullLiteral())
+
+
+@dataclass
+class QuoteBlock(Expression):
+    """引述块：引述 { 代码块 }"""
+
+    body: list[Statement] = field(default_factory=list)
+
+
+@dataclass
+class UnquoteExpr(Expression):
+    """注入表达式：注入 表达式"""
+
+    expression: Expression = field(default_factory=lambda: NullLiteral())
+
+
+@dataclass
+class MacroCall(Expression):
+    """宏调用：!宏名(参数)"""
+
+    name: str = ""
+    arguments: list[Expression] = field(default_factory=list)

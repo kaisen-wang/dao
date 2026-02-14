@@ -34,6 +34,7 @@ class TokenType(Enum):
     # ========================
     定义 = auto()
     常量 = auto()
+    设 = auto()
     函数 = auto()
     返回 = auto()
 
@@ -144,6 +145,13 @@ class TokenType(Enum):
     剪枝 = auto()  # cut - 剪枝操作符
 
     # ========================
+    # 宏系统关键字
+    # ========================
+    定义宏 = auto()  # define_macro - 宏定义
+    引述 = auto()  # quote - 引述块
+    注入 = auto()  # unquote - 注入表达式
+
+    # ========================
     # 并发编程关键字
     # ========================
     异步 = auto()  # async - 异步函数
@@ -240,9 +248,14 @@ KEYWORDS: dict[str, TokenType] = {
     "规则": TokenType.规则,
     "查询": TokenType.查询,
     "剪枝": TokenType.剪枝,
+    # 宏系统
+    "定义宏": TokenType.定义宏,
+    "引述": TokenType.引述,
+    "注入": TokenType.注入,
     # 控制流
     "定义": TokenType.定义,
     "常量": TokenType.常量,
+    "设": TokenType.设,
     "函数": TokenType.函数,
     "返回": TokenType.返回,
     "如果": TokenType.如果,

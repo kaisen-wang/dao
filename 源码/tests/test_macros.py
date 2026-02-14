@@ -1,0 +1,218 @@
+"""
+宏系统测试模块
+测试道语言的宏系统功能
+"""
+
+import os
+import sys
+
+import pytest
+
+# 确保能导入dao包
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dao.errors import 返回信号, 道错误
+from dao.interpreter import Interpreter
+from dao.lexer import Lexer
+from dao.parser import Parser
+
+
+def run_code(source: str, filename: str = "<测试>") -> tuple[object, Interpreter]:
+    """执行一段道语言代码，返回结果和解释器实例"""
+    interpreter = Interpreter()
+
+    # 1. 词法分析
+    lexer = Lexer(source, filename)
+    tokens = lexer.tokenize()
+
+    # 2. 语法分析
+    parser = Parser(tokens, source)
+    ast = parser.parse()
+
+    # 3. 解释执行
+    try:
+        result = interpreter.execute(ast, source=source)
+    except 返回信号:
+        result = None
+    return result, interpreter
+
+
+def test_macro_basic_functionality():
+    """测试基本宏功能"""
+    code = """
+定义宏 加一(x) {
+    返回 引述 { $x + 1 }
+}
+
+设 结果 = !加一(5)
+"""
+    result, interpreter = run_code(code)
+    # 验证结果变量的值
+    assert interpreter.global_env.get("结果") == 6
+
+
+def test_macro_with_block():
+    """测试带块的宏"""
+    code = """
+定义宏 循环(n, 块) {
+    返回 引述 {
+        设 i = 0
+        当 i < $n {
+            $块
+            i = i + 1
+        }
+    }
+}
+
+设 总和 = 0
+!循环(5) {
+    总和 = 总和 + i
+}
+"""
+    result, interpreter = run_code(code)
+    # 验证总和的值
+    assert interpreter.global_env.get("总和") == 10
+
+
+def test_quote_unquote():
+    """测试引述和反引述表达式"""
+    code = """
+定义宏 构建表达式(a, b) {
+    返回 引述 {
+        $a * $b + $a
+    }
+}
+
+设 结果 = !构建表达式(2, 3)
+"""
+    result, interpreter = run_code(code)
+    # 验证结果变量的值
+    assert interpreter.global_env.get("结果") == 2 * 3 + 2
+
+
+def test_hygienic_macro():
+    """测试卫生宏"""
+    code = """
+定义宏 卫生测试(x) {
+    返回 引述 {
+        设 temp = $x * 2
+        temp
+    }
+}
+
+设 temp = 10
+设 结果 = !卫生测试(5)
+"""
+    result, interpreter = run_code(code)
+    # 验证结果变量的值
+    assert interpreter.global_env.get("结果") == 10
+    # 验证 temp 变量的值（应该保持为 10）
+    assert interpreter.global_env.get("temp") == 10
+
+
+def test_macro_with_multiple_params():
+    """测试多参数宏"""
+    code = """
+定义宏 计算(a, b, c) {
+    返回 引述 {
+        ($a + $b) * $c
+    }
+}
+
+设 结果 = !计算(1, 2, 3)
+断言 结果 == (1+2)*3
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("结果") == (1 + 2) * 3
+
+
+def test_macro_with_optional_params():
+    """测试可选参数宏"""
+    code = """
+定义宏 可选参数(x, y=10) {
+    返回 引述 {
+        $x + $y
+    }
+}
+
+设 结果1 = !可选参数(5)
+设 结果2 = !可选参数(5, 20)
+断言 结果1 == 15
+断言 结果2 == 25
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("结果1") == 15
+    assert interpreter.global_env.get("结果2") == 25
+
+
+def test_macro_recursion():
+    """测试递归宏"""
+    code = """
+定义宏 递归宏(n) {
+    返回 如果 n == 0 {
+        引述 { 0 }
+    } 否则 {
+        引述 { $n + !递归宏($n - 1) }
+    }
+}
+
+设 结果 = !递归宏(5)
+断言 结果 == 15
+"""
+    result = run_code(code)
+    assert result is True
+
+
+def test_macro_with_pattern_matching():
+    """测试模式匹配宏"""
+    code = """
+定义宏 模式匹配宏(x) {
+    返回 匹配 x {
+        情况 0 { 引述 { "零" } }
+        情况 1 { 引述 { "一" } }
+        情况 2 { 引述 { "二" } }
+        其他情况 { 引述 { "其他" } }
+    }
+}
+
+设 结果1 = !模式匹配宏(1)
+设 结果2 = !模式匹配宏(3)
+断言 结果1 == "一"
+断言 结果2 == "其他"
+"""
+    result = run_code(code)
+    assert result is True
+
+
+def test_macro_injection():
+    """测试宏注入"""
+    code = """
+定义宏 注入宏() {
+    设 a = 1
+    设 b = 2
+    返回 引述 { 1 + 2 }
+}
+
+设 注入结果 = !注入宏()
+"""
+    result, interpreter = run_code(code)
+    # 验证注入结果变量的值
+    assert interpreter.global_env.get("注入结果") == 3
+
+
+def test_macro_with_pipe():
+    """测试管道操作符与宏结合"""
+    code = """
+定义宏 平方(x) {
+    返回 引述 { $x * $x }
+}
+
+定义宏 加五(x) {
+    返回 引述 { $x + 5 }
+}
+
+设 结果 = 3 |> 平方 |> 加五
+"""
+    result, interpreter = run_code(code)
+    # 验证结果变量的值
+    assert interpreter.global_env.get("结果") == 3 * 3 + 5

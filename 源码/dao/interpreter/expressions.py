@@ -29,12 +29,59 @@ class ExpressionEvaluator:
 
     def eval_expression(self, expr: Expression, env: Environment) -> object:
         """分派并求值一个表达式"""
-        from ..ast_nodes import LogicVariable as ASTLogicVariable
-
-        if isinstance(expr, ASTLogicVariable):
+        # 先使用 isinstance 检查避免 match 语句作用域问题
+        if type(expr).__name__ == "LogicVariable":
             from ..logic.core import LogicVariable
 
             return LogicVariable(expr.name)
+
+        if isinstance(expr, Identifier):
+            if expr.name.startswith("?"):
+                from ..logic.core import LogicVariable
+
+                return LogicVariable(expr.name)
+            return env.get(expr.name)
+
+        # 处理 ExpressionStmt 类型
+        if isinstance(expr, ExpressionStmt):
+            return self.eval_expression(expr.expression, env)
+
+        # 处理语句类型
+        from ..ast_nodes import (
+            AssertStmt,
+            Assignment,
+            BreakStmt,
+            ContinueStmt,
+            ForInStmt,
+            ForRangeStmt,
+            IfStmt,
+            MatchStmt,
+            ReturnStmt,
+            ThrowStmt,
+            VariableDecl,
+            WhileStmt,
+            YieldStmt,
+        )
+
+        if isinstance(
+            expr,
+            (
+                WhileStmt,
+                IfStmt,
+                ForInStmt,
+                ForRangeStmt,
+                BreakStmt,
+                ContinueStmt,
+                ReturnStmt,
+                YieldStmt,
+                ThrowStmt,
+                AssertStmt,
+                MatchStmt,
+                VariableDecl,
+                Assignment,
+            ),
+        ):
+            return self.exec_statement(expr, env)
 
         match expr:
             case NumberLiteral():
@@ -54,12 +101,6 @@ class ExpressionEvaluator:
                     self.eval_expression(k, env): self.eval_expression(v, env)
                     for k, v in expr.pairs
                 }
-            case Identifier():
-                if expr.name.startswith("?"):
-                    from ..logic.core import LogicVariable
-
-                    return LogicVariable(expr.name)
-                return env.get(expr.name)
             case SelfExpr():
                 return env.get("本对象")
             case SuperExpr():
@@ -92,14 +133,28 @@ class ExpressionEvaluator:
                 return self.eval_receive(expr, env)
             case LogicQuery():
                 return self.eval_logic_query(expr, env)
-            case LogicVariable():
-                return self.eval_logic_variable(expr, env)
+
+            case MacroCall():
+                return self.eval_macro_call(expr, env)
+            case QuoteBlock():
+                return self.eval_quote_block(expr, env)
+            case UnquoteExpr():
+                return self.eval_unquote_expr(expr, env)
             case LogicPredicate():
                 return self.eval_logic_predicate(expr, env)
             case LogicNegation():
                 return self.eval_logic_negation(expr, env)
             case LogicCut():
                 return self.eval_logic_cut(expr, env)
+            case BlockExpr():
+                # 执行块中的所有语句并返回最后一个值
+                evaluated = None
+                for stmt in expr.body:
+                    if hasattr(stmt, "expression"):
+                        evaluated = self.eval_expression(stmt.expression, env)
+                    else:
+                        evaluated = self.exec_statement(stmt, env)
+                return evaluated
             case LogicConstraint():
                 return self.eval_logic_constraint(expr, env)
             case _:
@@ -541,6 +596,152 @@ class ExpressionEvaluator:
 
         return callee.call(args, kwargs)
 
+    # ========================
+    # 宏系统相关表达式求值
+    # ========================
+
+    def eval_macro_call(self, expr: MacroCall, env: Environment) -> object:
+        """求值宏调用：!宏名(参数)"""
+        from ..ast_nodes import QuoteBlock
+        from ..macros import MacroExpander
+        from ..macros.ast_repr import DataToAST
+        from ..macros.registry import find_macro
+
+        # 检查是否有该名称的宏定义
+        macro_info = find_macro(expr.name)
+        if not macro_info:
+            raise 运行时错误(
+                f"未找到宏定义 '{expr.name}'",
+                expr.line,
+                expr.column,
+                self.source,
+            )
+
+        # 保留参数的 AST 节点，不进行求值，以便在替换时保持节点类型
+        evaluated_args = expr.arguments
+
+        # 宏体可能是数据结构，需要先转换回 AST 节点
+        if isinstance(macro_info.body, (list, dict)):
+            body_ast = DataToAST.convert(macro_info.body)
+        else:
+            body_ast = macro_info.body
+
+        # 应用宏展开
+        expander = MacroExpander()
+        expanded_body = expander._apply_macro_parameters(
+            body_ast, macro_info.parameters, evaluated_args
+        )
+
+        # 递归展开结果中的宏调用
+        expanded = expander.expand(expanded_body)
+
+        # 调试输出
+        print(f"宏展开后得到: {type(expanded).__name__}: {str(expanded)}")
+
+        # 处理展开后的结果
+        if isinstance(expanded, QuoteBlock):
+            # 如果是 QuoteBlock，直接取其内容
+            expanded = expanded.body
+
+        if isinstance(expanded, list):
+            # 如果是语句列表，需要检查是否包含表达式语句
+            if len(expanded) == 1 and hasattr(expanded[0], "expression"):
+                # 提取表达式
+                expanded = expanded[0].expression
+
+        # 求值展开后的表达式
+        if isinstance(expanded, (list, dict)):
+            # 如果是数据结构，先转换回 AST
+            expanded = DataToAST.convert(expanded)
+
+        # 处理列表返回值
+        if isinstance(expanded, list):
+            # 创建新的作用域来执行宏体，确保卫生宏
+            macro_env = Environment(parent=env)
+
+            evaluated = None
+
+            for stmt in expanded:
+                # 检查是否是返回语句
+                if hasattr(stmt, "value") and stmt.__class__.__name__ == "ReturnStmt":
+                    # 如果是返回语句，我们需要求值其 value 属性
+                    return_value = self.eval_expression(stmt.value, macro_env)
+                    # 如果返回值是 QuoteBlock 或其数据结构，需要执行其内容
+                    from ..ast_nodes import QuoteBlock
+                    from ..macros.ast_repr import ASTToData, DataToAST
+
+                    if isinstance(return_value, list):
+                        # 如果是数据结构列表，转换回 AST 并在新作用域中执行，确保卫生宏
+                        for quote_stmt in return_value:
+                            ast_stmt = DataToAST.convert(quote_stmt)
+                            if hasattr(ast_stmt, "expression"):
+                                evaluated = self.eval_expression(
+                                    ast_stmt.expression, macro_env
+                                )
+                            else:
+                                evaluated = self.exec_statement(ast_stmt, macro_env)
+                    elif isinstance(stmt.value, QuoteBlock):
+                        # 如果是 QuoteBlock，在新作用域中执行其内容，确保卫生宏
+                        for quote_stmt in stmt.value.body:
+                            if hasattr(quote_stmt, "expression"):
+                                evaluated = self.eval_expression(
+                                    quote_stmt.expression, macro_env
+                                )
+                            else:
+                                evaluated = self.exec_statement(quote_stmt, macro_env)
+                    else:
+                        evaluated = return_value
+                elif hasattr(stmt, "expression"):
+                    evaluated = self.eval_expression(stmt.expression, macro_env)
+                else:
+                    # 如果不是表达式语句，直接执行
+                    evaluated = self.exec_statement(stmt, macro_env)
+        else:
+            evaluated = self.eval_expression(expanded, env)
+
+        # 确保我们对所有类型的结果进行全面求值
+        while isinstance(evaluated, (list, dict)):
+            if isinstance(evaluated, list):
+                if len(evaluated) == 1:
+                    evaluated = evaluated[0]
+                else:
+                    evaluated = evaluated[-1]
+            elif isinstance(evaluated, dict) and "__type__" in evaluated:
+                # 将数据结构转换回实际的 AST 并求值
+                evaluated = DataToAST.convert(evaluated)
+                evaluated = self.eval_expression(evaluated, env)
+
+        print(f"表达式求值结果: {type(evaluated).__name__}: {evaluated}")
+
+        return evaluated
+
+    def eval_quote_block(self, expr: QuoteBlock, env: Environment) -> object:
+        """求值引述块：引述 { 代码块 }"""
+        from ..macros.ast_repr import ASTToData
+
+        # 将引述块内容转换为数据结构，保持原样不执行
+        return ASTToData.convert(expr.body)
+
+    def eval_unquote_expr(self, expr: UnquoteExpr, env: Environment) -> object:
+        """求值注入表达式：注入(表达式)"""
+        from ..ast_nodes import Identifier
+
+        # 如果 expr.expression 是标识符，我们需要检查它是否是宏参数
+        # 如果是标识符，并且它在当前环境中没有找到，可能是一个未绑定的变量
+        # 或者是一个在宏参数中应该被替换但没有被替换的变量
+        if isinstance(expr.expression, Identifier):
+            variable_name = expr.expression.name
+
+            try:
+                return self.eval_expression(expr.expression, env)
+            except:
+                # 如果无法找到变量，可能是因为在宏参数替换时没有正确处理
+                # 或者是一个在作用域链中没有定义的变量
+                print(f"变量 '{variable_name}' 在环境中未找到")
+                return None
+
+        return self.eval_expression(expr.expression, env)
+
     def eval_lambda(self, expr: LambdaExpr, env: Environment) -> DaoFunction:
         """求值匿名函数（创建闭包）"""
         return DaoFunction(
@@ -555,6 +756,19 @@ class ExpressionEvaluator:
 
     def eval_pipe(self, expr: PipeExpr, env: Environment) -> object:
         """求值管道表达式：甲 |> 乙"""
+        # 检查右侧是否是宏（通过标识符查找）
+        if isinstance(expr.right, Identifier):
+            from ..macros.registry import find_macro
+
+            macro_info = find_macro(expr.right.name)
+            if macro_info:
+                # 对于宏，我们需要保留左侧的 AST 节点原样传递，不进行求值
+                from ..ast_nodes import MacroCall
+
+                macro_call = MacroCall(name=expr.right.name, arguments=[expr.left])
+                return self.eval_macro_call(macro_call, env)
+
+        # 对于其他情况，继续正常的求值流程
         left_val = self.eval_expression(expr.left, env)
 
         if isinstance(expr.right, FunctionCall):
@@ -580,6 +794,18 @@ class ExpressionEvaluator:
             if isinstance(callee, DaoFunction):
                 return self._call_dao_function(callee, args, kwargs, expr)
             raise 类型错误("管道右侧必须是函数", expr.line, expr.column, self.source)
+
+        # 检查右侧是否是宏（通过标识符查找）
+        if isinstance(expr.right, Identifier):
+            from ..macros.registry import find_macro
+
+            macro_info = find_macro(expr.right.name)
+            if macro_info:
+                # 创建宏调用表达式
+                from ..ast_nodes import MacroCall
+
+                macro_call = MacroCall(name=expr.right.name, arguments=[left_val])
+                return self.eval_macro_call(macro_call, env)
 
         callee = self.eval_expression(expr.right, env)
         if isinstance(callee, DaoCallable) or isinstance(callee, DaoClass):

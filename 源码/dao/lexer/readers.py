@@ -446,3 +446,20 @@ class LexerReaders:
 
         word = "".join(result)
         return self._make_token(TokenType.标识符, word, start_line, start_col)
+
+    def _read_macro_injection(self) -> Token:
+        """读取宏注入表达式 ($变量名)"""
+        start_line = self.line
+        start_col = self.column
+        self.advance()  # 跳过 $
+
+        result = ["$"]
+
+        # 读取变量名（标识符）
+        while self.current_char is not None and self._is_identifier_char(
+            self.current_char
+        ):
+            result.append(self.advance())
+
+        word = "".join(result)
+        return self._make_token(TokenType.标识符, word, start_line, start_col)
