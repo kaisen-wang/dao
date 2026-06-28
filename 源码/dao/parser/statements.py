@@ -121,60 +121,7 @@ class StatementParser(
                 logger.debug(
                     "=== parse_macro_definition 调用 === pos=%d token=%s", self.pos, self.current,
                 )
-                macro = self.parse_macro_definition()
-
-                # 修正：使用直接的方法查找匹配的右花括号
-                logger.debug(
-                    "Macro body after parse: %s", len(macro.body) if hasattr(macro, 'body') else 'no body',
-                )
-
-                # 查找函数定义对应的左花括号的位置
-                function_body_start = -1
-                i = self.pos
-                while i >= 0:
-                    if self.tokens[i].type == TokenType.左花括号 and i < len(
-                        self.tokens
-                    ):
-                        # 需要找到与函数定义对应的左花括号，而不是其他可能的左括号
-                        # 我们可以使用简单的深度匹配
-                        depth = 1
-                        j = i + 1
-                        while j < len(self.tokens):
-                            if self.tokens[j].type == TokenType.左花括号:
-                                depth += 1
-                            elif self.tokens[j].type == TokenType.右花括号:
-                                depth -= 1
-                                if depth == 0:
-                                    logger.debug("找到了匹配的函数体边界: %d -> %d", i, j)
-                                    function_body_start = i
-                                    matching_right_brace_pos = j
-                                    break
-                            j += 1
-                        if function_body_start != -1:
-                            break
-                    i -= 1
-
-                if function_body_start != -1 and (
-                    macro.body is None or len(macro.body) == 0
-                ):
-                    logger.debug("手动解析函数体 pos=%d", self.pos)
-                    # 手动解析函数体
-                    body = []
-
-                    self.pos = function_body_start + 1
-
-                    while self.pos < matching_right_brace_pos:
-                        if self.current.type in (TokenType.换行, TokenType.缩进):
-                            self.advance()
-                            continue
-                        stmt = self.parse_statement()
-                        if stmt:
-                            body.append(stmt)
-
-                    self.pos = matching_right_brace_pos + 1
-                    macro.body = body
-
-                return macro
+                return self.parse_macro_definition()
             case TokenType.逻辑:
                 return self.parse_logic_block()
             case TokenType.导入:

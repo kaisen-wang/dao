@@ -11,10 +11,15 @@
 - parse_macro_call()：解析宏调用表达式
 
 支持的语法：
-- 定义宏 名称(参数列表) { ... }
-- 引述 { ... }
+- 定义宏 名称(参数列表)
+      宏体
+- 引述
+      引述体
+- 引述 表达式          （单行引述）
 - 注入(表达式)
 - !宏名(参数)
+- !宏名(参数)          （带缩进块参数）
+      块体
 """
 
 import logging
@@ -47,7 +52,7 @@ class MacroParser:
     """宏系统解析方法集"""
 
     def parse_macro_definition(self) -> MacroDefinition:
-        """解析宏定义：定义宏 名称(参数) { 函数体 }"""
+        """解析宏定义：定义宏 名称(参数) 换行 缩进体"""
         logger.debug("parse_macro_definition 内部 pos=%d", self.pos)
         token = self.advance()  # 消费 "定义宏"
 
@@ -85,14 +90,17 @@ class MacroParser:
                 parameters.append(param_str)
 
                 if self.match(TokenType.右括号):
-                    self.advance()  # 消费右括号
+                    # match 已经消费了右括号，不需要再 advance
                     break
                 self.expect(TokenType.逗号, "参数之间需要逗号分隔")
         else:
             self.advance()  # 消费右括号
 
-        # 不解析函数体，在 statements.py 中处理函数体解析
-        body = []
+        # 期望换行
+        self.expect(TokenType.换行, "宏定义头部后需要换行")
+
+        # 解析宏体（缩进块）
+        body = self.parse_block()
 
         return MacroDefinition(
             name=name,
@@ -103,7 +111,7 @@ class MacroParser:
         )
 
     def parse_quote_block(self) -> QuoteBlock:
-        """解析引述块：引述 { ... } 或 引用 { ... } 或 引述 ... 或 引用 ..."""
+        """解析引述块：引述 换行 缩进体 或 引述 表达式（单行）"""
         if self.current.type == TokenType.引述 or self.current.type == TokenType.引用:
             token = self.advance()  # 消费 "引述" 或 "引用"
         else:
@@ -114,42 +122,16 @@ class MacroParser:
                 self.source,
             )
 
-        # 检查是否有花括号
-        has_braces = False
-        if self.match(TokenType.左花括号):
-            has_braces = True
-
         body = []
 
         logger.debug("=== parse_quote_block ===")
-        # 跳过任何前导的换行或空格
-        while self.match(TokenType.换行):
-            pass
 
-        if has_braces:
-            # 解析花括号块内容
-            while (
-                not self.match(TokenType.右花括号)
-                and self.current.type != TokenType.文件结束
-            ):
-                if self.current.type == TokenType.换行:
-                    self.advance()
-                    continue
-
-                logger.debug(
-                    "  Parsing at pos %d, type=%s, value=%s",
-                    self.pos, self.tokens[self.pos].type.name, self.tokens[self.pos].value,
-                )
-
-                stmt = self.parse_statement()
-                if stmt:
-                    logger.debug("  Adding stmt: %s", type(stmt).__name__)
-                    body.append(stmt)
-
-            self.advance()  # 消费右花括号
+        if self.current.type == TokenType.换行:
+            # 缩进块模式：引述后换行，然后缩进体
+            self.advance()  # 消费换行
+            body = self.parse_block()
         else:
-            # 解析不带花括号的内容
-            # 直到遇到换行或文件结束
+            # 单行模式：引述后直接跟表达式
             stmt = self.parse_statement()
             if stmt:
                 logger.debug("  Adding stmt: %s", type(stmt).__name__)
@@ -179,7 +161,7 @@ class MacroParser:
         )
 
     def parse_macro_call(self) -> MacroCall:
-        """解析宏调用：!宏名(参数) 或 !宏名(参数) { 块 }"""
+        """解析宏调用：!宏名(参数) 或 !宏名(参数) 换行 缩进块"""
         token = self.advance()  # 消费 "!"
 
         name_token = self.expect(TokenType.标识符, "宏调用需要宏名称")
@@ -195,7 +177,7 @@ class MacroParser:
                 arguments.append(arg)
 
                 if self.match(TokenType.右括号):
-                    self.advance()  # 消费右括号
+                    # match 已经消费了右括号
                     break
                 self.expect(TokenType.逗号, "参数之间需要逗号分隔")
         else:
@@ -203,49 +185,17 @@ class MacroParser:
 
         logger.debug("After parsing macro call: pos=%d, arguments=%d", self.pos, len(arguments))
 
-        # 检查是否有块参数（作为参数列表后的可选块）
-        # 跳过任何可能的换行
+        # 检查是否有块参数
+        # 跳过换行
         while self.pos < len(self.tokens) and self.current.type == TokenType.换行:
             self.advance()
 
-        # 检查当前位置或前一位置是否有左花括号（处理位置偏移）
-        check_pos = self.pos
-        if check_pos > 0 and self.tokens[check_pos - 1].type == TokenType.左花括号:
-            check_pos = self.pos - 1
-
-        if (
-            check_pos < len(self.tokens)
-            and self.tokens[check_pos].type == TokenType.左花括号
-        ):
-            logger.debug("Block argument found at pos=%d", check_pos)
-            self.pos = check_pos + 1  # 移动到左花括号之后
-
-            # 找到匹配的右花括号
-            depth = 1
-            block_end = self.pos
-            while block_end < len(self.tokens):
-                if self.tokens[block_end].type == TokenType.左花括号:
-                    depth += 1
-                elif self.tokens[block_end].type == TokenType.右花括号:
-                    depth -= 1
-                    if depth == 0:
-                        logger.debug("Block found from %d to %d", self.pos, block_end)
-                        break
-                block_end += 1
-
-            if block_end < len(self.tokens):
-                block_body = []
-
-                while self.pos < block_end:
-                    stmt = self.parse_statement()
-                    if stmt:
-                        block_body.append(stmt)
-                        logger.debug("  Added block statement: %s", type(stmt).__name__)
-
+        # 检查是否有缩进块
+        if self.current.type == TokenType.缩进:
+            block_body = self.parse_block()
+            if block_body:
                 arguments.append(BlockExpr(body=block_body))
-                self.pos = block_end + 1
-
-            logger.debug("Block extraction complete, pos is now %d", self.pos)
+                logger.debug("Added block argument with %d statements", len(block_body))
 
         return MacroCall(
             name=name,

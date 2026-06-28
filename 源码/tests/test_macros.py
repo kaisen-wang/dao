@@ -45,87 +45,70 @@ def run_code(source: str, filename: str = "<测试>") -> tuple[object, Interpret
 def test_macro_basic_functionality():
     """测试基本宏功能"""
     code = """
-定义宏 加一(x) {
-    返回 引述 { $x + 1 }
-}
+定义宏 加一(x)
+    返回 引述 $x + 1
 
 设 结果 = !加一(5)
 """
     result, interpreter = run_code(code)
-    # 验证结果变量的值
     assert interpreter.global_env.get("结果") == 6
 
 
 def test_macro_with_block():
     """测试带块的宏"""
     code = """
-定义宏 循环(n, 块) {
-    返回 引述 {
+定义宏 循环(n, 块)
+    返回 引述
         设 i = 0
-        当 i < $n {
+        当 i < $n
             $块
             i = i + 1
-        }
-    }
-}
 
 设 总和 = 0
-!循环(5) {
+!循环(5)
     总和 = 总和 + i
-}
 """
     result, interpreter = run_code(code)
-    # 验证总和的值
     assert interpreter.global_env.get("总和") == 10
 
 
 def test_quote_unquote():
     """测试引述和反引述表达式"""
     code = """
-定义宏 构建表达式(a, b) {
-    返回 引述 {
+定义宏 构建表达式(a, b)
+    返回 引述
         $a * $b + $a
-    }
-}
 
 设 结果 = !构建表达式(2, 3)
 """
     result, interpreter = run_code(code)
-    # 验证结果变量的值
     assert interpreter.global_env.get("结果") == 2 * 3 + 2
 
 
 def test_hygienic_macro():
     """测试卫生宏"""
     code = """
-定义宏 卫生测试(x) {
-    返回 引述 {
+定义宏 卫生测试(x)
+    返回 引述
         设 temp = $x * 2
         temp
-    }
-}
 
 设 temp = 10
 设 结果 = !卫生测试(5)
 """
     result, interpreter = run_code(code)
-    # 验证结果变量的值
     assert interpreter.global_env.get("结果") == 10
-    # 验证 temp 变量的值（应该保持为 10）
     assert interpreter.global_env.get("temp") == 10
 
 
 def test_macro_with_multiple_params():
     """测试多参数宏"""
     code = """
-定义宏 计算(a, b, c) {
-    返回 引述 {
+定义宏 计算(a, b, c)
+    返回 引述
         ($a + $b) * $c
-    }
-}
 
 设 结果 = !计算(1, 2, 3)
-断言 结果 == (1+2)*3
 """
     result, interpreter = run_code(code)
     assert interpreter.global_env.get("结果") == (1 + 2) * 3
@@ -134,16 +117,12 @@ def test_macro_with_multiple_params():
 def test_macro_with_optional_params():
     """测试可选参数宏"""
     code = """
-定义宏 可选参数(x, y=10) {
-    返回 引述 {
+定义宏 可选参数(x, y=10)
+    返回 引述
         $x + $y
-    }
-}
 
 设 结果1 = !可选参数(5)
 设 结果2 = !可选参数(5, 20)
-断言 结果1 == 15
-断言 结果2 == 25
 """
     result, interpreter = run_code(code)
     assert interpreter.global_env.get("结果1") == 15
@@ -153,15 +132,12 @@ def test_macro_with_optional_params():
 def test_macro_recursion():
     """测试递归宏"""
     code = """
-定义宏 递归宏(n) {
-    返回 引述 {
-        如果 $n == 0 {
+定义宏 递归宏(n)
+    返回 引述
+        如果 $n == 0
             0
-        } 否则 {
+        否则
             $n + !递归宏($n - 1)
-        }
-    }
-}
 
 设 结果 = !递归宏(5)
 """
@@ -169,61 +145,32 @@ def test_macro_recursion():
     assert interpreter.global_env.get("结果") == 15
 
 
-@pytest.mark.skip("暂时禁用模式匹配宏测试")
-def test_macro_with_pattern_matching():
-    """测试模式匹配宏"""
-    code = """
-定义宏 模式匹配宏(x) {
-    返回 引述 {
-        匹配 $x {
-            情况 0 { "零" }
-            情况 1 { "一" }
-            情况 2 { "二" }
-            其他情况 { "其他" }
-        }
-    }
-}
-
-设 结果1 = !模式匹配宏(1)
-设 结果2 = !模式匹配宏(3)
-断言 结果1 == "一"
-断言 结果2 == "其他"
-"""
-    result = run_code(code)
-    assert result is True
-
-
 def test_macro_injection():
     """测试宏注入"""
     code = """
-定义宏 注入宏() {
+定义宏 注入宏()
     设 a = 1
     设 b = 2
-    返回 引述 { 1 + 2 }
-}
+    返回 引述 1 + 2
 
 设 注入结果 = !注入宏()
 """
     result, interpreter = run_code(code)
-    # 验证注入结果变量的值
     assert interpreter.global_env.get("注入结果") == 3
 
 
 def test_macro_with_pipe():
     """测试管道操作符与宏结合"""
     code = """
-定义宏 平方(x) {
-    返回 引述 { $x * $x }
-}
+定义宏 平方(x)
+    返回 引述 $x * $x
 
-定义宏 加五(x) {
-    返回 引述 { $x + 5 }
-}
+定义宏 加五(x)
+    返回 引述 $x + 5
 
 设 结果 = 3 |> 平方 |> 加五
 """
     result, interpreter = run_code(code)
-    # 验证结果变量的值
     assert interpreter.global_env.get("结果") == 3 * 3 + 5
 
 
@@ -243,13 +190,11 @@ def test_macro_undefined_error():
 def test_macro_redefinition_error():
     """测试同一作用域内重复定义同名宏报错"""
     code = """
-定义宏 测试(x) {
-    返回 引述 { $x + 1 }
-}
+定义宏 测试(x)
+    返回 引述 $x + 1
 
-定义宏 测试(y) {
-    返回 引述 { $y + 2 }
-}
+定义宏 测试(y)
+    返回 引述 $y + 2
 """
     from dao.errors import 宏展开错误
     with pytest.raises(宏展开错误, match="已在当前作用域中定义"):
@@ -263,14 +208,11 @@ def test_macro_scope_management():
     registry = MacroRegistry()
     registry.clear()
 
-    # 根作用域
     assert registry.get_macro_count() == 0
 
-    # 进入新作用域
     registry.enter_scope()
     assert registry._scope_depth == 1
 
-    # 离开作用域
     registry.leave_scope()
     assert registry._scope_depth == 0
 
@@ -278,27 +220,23 @@ def test_macro_scope_management():
 def test_macro_hygiene_no_capture():
     """测试卫生宏不捕获外部变量"""
     code = """
-定义宏 交换(a, b) {
-    返回 引述 {
+定义宏 交换(a, b)
+    返回 引述
         设 _temp = $a
         $a
-    }
-}
 
 设 _temp = 100
 设 结果 = !交换(5, 10)
 """
     result, interpreter = run_code(code)
-    # 宏内定义的 _temp 不应影响外部的 _temp
     assert interpreter.global_env.get("_temp") == 100
 
 
 def test_macro_multiple_calls():
     """测试同一宏多次调用"""
     code = """
-定义宏 双倍(x) {
-    返回 引述 { $x * 2 }
-}
+定义宏 双倍(x)
+    返回 引述 $x * 2
 
 设 结果1 = !双倍(3)
 设 结果2 = !双倍(7)
@@ -313,9 +251,8 @@ def test_macro_multiple_calls():
 def test_macro_nested_arithmetic():
     """测试宏展开结果参与复杂运算"""
     code = """
-定义宏 平方(x) {
-    返回 引述 { $x * $x }
-}
+定义宏 平方(x)
+    返回 引述 $x * $x
 
 设 a = !平方(3)
 设 b = !平方(4)
@@ -328,9 +265,8 @@ def test_macro_nested_arithmetic():
 def test_macro_string_argument():
     """测试宏接受字符串参数"""
     code = """
-定义宏 问候(名字) {
-    返回 引述 { $名字 }
-}
+定义宏 问候(名字)
+    返回 引述 $名字
 
 设 结果 = !问候("世界")
 """
@@ -341,9 +277,8 @@ def test_macro_string_argument():
 def test_macro_boolean_argument():
     """测试宏接受布尔参数"""
     code = """
-定义宏 取反(条件) {
-    返回 引述 { 不是 $条件 }
-}
+定义宏 取反(条件)
+    返回 引述 不是 $条件
 
 设 结果 = !取反(真)
 """
