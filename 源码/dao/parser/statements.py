@@ -121,6 +121,8 @@ class StatementParser(
                 logger.debug(
                     "=== parse_macro_definition 调用 === pos=%d token=%s", self.pos, self.current,
                 )
+                if self._is_pattern_macro():
+                    return self.parse_pattern_macro_definition()
                 return self.parse_macro_definition()
             case TokenType.逻辑:
                 return self.parse_logic_block()

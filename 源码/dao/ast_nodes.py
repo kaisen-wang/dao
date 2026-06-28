@@ -695,3 +695,40 @@ class MacroCall(Expression):
 
     name: str = ""
     arguments: list[Expression] = field(default_factory=list)
+
+
+# ========================
+# 模式匹配宏
+# ========================
+
+
+@dataclass
+class PatternBranch(ASTNode):
+    """模式分支：模式 [当 守卫] => 引述体"""
+
+    pattern: Expression = field(default_factory=lambda: Identifier())
+    guard: Expression | None = None
+    body: QuoteBlock = field(default_factory=lambda: QuoteBlock())
+
+
+@dataclass
+class PatternMatchBody(Expression):
+    """模式匹配宏体：包含多个模式分支"""
+
+    branches: list[PatternBranch] = field(default_factory=list)
+
+
+@dataclass
+class TypeCheckPattern(Expression):
+    """类型检查模式：类型:类型名"""
+
+    type_name: str = ""  # "列表"、"字典"、"数值"、"文本"、"布尔"、"函数"
+
+
+@dataclass
+class EnumVariantPattern(Expression):
+    """枚举变体模式：枚举名.变体名(绑定变量)"""
+
+    enum_name: str = ""
+    variant_name: str = ""
+    binding: str | None = None

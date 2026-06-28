@@ -38,6 +38,7 @@ from ..ast_nodes import (
     DestructureAssign,
     DictLiteral,
     EnumDecl,
+    EnumVariantPattern,
     ExportStmt,
     Expression,
     ExpressionStmt,
@@ -68,6 +69,8 @@ from ..ast_nodes import (
     NullLiteral,
     NumberLiteral,
     ParallelStmt,
+    PatternBranch,
+    PatternMatchBody,
     PipeExpr,
     Program,
     QuoteBlock,
@@ -85,6 +88,7 @@ from ..ast_nodes import (
     ThrowStmt,
     TraitDecl,
     TryStmt,
+    TypeCheckPattern,
     UnaryOp,
     UnquoteExpr,
     VariableDecl,
@@ -288,6 +292,11 @@ class DataToAST:
             "PipeExpr": PipeExpr,
             "TemplateLiteral": TemplateLiteral,
             "MacroDefinition": MacroDefinition,
+            # 模式匹配宏
+            "PatternBranch": PatternBranch,
+            "PatternMatchBody": PatternMatchBody,
+            "TypeCheckPattern": TypeCheckPattern,
+            "EnumVariantPattern": EnumVariantPattern,
         }
 
         return class_map.get(class_name)

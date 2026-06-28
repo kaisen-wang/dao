@@ -6,6 +6,7 @@
 
 新增的解析方法：
 - parse_macro_definition()：解析宏定义语句
+- parse_pattern_macro_definition()：解析模式匹配宏定义语句
 - parse_quote_block()：解析引述块
 - parse_unquote_expr()：解析注入表达式
 - parse_macro_call()：解析宏调用表达式
@@ -13,6 +14,9 @@
 支持的语法：
 - 定义宏 名称(参数列表)
       宏体
+- 定义宏 名称(参数列表) 匹配
+      模式1 => 引述体1
+      模式2 => 引述体2
 - 引述
       引述体
 - 引述 表达式          （单行引述）
@@ -28,6 +32,7 @@ from ...ast_nodes import (
     BinaryOp,
     BlockExpr,
     BooleanLiteral,
+    EnumVariantPattern,
     Expression,
     FunctionCall,
     Identifier,
@@ -35,9 +40,12 @@ from ...ast_nodes import (
     MacroDefinition,
     NullLiteral,
     NumberLiteral,
+    PatternBranch,
+    PatternMatchBody,
     QuoteBlock,
     Statement,
     StringLiteral,
+    TypeCheckPattern,
     UnaryOp,
     UnquoteExpr,
     VariableDecl,
@@ -60,7 +68,25 @@ class MacroParser:
         name_token = self.expect(TokenType.标识符, "宏定义需要一个名称")
         name = name_token.value
 
-        # 解析参数列表
+        # 解析参数列表（共用方法）
+        parameters = self._parse_parameter_list()
+
+        # 期望换行
+        self.expect(TokenType.换行, "宏定义头部后需要换行")
+
+        # 解析宏体（缩进块）
+        body = self.parse_block()
+
+        return MacroDefinition(
+            name=name,
+            parameters=parameters,
+            body=body,
+            line=token.line,
+            column=token.column,
+        )
+
+    def _parse_parameter_list(self) -> list[str]:
+        """解析参数列表（供普通宏和模式匹配宏共用）"""
         parameters = []
         self.expect(TokenType.左括号, "宏定义需要参数列表")
 
@@ -96,18 +122,198 @@ class MacroParser:
         else:
             self.advance()  # 消费右括号
 
-        # 期望换行
-        self.expect(TokenType.换行, "宏定义头部后需要换行")
+        return parameters
 
-        # 解析宏体（缩进块）
-        body = self.parse_block()
+    def _is_pattern_macro(self) -> bool:
+        """判断宏定义是否为模式匹配宏（前看方法）"""
+        saved_pos = self.pos
+
+        try:
+            self.advance()  # 跳过 "定义宏"
+
+            # 跳过名称（可能是标识符或关键字）
+            self.advance()
+
+            # 跳过参数列表
+            if self.pos < len(self.tokens) and self.current.type == TokenType.左括号:
+                depth = 1
+                self.advance()
+                while depth > 0 and self.pos < len(self.tokens):
+                    if self.current.type == TokenType.左括号:
+                        depth += 1
+                    elif self.current.type == TokenType.右括号:
+                        depth -= 1
+                    self.advance()
+
+            # 检查下一个token是否为 "匹配"
+            result = self.pos < len(self.tokens) and self.current.type == TokenType.匹配
+            return result
+        finally:
+            self.pos = saved_pos
+
+    def parse_pattern_macro_definition(self) -> MacroDefinition:
+        """解析模式匹配宏定义：定义宏 名称(参数) 匹配 模式分支..."""
+        logger.debug("parse_pattern_macro_definition 内部 pos=%d", self.pos)
+        token = self.advance()  # 消费 "定义宏"
+
+        # 解析宏名称
+        name_token = self.expect(TokenType.标识符, "宏定义需要一个名称")
+        name = name_token.value
+
+        # 解析参数列表（共用方法）
+        parameters = self._parse_parameter_list()
+
+        # 期望 "匹配" 关键字
+        self.expect(TokenType.匹配, "模式匹配宏需要 '匹配' 关键字")
+
+        # 期望换行 + 缩进
+        self.expect(TokenType.换行, "'匹配' 后需要换行")
+        self.expect(TokenType.缩进, "模式分支需要缩进")
+
+        # 循环解析模式分支
+        branches = []
+        while self.current.type not in (TokenType.回退, TokenType.文件结束):
+            self.skip_newlines()
+            if self.current.type in (TokenType.回退, TokenType.文件结束):
+                break
+            branches.append(self._parse_pattern_branch())
+
+        self.match(TokenType.回退)
+
+        if not branches:
+            raise 语法错误(
+                "模式匹配宏至少需要一个模式分支",
+                token.line,
+                token.column,
+                self.source,
+            )
+
+        # 构建 PatternMatchBody
+        pattern_body = PatternMatchBody(
+            branches=branches,
+            line=token.line,
+            column=token.column,
+        )
 
         return MacroDefinition(
             name=name,
             parameters=parameters,
-            body=body,
+            body=pattern_body,
             line=token.line,
             column=token.column,
+        )
+
+    def _parse_pattern_branch(self) -> PatternBranch:
+        """解析模式分支：模式 [当 守卫] => 引述体"""
+        line, col = self.current.line, self.current.column
+
+        # 解析匹配模式
+        pattern = self._parse_pattern()
+
+        # 可选守卫条件
+        guard = None
+        if self.match(TokenType.当):
+            guard = self.parse_expression()
+
+        # 期望 =>
+        self.expect(TokenType.箭头, "模式分支需要 '=>'")
+
+        # 解析引述体
+        body = self.parse_quote_block()
+
+        return PatternBranch(
+            pattern=pattern,
+            guard=guard,
+            body=body,
+            line=line,
+            column=col,
+        )
+
+    def _parse_pattern(self) -> Expression:
+        """解析匹配模式"""
+        # 通配符 _
+        if self.current.type == TokenType.标识符 and self.current.value == "_":
+            token = self.advance()
+            return Identifier(name="_", line=token.line, column=token.column)
+
+        # 列表模式 [...]
+        if self.current.type == TokenType.左方括号:
+            return self.parse_list_pattern()
+
+        # 字典模式 {...}
+        if self.current.type == TokenType.左花括号:
+            return self.parse_dict_pattern()
+
+        # 类型检查模式 类型:类型名
+        if self.current.type == TokenType.类型 and self.peek().type == TokenType.冒号:
+            return self._parse_type_check_pattern()
+
+        # 枚举变体模式 标识符.标识符(绑定)
+        if (
+            self.current.type == TokenType.标识符
+            and self.peek().type == TokenType.点
+        ):
+            return self._parse_enum_variant_pattern()
+
+        # 字面量模式（数值、文本、布尔、空）
+        if self.current.type in (
+            TokenType.数值,
+            TokenType.文本,
+            TokenType.真,
+            TokenType.假,
+            TokenType.空,
+        ):
+            return self.parse_expression()
+
+        # 变量绑定模式（标识符）
+        if self.current.type == TokenType.标识符:
+            token = self.advance()
+            return Identifier(name=token.value, line=token.line, column=token.column)
+
+        raise 语法错误(
+            f"无效的模式: {self.current.value}",
+            self.current.line,
+            self.current.column,
+            self.source,
+        )
+
+    def _parse_type_check_pattern(self) -> TypeCheckPattern:
+        """解析类型检查模式：类型:类型名"""
+        token = self.advance()  # 消费 "类型"
+        self.expect(TokenType.冒号, "类型检查模式需要 ':'")
+
+        type_name_token = self.expect(TokenType.标识符, "类型检查模式需要类型名")
+        type_name = type_name_token.value
+
+        return TypeCheckPattern(
+            type_name=type_name,
+            line=token.line,
+            column=token.column,
+        )
+
+    def _parse_enum_variant_pattern(self) -> EnumVariantPattern:
+        """解析枚举变体模式：枚举名.变体名(绑定变量)"""
+        enum_token = self.advance()  # 消费枚举名
+        enum_name = enum_token.value
+
+        self.expect(TokenType.点, "枚举变体模式需要 '.'")
+
+        variant_token = self.expect(TokenType.标识符, "枚举变体模式需要变体名")
+        variant_name = variant_token.value
+
+        # 可选解析括号内的绑定变量名
+        binding = None
+        if self.match(TokenType.左括号):
+            binding_token = self.expect(TokenType.标识符, "枚举变体绑定需要变量名")
+            binding = binding_token.value
+            self.expect(TokenType.右括号, "枚举变体绑定需要 ')'")
+
+        return EnumVariantPattern(
+            enum_name=enum_name,
+            variant_name=variant_name,
+            binding=binding,
+            line=enum_token.line,
+            column=enum_token.column,
         )
 
     def parse_quote_block(self) -> QuoteBlock:

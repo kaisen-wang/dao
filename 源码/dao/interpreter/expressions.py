@@ -622,6 +622,10 @@ class ExpressionEvaluator:
                 self.source,
             )
 
+        # 模式匹配宏分支
+        if macro_info.is_pattern_macro:
+            return self._eval_pattern_macro_call(expr, macro_info, env)
+
         # 保留参数的 AST 节点，不进行求值，以便在替换时保持节点类型
         evaluated_args = expr.arguments
 
@@ -684,6 +688,138 @@ class ExpressionEvaluator:
         logger.debug("表达式求值结果: %s: %s", type(evaluated).__name__, evaluated)
 
         return evaluated
+
+    def _eval_pattern_macro_call(self, expr: MacroCall, macro_info, env: Environment) -> object:
+        """求值模式匹配宏调用"""
+        import copy
+        import logging
+
+        from ..macros.pattern_engine import PatternMatchEngine
+        from ..macros.expander import MacroExpander
+
+        logger = logging.getLogger('dao.macros')
+
+        # 1. 评估宏参数得到运行时值列表
+        evaluated_args = [self.eval_expression(arg, env) for arg in expr.arguments]
+
+        # 2. 创建参数绑定环境
+        macro_env = env.create_child()
+        for i, param in enumerate(macro_info.parameters):
+            param_name = param.split('=')[0].strip()
+            if i < len(evaluated_args):
+                macro_env.define(param_name, evaluated_args[i])
+
+        # 3. 按顺序遍历模式分支
+        engine = PatternMatchEngine()
+        for branch in macro_info.branches:
+            # 获取匹配主题（第一个参数的值）
+            subject = evaluated_args[0] if evaluated_args else None
+
+            # 创建分支环境
+            case_env = macro_env.create_child()
+
+            # 执行模式匹配
+            match_result = engine.match(branch.pattern, subject, case_env)
+
+            if match_result.matched:
+                # 将绑定变量注入到环境中
+                for name, value in match_result.bindings.items():
+                    case_env.define(name, value)
+
+                # 检查守卫条件
+                if branch.guard:
+                    guard_result = self.eval_expression(branch.guard, case_env)
+                    if not self._is_truthy(guard_result):
+                        continue
+
+                # 执行匹配分支的引述体
+                expanded_body = self._expand_pattern_branch(branch, case_env, macro_info)
+                return self._exec_block(expanded_body, case_env)
+
+        # 无匹配分支
+        raise 运行时错误(
+            f"模式匹配宏 '{expr.name}' 无法匹配输入值",
+            expr.line,
+            expr.column,
+            self.source,
+        )
+
+    def _expand_pattern_branch(self, branch, case_env, macro_info) -> list:
+        """展开模式匹配分支的引述体"""
+        import copy
+
+        from ..macros.expander import MacroExpander
+
+        # 深拷贝引述体
+        body = copy.deepcopy(branch.body.body)
+
+        # 收集模式绑定变量和宏参数作为替换映射
+        replacements = {}
+
+        # 添加宏参数
+        for i, param in enumerate(macro_info.parameters):
+            param_name = param.split('=')[0].strip()
+            try:
+                val = case_env.get(param_name)
+                replacements[param_name] = self._value_to_ast(val)
+            except Exception:
+                pass
+
+        # 添加模式绑定变量
+        for name, value in case_env.values.items():
+            if name not in replacements:
+                replacements[name] = self._value_to_ast(value)
+
+        # 执行参数替换
+        expander = MacroExpander()
+        result = expander._replace_in_node(body, replacements)
+
+        return result if isinstance(result, list) else [result]
+
+    def _value_to_ast(self, value):
+        """将运行时值转换为AST节点"""
+        from ..ast_nodes import (
+            BooleanLiteral,
+            DictLiteral,
+            ListLiteral,
+            NullLiteral,
+            NumberLiteral,
+            StringLiteral,
+        )
+
+        if isinstance(value, bool):
+            return BooleanLiteral(value=value)
+        if isinstance(value, int):
+            return NumberLiteral(value=value)
+        if isinstance(value, float):
+            return NumberLiteral(value=value)
+        if isinstance(value, str):
+            return StringLiteral(value=value)
+        if value is None:
+            return NullLiteral()
+        if isinstance(value, list):
+            return ListLiteral(elements=[self._value_to_ast(v) for v in value])
+        if isinstance(value, dict):
+            return DictLiteral(
+                pairs=[
+                    (StringLiteral(value=str(k)), self._value_to_ast(v))
+                    for k, v in value.items()
+                ]
+            )
+        # 其他类型转为字符串
+        return StringLiteral(value=str(value))
+
+    def _exec_block(self, stmts: list, env: Environment) -> object:
+        """执行语句块，返回最后一个表达式的值"""
+        result = None
+        for stmt in stmts:
+            if hasattr(stmt, "expression"):
+                result = self.eval_expression(stmt.expression, env)
+            elif hasattr(stmt, "value") and isinstance(stmt, ReturnStmt):
+                result = self.eval_expression(stmt.value, env)
+            else:
+                result = self.exec_statement(stmt, env)
+        return result
 
     def _normalize_expanded(self, expanded):
         """将展开结果规范化为可执行AST"""

@@ -21,7 +21,7 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
-from ..ast_nodes import MacroDefinition
+from ..ast_nodes import MacroDefinition, PatternMatchBody
 from ..tokens import TokenType
 
 logger = logging.getLogger('dao.macros')
@@ -38,6 +38,8 @@ class MacroInfo:
     column: int
     source_code: str  # 宏定义的源代码片段（用于调试）
     scope_depth: int = 0  # 定义时的作用域深度
+    is_pattern_macro: bool = False  # 是否为模式匹配宏
+    branches: list | None = None  # 模式分支列表（仅模式匹配宏有效）
 
 
 class MacroRegistry:
@@ -108,15 +110,21 @@ class MacroRegistry:
                 source_code,
             )
 
+        # 判断是否为模式匹配宏
+        is_pattern = isinstance(macro_def.body, PatternMatchBody)
+        branches = macro_def.body.branches if is_pattern else None
+
         # 创建宏信息对象
         macro_info = MacroInfo(
             name=macro_def.name,
             parameters=macro_def.parameters,
-            body=macro_def.body,
+            body=None if is_pattern else macro_def.body,
             line=macro_def.line,
             column=macro_def.column,
             source_code=source_code,
             scope_depth=self._scope_depth,
+            is_pattern_macro=is_pattern,
+            branches=branches,
         )
 
         # 存储到注册表中
@@ -128,6 +136,15 @@ class MacroRegistry:
         current_scope.add(macro_def.name)
 
         logger.debug("注册宏 '%s'，作用域深度=%d", macro_def.name, self._scope_depth)
+
+        # 模式匹配宏：执行穷尽性检查
+        if is_pattern and branches:
+            from .exhaustiveness import ExhaustivenessChecker
+            checker = ExhaustivenessChecker()
+            warnings = checker.check(branches)
+            for warning in warnings:
+                logger.warning("宏 '%s': %s", macro_def.name, warning)
+
         return True
 
     def find_macro(self, name: str) -> Optional[MacroInfo]:
@@ -194,9 +211,12 @@ class MacroRegistry:
         lines = ["宏注册表："]
         for name, info_list in self._macros.items():
             for info in info_list:
-                lines.append(f"  宏名: {name} ({info.parameters})")
+                macro_type = "模式匹配" if info.is_pattern_macro else "普通"
+                lines.append(f"  宏名: {name} ({info.parameters}) [{macro_type}]")
                 lines.append(f"    定义位置: 第{info.line}行")
                 lines.append(f"    作用域深度: {info.scope_depth}")
+                if info.is_pattern_macro and info.branches:
+                    lines.append(f"    模式分支数: {len(info.branches)}")
         if not self._macros:
             lines.append("  无宏定义")
         return "\n".join(lines)

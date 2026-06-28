@@ -107,6 +107,10 @@ class MacroExpander:
         if not macro_info:
             return call
 
+        # 模式匹配宏分支
+        if macro_info.is_pattern_macro:
+            return self._expand_pattern_macro(call, macro_info, recursion_depth)
+
         logger.debug("展开宏调用: !%s%s (深度=%d)", call.name, call.arguments, recursion_depth)
 
         # 检测递归宏调用：如果宏体中包含对自身的调用，
@@ -137,6 +141,53 @@ class MacroExpander:
         logger.debug("宏调用结果: %s", expanded)
 
         return expanded
+
+    def _expand_pattern_macro(self, call: MacroCall, macro_info: MacroInfo, recursion_depth: int):
+        """展开模式匹配宏：将宏调用展开为等价的 MatchStmt"""
+        from ..ast_nodes import MatchCase, MatchStmt, VariableDecl
+
+        # 构建等价的 MatchStmt
+        subject = Identifier(name=macro_info.parameters[0].split('=')[0].strip())
+        cases = []
+
+        for branch in macro_info.branches:
+            case = MatchCase(
+                pattern=branch.pattern,
+                guard=branch.guard,
+                body=branch.body.body,  # QuoteBlock.body → list[Statement]
+                is_wildcard=isinstance(branch.pattern, Identifier) and branch.pattern.name == "_",
+                line=branch.line,
+                column=branch.column,
+            )
+            cases.append(case)
+
+        match_stmt = MatchStmt(
+            subject=subject,
+            cases=cases,
+            line=call.line,
+            column=call.column,
+        )
+
+        # 将宏调用参数绑定到匹配主题
+        # 例如：!描述(0) → 设 值 = 0; 匹配 值 ...
+        bindings = {}
+        for i, param in enumerate(macro_info.parameters):
+            param_name = param.split('=')[0].strip()
+            if i < len(call.arguments):
+                bindings[param_name] = call.arguments[i]
+
+        # 创建参数绑定语句 + MatchStmt
+        result_stmts = []
+        for param_name, arg_expr in bindings.items():
+            result_stmts.append(VariableDecl(
+                name=param_name,
+                value=arg_expr,
+                line=call.line,
+                column=call.column,
+            ))
+        result_stmts.append(match_stmt)
+
+        return result_stmts
 
     def _is_recursive_macro(self, macro_info: MacroInfo, macro_name: str) -> bool:
         """检测宏体中是否包含对自身的递归调用"""
