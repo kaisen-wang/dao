@@ -180,8 +180,8 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
         """解析代码块 - 支持缩进块或花括号块"""
         if self.match(TokenType.左花括号):
             # 花括号块 - 支持左花括号后直接跟着语句而不需要换行
+            # 注意：match 已经消费了左花括号，不需要再 advance
             statements = []
-            self.advance()  # 消费左花括号
 
             logger.debug(
                 f"parse_block 开始解析，pos={self.pos}, current token: {self.tokens[self.pos].type.name} -> '{self.tokens[self.pos].value}'"
@@ -252,7 +252,7 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
                         self.advance()
 
             logger.debug(f"parse_block 结束解析，共 {len(statements)} 个语句")
-            self.advance()  # 消费右花括号
+            # 注意：match(右花括号) 在循环条件中已经消费了右花括号
             return statements
         else:
             # 检查是否在引号块中（通过调用堆栈）

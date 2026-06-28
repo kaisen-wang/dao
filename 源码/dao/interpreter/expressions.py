@@ -637,8 +637,17 @@ class ExpressionEvaluator:
             body_ast, macro_info.parameters, evaluated_args
         )
 
-        # 递归展开结果中的宏调用
-        expanded = expander.expand(expanded_body)
+        # 检测递归宏：如果宏体中包含对自身的调用，
+        # 只做参数替换，不递归展开，让运行时求值处理递归
+        is_recursive = expander._is_recursive_macro(macro_info, expr.name)
+
+        if not is_recursive:
+            # 非递归宏：递归展开结果中的宏调用
+            expanded = expander.expand(expanded_body)
+        else:
+            # 递归宏：仅做参数替换，保留 MacroCall 节点
+            expanded = expanded_body
+            logger.debug("递归宏 '%s'，仅做参数替换", expr.name)
 
         logger.debug("宏展开后得到: %s: %s", type(expanded).__name__, str(expanded))
 

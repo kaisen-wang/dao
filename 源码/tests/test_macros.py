@@ -150,7 +150,6 @@ def test_macro_with_optional_params():
     assert interpreter.global_env.get("结果2") == 25
 
 
-@pytest.mark.skip("暂时禁用递归宏测试，存在无限递归问题")
 def test_macro_recursion():
     """测试递归宏"""
     code = """
@@ -165,10 +164,9 @@ def test_macro_recursion():
 }
 
 设 结果 = !递归宏(5)
-断言 结果 == 15
 """
-    result = run_code(code)
-    assert result is True
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("结果") == 15
 
 
 @pytest.mark.skip("暂时禁用模式匹配宏测试")

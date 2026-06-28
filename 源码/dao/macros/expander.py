@@ -107,7 +107,18 @@ class MacroExpander:
         if not macro_info:
             return call
 
-        logger.debug("展开宏调用: !%s%s", call.name, call.arguments)
+        logger.debug("展开宏调用: !%s%s (深度=%d)", call.name, call.arguments, recursion_depth)
+
+        # 检测递归宏调用：如果宏体中包含对自身的调用，
+        # 则只做参数替换，不递归展开，让解释器在运行时处理递归
+        if self._is_recursive_macro(macro_info, call.name):
+            logger.debug("检测到递归宏 '%s'，仅做参数替换", call.name)
+            expanded_body = self._apply_macro_parameters(
+                macro_info.body, macro_info.parameters, call.arguments
+            )
+            # 卫生宏处理
+            expanded_body = self._apply_hygiene(expanded_body, macro_info.parameters)
+            return expanded_body
 
         # 评估宏参数
         evaluated_args = [self.expand(arg, recursion_depth) for arg in call.arguments]
@@ -126,6 +137,35 @@ class MacroExpander:
         logger.debug("宏调用结果: %s", expanded)
 
         return expanded
+
+    def _is_recursive_macro(self, macro_info: MacroInfo, macro_name: str) -> bool:
+        """检测宏体中是否包含对自身的递归调用"""
+        return self._contains_macro_call(macro_info.body, macro_name)
+
+    def _contains_macro_call(self, node, macro_name: str) -> bool:
+        """检查节点树中是否包含指定名称的宏调用"""
+        if node is None:
+            return False
+
+        if isinstance(node, list):
+            return any(self._contains_macro_call(n, macro_name) for n in node)
+
+        if isinstance(node, MacroCall) and node.name == macro_name:
+            return True
+
+        if hasattr(node, '__dataclass_fields__'):
+            for field_name in node.__dataclass_fields__:
+                if field_name in ('line', 'column'):
+                    continue
+                attr = getattr(node, field_name)
+                if isinstance(attr, list):
+                    if any(self._contains_macro_call(item, macro_name) for item in attr):
+                        return True
+                elif hasattr(attr, '__dataclass_fields__') or isinstance(attr, (Expression, Statement)):
+                    if self._contains_macro_call(attr, macro_name):
+                        return True
+
+        return False
 
     def _expand_quote_block(self, block: QuoteBlock, recursion_depth: int):
         """处理引述块"""
