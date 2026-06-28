@@ -19,6 +19,11 @@ from dao.parser import Parser
 
 def run_code(source: str, filename: str = "<测试>") -> tuple[object, Interpreter]:
     """执行一段道语言代码，返回结果和解释器实例"""
+    from dao.macros.registry import MacroRegistry
+
+    # 清理宏注册表，避免测试间干扰
+    MacroRegistry().clear()
+
     interpreter = Interpreter()
 
     # 1. 词法分析
@@ -222,3 +227,127 @@ def test_macro_with_pipe():
     result, interpreter = run_code(code)
     # 验证结果变量的值
     assert interpreter.global_env.get("结果") == 3 * 3 + 5
+
+
+# ==================== 新增测试 ====================
+
+
+def test_macro_undefined_error():
+    """测试调用未定义的宏时报错"""
+    code = """
+设 结果 = !不存在的宏(5)
+"""
+    from dao.errors import 运行时错误
+    with pytest.raises(运行时错误, match="未找到宏定义"):
+        run_code(code)
+
+
+def test_macro_redefinition_error():
+    """测试同一作用域内重复定义同名宏报错"""
+    code = """
+定义宏 测试(x) {
+    返回 引述 { $x + 1 }
+}
+
+定义宏 测试(y) {
+    返回 引述 { $y + 2 }
+}
+"""
+    from dao.errors import 宏展开错误
+    with pytest.raises(宏展开错误, match="已在当前作用域中定义"):
+        run_code(code)
+
+
+def test_macro_scope_management():
+    """测试宏注册表作用域管理"""
+    from dao.macros.registry import MacroRegistry
+
+    registry = MacroRegistry()
+    registry.clear()
+
+    # 根作用域
+    assert registry.get_macro_count() == 0
+
+    # 进入新作用域
+    registry.enter_scope()
+    assert registry._scope_depth == 1
+
+    # 离开作用域
+    registry.leave_scope()
+    assert registry._scope_depth == 0
+
+
+def test_macro_hygiene_no_capture():
+    """测试卫生宏不捕获外部变量"""
+    code = """
+定义宏 交换(a, b) {
+    返回 引述 {
+        设 _temp = $a
+        $a
+    }
+}
+
+设 _temp = 100
+设 结果 = !交换(5, 10)
+"""
+    result, interpreter = run_code(code)
+    # 宏内定义的 _temp 不应影响外部的 _temp
+    assert interpreter.global_env.get("_temp") == 100
+
+
+def test_macro_multiple_calls():
+    """测试同一宏多次调用"""
+    code = """
+定义宏 双倍(x) {
+    返回 引述 { $x * 2 }
+}
+
+设 结果1 = !双倍(3)
+设 结果2 = !双倍(7)
+设 结果3 = !双倍(0)
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("结果1") == 6
+    assert interpreter.global_env.get("结果2") == 14
+    assert interpreter.global_env.get("结果3") == 0
+
+
+def test_macro_nested_arithmetic():
+    """测试宏展开结果参与复杂运算"""
+    code = """
+定义宏 平方(x) {
+    返回 引述 { $x * $x }
+}
+
+设 a = !平方(3)
+设 b = !平方(4)
+设 结果 = a + b
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("结果") == 9 + 16
+
+
+def test_macro_string_argument():
+    """测试宏接受字符串参数"""
+    code = """
+定义宏 问候(名字) {
+    返回 引述 { $名字 }
+}
+
+设 结果 = !问候("世界")
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("结果") == "世界"
+
+
+def test_macro_boolean_argument():
+    """测试宏接受布尔参数"""
+    code = """
+定义宏 取反(条件) {
+    返回 引述 { 不是 $条件 }
+}
+
+设 结果 = !取反(真)
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("结果") == False

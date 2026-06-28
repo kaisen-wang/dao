@@ -6,6 +6,10 @@ Parser 类：组合 StatementParser 和 ExpressionParser 混入，
 提供初始化、基础设施方法、顶层解析入口和代码块解析。
 """
 
+import logging
+
+logger = logging.getLogger('dao.parser')
+
 from ..ast_nodes import Program, Statement
 from ..errors import 语法错误
 from ..tokens import Token, TokenType
@@ -179,7 +183,7 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
             statements = []
             self.advance()  # 消费左花括号
 
-            print(
+            logger.debug(
                 f"parse_block 开始解析，pos={self.pos}, current token: {self.tokens[self.pos].type.name} -> '{self.tokens[self.pos].value}'"
             )
 
@@ -189,7 +193,7 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
             ):
                 # 跳过换行或缩进
                 if self.current.type in (TokenType.换行, TokenType.缩进):
-                    print(f"parse_block 跳过换行/缩进，pos={self.pos}")
+                    logger.debug(f"parse_block 跳过换行/缩进，pos={self.pos}")
                     self.advance()
                     continue
 
@@ -204,7 +208,7 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
                     self.current.type == TokenType.标识符
                     and self.current.value == "$块"
                 ):
-                    print(f"parse_block 找到 $块，pos={self.pos}")
+                    logger.debug(f"parse_block 找到 $块，pos={self.pos}")
                     from ..ast_nodes import ExpressionStmt
 
                     expr = self.parse_primary()
@@ -214,7 +218,7 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
                         column=self.current.column,
                     )
                     statements.append(stmt)
-                    print(f"parse_block 添加 $块 语句，type={type(stmt).__name__}")
+                    logger.debug(f"parse_block 添加 $块 语句，type={type(stmt).__name__}")
                     continue
 
                 # 处理其他以 $ 开头的标识符
@@ -222,7 +226,7 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
                     self.current.type == TokenType.标识符
                     and self.current.value.startswith("$")
                 ):
-                    print(
+                    logger.debug(
                         f"parse_block 找到 $ 标识符，value={self.current.value}, pos={self.pos}"
                     )
                     from ..ast_nodes import ExpressionStmt
@@ -236,18 +240,18 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
                     statements.append(stmt)
 
                 else:
-                    print(
+                    logger.debug(
                         f"parse_block 解析语句，pos={self.pos}, type={self.current.type.name}"
                     )
                     stmt = self.parse_statement()
                     if stmt:
                         statements.append(stmt)
-                        print(f"parse_block 添加语句，type={type(stmt).__name__}")
+                        logger.debug(f"parse_block 添加语句，type={type(stmt).__name__}")
                     else:
-                        print(f"parse_block 跳过无效语句，pos={self.pos}")
+                        logger.debug(f"parse_block 跳过无效语句，pos={self.pos}")
                         self.advance()
 
-            print(f"parse_block 结束解析，共 {len(statements)} 个语句")
+            logger.debug(f"parse_block 结束解析，共 {len(statements)} 个语句")
             self.advance()  # 消费右花括号
             return statements
         else:

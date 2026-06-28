@@ -297,10 +297,7 @@ class ASTIntrospector:
 
     def has_side_effects(self) -> bool:
         """分析是否有副作用"""
-        # 简单的副作用分析
-        has_assignments = any(
-            isinstance(node, VariableDecl) for node in self.find_by_type(VariableDecl)
-        )
+        has_assignments = len(self.find_by_type(Assignment)) > 0
         has_throw = len(self.find_by_type(ThrowStmt)) > 0
         has_assert = len(self.find_by_type(AssertStmt)) > 0
         has_send_receive = len(self.get_send_receive_operations()) > 0

@@ -951,10 +951,8 @@ class StatementExecutor:
 
     def exec_macro_definition(self, stmt: MacroDefinition, env: Environment) -> object:
         """执行宏定义：将宏添加到当前环境"""
-        from dao.macros.registry import register_macro
+        from ..macros.registry import MacroRegistry
 
-        try:
-            register_macro(stmt)
-        except 返回信号:
-            pass
+        registry = MacroRegistry()
+        registry.register_macro(stmt)
         return None

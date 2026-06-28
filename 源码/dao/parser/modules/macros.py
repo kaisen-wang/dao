@@ -17,8 +17,11 @@
 - !宏名(参数)
 """
 
+import logging
+
 from ...ast_nodes import (
     BinaryOp,
+    BlockExpr,
     BooleanLiteral,
     Expression,
     FunctionCall,
@@ -37,13 +40,15 @@ from ...ast_nodes import (
 from ...errors import 语法错误
 from ...tokens import TokenType
 
+logger = logging.getLogger('dao.macros')
+
 
 class MacroParser:
     """宏系统解析方法集"""
 
     def parse_macro_definition(self) -> MacroDefinition:
         """解析宏定义：定义宏 名称(参数) { 函数体 }"""
-        print(f"parse_macro_definition 内部 pos={self.pos}")
+        logger.debug("parse_macro_definition 内部 pos=%d", self.pos)
         token = self.advance()  # 消费 "定义宏"
 
         # 解析宏名称
@@ -116,7 +121,7 @@ class MacroParser:
 
         body = []
 
-        print("=== parse_quote_block ===")
+        logger.debug("=== parse_quote_block ===")
         # 跳过任何前导的换行或空格
         while self.match(TokenType.换行):
             pass
@@ -131,20 +136,14 @@ class MacroParser:
                     self.advance()
                     continue
 
-                print(
-                    f"  Parsing at pos {self.pos}, type={self.tokens[self.pos].type.name}, value={self.tokens[self.pos].value}"
+                logger.debug(
+                    "  Parsing at pos %d, type=%s, value=%s",
+                    self.pos, self.tokens[self.pos].type.name, self.tokens[self.pos].value,
                 )
 
                 stmt = self.parse_statement()
                 if stmt:
-                    print(f"  Adding stmt: {type(stmt).__name__}")
-                    from dao.ast_nodes import WhileStmt
-
-                    if isinstance(stmt, WhileStmt):
-                        print(f"    WhileStmt body statements: {len(stmt.body)}")
-                        for i, s in enumerate(stmt.body):
-                            print(f"      Statement {i}: {type(s).__name__}")
-
+                    logger.debug("  Adding stmt: %s", type(stmt).__name__)
                     body.append(stmt)
 
             self.advance()  # 消费右花括号
@@ -153,7 +152,7 @@ class MacroParser:
             # 直到遇到换行或文件结束
             stmt = self.parse_statement()
             if stmt:
-                print(f"  Adding stmt: {type(stmt).__name__}")
+                logger.debug("  Adding stmt: %s", type(stmt).__name__)
                 body.append(stmt)
 
         return QuoteBlock(
@@ -202,24 +201,14 @@ class MacroParser:
         else:
             self.advance()  # 消费右括号
 
-        print(f"After parsing macro call: pos={self.pos}, arguments={len(arguments)}")
-        print(f"Tokens around pos:")
-        for i in range(max(0, self.pos - 3), min(len(self.tokens), self.pos + 3)):
-            type_name = self.tokens[i].type.name
-            value = self.tokens[i].value
-            prefix = "→" if i == self.pos else " "
-            print(f"  {prefix}[{i:2d}] {type_name:12} : {repr(value)}")
-
-        if self.pos < len(self.tokens):
-            print(f"Current token: {self.current.type.name} -> '{self.current.value}'")
+        logger.debug("After parsing macro call: pos=%d, arguments=%d", self.pos, len(arguments))
 
         # 检查是否有块参数（作为参数列表后的可选块）
         # 跳过任何可能的换行
         while self.pos < len(self.tokens) and self.current.type == TokenType.换行:
             self.advance()
 
-        # 问题分析：pos=41 但左花括号在 pos=40，说明位置计算有误
-        # 尝试向后检查一个位置
+        # 检查当前位置或前一位置是否有左花括号（处理位置偏移）
         check_pos = self.pos
         if check_pos > 0 and self.tokens[check_pos - 1].type == TokenType.左花括号:
             check_pos = self.pos - 1
@@ -228,7 +217,7 @@ class MacroParser:
             check_pos < len(self.tokens)
             and self.tokens[check_pos].type == TokenType.左花括号
         ):
-            print(f"Block argument found at pos={check_pos}")
+            logger.debug("Block argument found at pos=%d", check_pos)
             self.pos = check_pos + 1  # 移动到左花括号之后
 
             # 找到匹配的右花括号
@@ -240,25 +229,23 @@ class MacroParser:
                 elif self.tokens[block_end].type == TokenType.右花括号:
                     depth -= 1
                     if depth == 0:
-                        print(f"Block found from {self.pos} to {block_end}")
+                        logger.debug("Block found from %d to %d", self.pos, block_end)
                         break
                 block_end += 1
 
             if block_end < len(self.tokens):
-                from ...ast_nodes import BlockExpr
-
                 block_body = []
 
                 while self.pos < block_end:
                     stmt = self.parse_statement()
                     if stmt:
                         block_body.append(stmt)
-                        print(f"  Added block statement: {type(stmt).__name__}")
+                        logger.debug("  Added block statement: %s", type(stmt).__name__)
 
                 arguments.append(BlockExpr(body=block_body))
                 self.pos = block_end + 1
 
-            print(f"Block extraction complete, pos is now {self.pos}")
+            logger.debug("Block extraction complete, pos is now %d", self.pos)
 
         return MacroCall(
             name=name,

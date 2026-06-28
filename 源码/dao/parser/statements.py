@@ -5,8 +5,12 @@
 这个文件将所有语句解析方法从各个模块导入，并通过多重继承组合到Parser类中。
 """
 
+import logging
+
 from ..ast_nodes import MacroDefinition, Statement
 from ..tokens import TokenType
+
+logger = logging.getLogger('dao.parser')
 
 # 导入所有语句解析模块
 from .modules import (
@@ -114,14 +118,14 @@ class StatementParser(
             case TokenType.匹配:
                 return self.parse_match_stmt()
             case TokenType.定义宏:
-                print(
-                    f"=== parse_macro_definition 调用 === pos={self.pos} token={self.current}"
+                logger.debug(
+                    "=== parse_macro_definition 调用 === pos=%d token=%s", self.pos, self.current,
                 )
                 macro = self.parse_macro_definition()
 
                 # 修正：使用直接的方法查找匹配的右花括号
-                print(
-                    f"Macro body after parse: {len(macro.body) if hasattr(macro, 'body') else 'no body'}"
+                logger.debug(
+                    "Macro body after parse: %s", len(macro.body) if hasattr(macro, 'body') else 'no body',
                 )
 
                 # 查找函数定义对应的左花括号的位置
@@ -141,7 +145,7 @@ class StatementParser(
                             elif self.tokens[j].type == TokenType.右花括号:
                                 depth -= 1
                                 if depth == 0:
-                                    print(f"找到了匹配的函数体边界: {i} -> {j}")
+                                    logger.debug("找到了匹配的函数体边界: %d -> %d", i, j)
                                     function_body_start = i
                                     matching_right_brace_pos = j
                                     break
@@ -153,7 +157,7 @@ class StatementParser(
                 if function_body_start != -1 and (
                     macro.body is None or len(macro.body) == 0
                 ):
-                    print(f"手动解析函数体 pos={self.pos}")
+                    logger.debug("手动解析函数体 pos=%d", self.pos)
                     # 手动解析函数体
                     body = []
 

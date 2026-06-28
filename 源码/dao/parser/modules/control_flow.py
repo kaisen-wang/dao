@@ -1,5 +1,9 @@
 """控制流解析混入"""
 
+import logging
+
+logger = logging.getLogger('dao.parser')
+
 from ...ast_nodes import (
     BreakStmt,
     ContinueStmt,
@@ -66,15 +70,15 @@ class ControlFlowParser:
         token = self.advance()  # 消费 当
         condition = self.parse_expression()
 
-        print(f"=== parse_while_stmt ===")
-        print(f"  condition parsed, current pos: {self.pos}")
-        print(f"  current token: {self.current.type.name} '{self.current.value}'")
+        logger.debug(f"=== parse_while_stmt ===")
+        logger.debug(f"  condition parsed, current pos: {self.pos}")
+        logger.debug(f"  current token: {self.current.type.name} '{self.current.value}'")
 
         # 在引号块中不需要强制换行
         if self.current.type != TokenType.左花括号:
             self.expect(TokenType.换行, "条件后需要换行")
 
-        print(f"  calling parse_block at pos: {self.pos}")
+        logger.debug(f"  calling parse_block at pos: {self.pos}")
 
         # 检查是否已经是左花括号，如果是，不应该通过 match 消费，直接传递给 parse_block
         if self.current.type == TokenType.左花括号:
@@ -82,7 +86,7 @@ class ControlFlowParser:
             statements = []
             self.advance()  # 消费左花括号
 
-            print(
+            logger.debug(
                 f"parse_block 开始解析，pos={self.pos}, current token: {self.tokens[self.pos].type.name} -> '{self.tokens[self.pos].value}'"
             )
 
@@ -92,7 +96,7 @@ class ControlFlowParser:
             ):
                 # 跳过换行或缩进
                 if self.current.type in (TokenType.换行, TokenType.缩进):
-                    print(f"parse_block 跳过换行/缩进，pos={self.pos}")
+                    logger.debug(f"parse_block 跳过换行/缩进，pos={self.pos}")
                     self.advance()
                     continue
 
@@ -107,7 +111,7 @@ class ControlFlowParser:
                     self.current.type == TokenType.标识符
                     and self.current.value == "$块"
                 ):
-                    print(f"parse_block 找到 $块，pos={self.pos}")
+                    logger.debug(f"parse_block 找到 $块，pos={self.pos}")
                     from ...ast_nodes import ExpressionStmt
 
                     expr = self.parse_primary()
@@ -117,7 +121,7 @@ class ControlFlowParser:
                         column=self.current.column,
                     )
                     statements.append(stmt)
-                    print(f"parse_block 添加 $块 语句，type={type(stmt).__name__}")
+                    logger.debug(f"parse_block 添加 $块 语句，type={type(stmt).__name__}")
                     continue
 
                 # 处理其他以 $ 开头的标识符
@@ -125,7 +129,7 @@ class ControlFlowParser:
                     self.current.type == TokenType.标识符
                     and self.current.value.startswith("$")
                 ):
-                    print(
+                    logger.debug(
                         f"parse_block 找到 $ 标识符，value={self.current.value}, pos={self.pos}"
                     )
                     from ...ast_nodes import ExpressionStmt
@@ -139,18 +143,18 @@ class ControlFlowParser:
                     statements.append(stmt)
 
                 else:
-                    print(
+                    logger.debug(
                         f"parse_block 解析语句，pos={self.pos}, type={self.current.type.name}"
                     )
                     stmt = self.parse_statement()
                     if stmt:
                         statements.append(stmt)
-                        print(f"parse_block 添加语句，type={type(stmt).__name__}")
+                        logger.debug(f"parse_block 添加语句，type={type(stmt).__name__}")
                     else:
-                        print(f"parse_block 跳过无效语句，pos={self.pos}")
+                        logger.debug(f"parse_block 跳过无效语句，pos={self.pos}")
                         self.advance()
 
-            print(f"parse_block 结束解析，共 {len(statements)} 个语句")
+            logger.debug(f"parse_block 结束解析，共 {len(statements)} 个语句")
             self.advance()  # 消费右花括号
             body = statements
         else:

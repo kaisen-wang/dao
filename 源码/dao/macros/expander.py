@@ -24,15 +24,20 @@
 6. 递归处理结果中的宏调用
 """
 
+import copy
+import logging
+import re
 from typing import List, Optional, Union
 
 from ..ast_nodes import (
     BooleanLiteral,
     Expression,
+    Identifier,
     MacroCall,
     NullLiteral,
     NumberLiteral,
     QuoteBlock,
+    ReturnStmt,
     Statement,
     StringLiteral,
     UnquoteExpr,
@@ -41,6 +46,8 @@ from ..tokens import TokenType
 from .hygiene import HygieneProcessor
 from .registry import MacroInfo, MacroRegistry
 from .scope import MacroScope
+
+logger = logging.getLogger('dao.macros')
 
 
 class MacroExpander:
@@ -66,7 +73,13 @@ class MacroExpander:
             展开后的节点
         """
         if recursion_depth >= self.max_recursion:
-            return node
+            from ..errors import 宏展开错误
+            raise 宏展开错误(
+                f"宏展开递归深度超限（最大{self.max_recursion}层）",
+                getattr(node, 'line', 0),
+                getattr(node, 'column', 0),
+                "",
+            )
 
         # 处理节点列表
         if isinstance(node, list):
@@ -94,8 +107,7 @@ class MacroExpander:
         if not macro_info:
             return call
 
-        if self.trace_expansion:
-            print(f"展开宏调用: !{call.name}{call.arguments}")
+        logger.debug("展开宏调用: !%s%s", call.name, call.arguments)
 
         # 评估宏参数
         evaluated_args = [self.expand(arg, recursion_depth) for arg in call.arguments]
@@ -105,11 +117,13 @@ class MacroExpander:
             macro_info.body, macro_info.parameters, evaluated_args
         )
 
+        # 卫生宏处理
+        expanded_body = self._apply_hygiene(expanded_body, macro_info.parameters)
+
         # 递归展开结果中的宏调用
         expanded = self.expand(expanded_body, recursion_depth + 1)
 
-        if self.trace_expansion:
-            print(f"宏调用结果: {expanded}")
+        logger.debug("宏调用结果: %s", expanded)
 
         return expanded
 
@@ -128,38 +142,80 @@ class MacroExpander:
         self, node: Union[Expression, Statement], recursion_depth: int
     ):
         """处理其他类型的节点"""
-        import inspect
+        if not hasattr(node, '__dataclass_fields__'):
+            return node
 
-        # 获取节点的属性
-        for attr_name in dir(node):
-            if not attr_name.startswith("__"):
-                attr = getattr(node, attr_name)
+        for field_name in node.__dataclass_fields__:
+            if field_name in ('line', 'column'):
+                continue
+            attr = getattr(node, field_name)
 
-                # 如果属性是可迭代对象，递归处理
-                if isinstance(attr, list):
-                    new_value = [self.expand(item, recursion_depth) for item in attr]
-                    setattr(node, attr_name, new_value)
-                elif isinstance(attr, (Expression, Statement)):
-                    new_value = self.expand(attr, recursion_depth)
-                    setattr(node, attr_name, new_value)
+            # 如果属性是可迭代对象，递归处理
+            if isinstance(attr, list):
+                new_value = [self.expand(item, recursion_depth) for item in attr]
+                setattr(node, field_name, new_value)
+            elif isinstance(attr, (Expression, Statement)):
+                new_value = self.expand(attr, recursion_depth)
+                setattr(node, field_name, new_value)
 
         return node
+
+    def _apply_hygiene(self, node, macro_parameters: List[str]):
+        """应用卫生宏处理"""
+        # 创建作用域分析器
+        scope = MacroScope()
+        param_names = set()
+        for param in macro_parameters:
+            name = param.split('=')[0].strip() if '=' in param else param.strip()
+            param_names.add(name)
+
+        scope._macro_parameters = param_names
+
+        # 收集节点中的变量信息
+        self._collect_variables(node, scope)
+
+        # 应用卫生处理
+        return self.hygiene_processor.process(node, scope)
+
+    def _collect_variables(self, node, scope: MacroScope):
+        """收集节点中的变量定义和使用信息"""
+        if node is None:
+            return
+
+        if isinstance(node, list):
+            for n in node:
+                self._collect_variables(n, scope)
+            return
+
+        if isinstance(node, VariableDecl):
+            scope.define_variable(node.name, is_bound=True)
+
+        if isinstance(node, Identifier):
+            scope.use_variable(node.name)
+
+        if hasattr(node, '__dataclass_fields__'):
+            for field_name in node.__dataclass_fields__:
+                if field_name in ('line', 'column'):
+                    continue
+                attr = getattr(node, field_name)
+                if isinstance(attr, list):
+                    for item in attr:
+                        self._collect_variables(item, scope)
+                elif hasattr(attr, '__dataclass_fields__') or isinstance(attr, Identifier):
+                    self._collect_variables(attr, scope)
 
     def _apply_macro_parameters(
         self, body: Expression, parameters: List[str], arguments: List[Expression]
     ):
         """应用宏参数绑定"""
-        import copy
-
-        from ..ast_nodes import Identifier, QuoteBlock, ReturnStmt, UnquoteExpr
         from .ast_ops import ASTOperations
 
         # 深拷贝传入的 body，防止多次调用之间的状态共享
         body = copy.deepcopy(body)
 
-        print("=== 宏参数绑定 ===")
-        print(f"  参数列表: {parameters}")
-        print(f"  实参列表: {arguments}")
+        logger.debug("=== 宏参数绑定 ===")
+        logger.debug("  参数列表: %s", parameters)
+        logger.debug("  实参列表: %s", arguments)
 
         # 支持可选参数（处理默认值）
         # 首先解析参数列表，分离参数名和默认值
@@ -176,65 +232,13 @@ class MacroExpander:
         for i, (param_name, default_value) in enumerate(parsed_params):
             if i < len(arguments):
                 replacements[param_name] = arguments[i]
-                print(f"  绑定参数 '{param_name}' -> {arguments[i]} (来自实参)")
+                logger.debug("  绑定参数 '%s' -> %s (来自实参)", param_name, arguments[i])
             else:
-                # 处理默认值（这里需要解析默认值表达式，目前简化处理）
-                # 先处理简单情况，如数值字面量
-                from ..ast_nodes import (
-                    BooleanLiteral,
-                    NullLiteral,
-                    NumberLiteral,
-                    StringLiteral,
-                )
-
-                # 解析默认值表达式，目前只支持简单的数值
-                try:
-                    # 尝试解析为数值
-                    if default_value and default_value.isdigit():
-                        replacements[param_name] = NumberLiteral(
-                            value=int(default_value)
-                        )
-                        print(f"  绑定参数 '{param_name}' -> {default_value} (默认值)")
-                    elif default_value == "10":
-                        replacements[param_name] = NumberLiteral(value=10)
-                        print(f"  绑定参数 '{param_name}' -> 10 (默认值)")
-                    elif default_value == "true" or default_value == "真":
-                        replacements[param_name] = BooleanLiteral(value=True)
-                        print(f"  绑定参数 '{param_name}' -> true (默认值)")
-                    elif default_value == "false" or default_value == "假":
-                        replacements[param_name] = BooleanLiteral(value=False)
-                        print(f"  绑定参数 '{param_name}' -> false (默认值)")
-                    elif default_value == "null" or default_value == "空":
-                        replacements[param_name] = NullLiteral()
-                        print(f"  绑定参数 '{param_name}' -> null (默认值)")
-                    elif (
-                        default_value.startswith('"')
-                        and default_value.endswith('"')
-                        or default_value.startswith("'")
-                        and default_value.endswith("'")
-                    ):
-                        replacements[param_name] = StringLiteral(
-                            value=default_value[1:-1]
-                        )
-                        print(
-                            f"  绑定参数 '{param_name}' -> {default_value[1:-1]} (默认值)"
-                        )
-                    # 对于名为 '块' 的参数，如果没有传入实参且没有默认值，不应设置默认值
-                    elif param_name == "块":
-                        print(f"  参数 '{param_name}' 未传入且无默认值，保留原样")
-                    else:
-                        # 默认值解析失败
-                        print(
-                            f"警告：无法解析默认值 '{default_value}'，使用 0 作为默认值"
-                        )
-                        replacements[param_name] = NumberLiteral(value=0)
-                except Exception as e:
-                    print(f"解析默认值时出错：{e}")
-                    # 对于名为 '块' 的参数，如果解析失败，保留原样
-                    if param_name == "块":
-                        print(f"  参数 '{param_name}' 解析失败，保留原样")
-                    else:
-                        replacements[param_name] = NumberLiteral(value=0)
+                # 处理默认值
+                default_node = self._parse_default_value(default_value, param_name)
+                if default_node is not None:
+                    replacements[param_name] = default_node
+                    logger.debug("  绑定参数 '%s' -> %s (默认值)", param_name, default_value)
 
         # 处理返回值的情况
         target_body = body
@@ -247,73 +251,87 @@ class MacroExpander:
             # 处理 return 语句的情况
             target_body = body[0].value
 
-        # 优化后的参数替换实现
-        def replace_node(node):
-            print(f"=== 替换节点 ===")
-            print(f"  原节点: {node}")
-            print(f"  类型: {type(node)}")
+        # 参数替换
+        result = self._replace_in_node(target_body, replacements)
+        return result
 
-            # 首先处理 QuoteBlock 类型
-            if isinstance(node, QuoteBlock):
-                node.body = [replace_node(stmt) for stmt in node.body]
-                print(f"  处理后节点: {node}")
-                return node
+    def _parse_default_value(self, value_str: Optional[str], param_name: str) -> Optional[Expression]:
+        """解析宏参数默认值"""
+        if value_str is None:
+            return None
 
-            # 处理 ExpressionStmt 类型
-            if hasattr(node, "expression"):
-                node.expression = replace_node(node.expression)
-                print(f"  处理后节点: {node}")
-                return node
+        value_str = value_str.strip()
 
-            # 处理 BinaryOp 类型
-            if hasattr(node, "left") and hasattr(node, "right"):
-                node.left = replace_node(node.left)
-                node.right = replace_node(node.right)
-                print(f"  处理后节点: {node}")
-                return node
+        # 数值（含负数、浮点数）
+        if re.match(r'^-?\d+$', value_str):
+            return NumberLiteral(value=int(value_str))
+        if re.match(r'^-?\d+\.\d+$', value_str):
+            return NumberLiteral(value=float(value_str))
+        # 布尔值
+        if value_str in ('true', '真'):
+            return BooleanLiteral(value=True)
+        if value_str in ('false', '假'):
+            return BooleanLiteral(value=False)
+        # 空值
+        if value_str in ('null', '空'):
+            return NullLiteral()
+        # 字符串
+        if (value_str.startswith('"') and value_str.endswith('"')) or \
+           (value_str.startswith("'") and value_str.endswith("'")):
+            return StringLiteral(value=value_str[1:-1])
+        # 对于名为 '块' 的参数，如果没有传入实参且没有默认值，不设置默认值
+        if param_name == '块':
+            return None
 
-            # 处理 UnquoteExpr 中的 Identifier
-            if isinstance(node, UnquoteExpr):
-                print(f"  找到 UnquoteExpr")
-                if isinstance(node.expression, Identifier):
-                    param_name = node.expression.name
-                    print(f"    参数名: '{param_name}'")
-                    if param_name in replacements:
-                        result = replacements[param_name]
-                        print(f"    替换为: {result} (来自 {replacements})")
-                        return result
-                else:
-                    node.expression = replace_node(node.expression)
-                print(f"  处理后节点: {node}")
-                return node
+        logger.warning("无法解析默认值 '%s'，使用 0 作为默认值", value_str)
+        return NumberLiteral(value=0)
 
-            # 处理 Identifier
-            elif isinstance(node, Identifier):
-                if node.name in replacements:
-                    result = replacements[node.name]
-                    print(f"  替换标识符 '{node.name}' 为: {result}")
-                    return result
-                print(f"  处理后节点: {node}")
-                return node
-
-            # 递归处理其他类型的节点
-            if hasattr(node, "__dict__"):
-                for attr_name in dir(node):
-                    if not attr_name.startswith("__") and hasattr(node, attr_name):
-                        attr_value = getattr(node, attr_name)
-
-                        if isinstance(attr_value, list):
-                            new_value = [replace_node(n) for n in attr_value]
-                            setattr(node, attr_name, new_value)
-                        elif hasattr(attr_value, "__dict__"):
-                            new_value = replace_node(attr_value)
-                            setattr(node, attr_name, new_value)
-
-            print(f"  处理后节点: {node}")
+    def _replace_in_node(self, node, replacements: dict):
+        """在节点中替换宏参数"""
+        if not replacements:
             return node
 
-        result = replace_node(target_body)
-        return result
+        if isinstance(node, list):
+            return [self._replace_in_node(n, replacements) for n in node]
+
+        if node is None:
+            return node
+
+        # 处理 UnquoteExpr 中的 Identifier
+        if isinstance(node, UnquoteExpr):
+            if isinstance(node.expression, Identifier):
+                param_name = node.expression.name
+                if param_name in replacements:
+                    return replacements[param_name]
+            else:
+                node.expression = self._replace_in_node(node.expression, replacements)
+            return node
+
+        # 处理 Identifier
+        if isinstance(node, Identifier):
+            if node.name in replacements:
+                return replacements[node.name]
+            return node
+
+        # 处理 QuoteBlock - 进入其内部替换
+        if isinstance(node, QuoteBlock):
+            node.body = [self._replace_in_node(stmt, replacements) for stmt in node.body]
+            return node
+
+        # 递归处理其他类型的节点
+        if hasattr(node, '__dataclass_fields__'):
+            for field_name in node.__dataclass_fields__:
+                if field_name in ('line', 'column'):
+                    continue
+                attr_value = getattr(node, field_name)
+                if isinstance(attr_value, list):
+                    new_value = [self._replace_in_node(n, replacements) for n in attr_value]
+                    setattr(node, field_name, new_value)
+                elif hasattr(attr_value, '__dataclass_fields__') or isinstance(attr_value, (Expression, Statement)):
+                    new_value = self._replace_in_node(attr_value, replacements)
+                    setattr(node, field_name, new_value)
+
+        return node
 
     def set_trace(self, enabled: bool):
         """设置是否跟踪展开过程"""
@@ -321,9 +339,7 @@ class MacroExpander:
 
     def register_builtin_macros(self):
         """注册内置宏"""
-        from ..ast_nodes import NumberLiteral, QuoteBlock, UnquoteExpr
-
-        # 这里可以添加内置宏的示例
+        # 内置宏将在后续版本中实现
         pass
 
     def __repr__(self):

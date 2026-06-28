@@ -82,12 +82,13 @@ class HygieneProcessor:
         if isinstance(node, list):
             return [self._rewrite_variables(n) for n in node]
 
-        if hasattr(node, "__dict__"):
-            for attr_name in dir(node):
-                if not attr_name.startswith("__"):
-                    attr_value = getattr(node, attr_name)
-                    new_value = self._rewrite_variables(attr_value)
-                    setattr(node, attr_name, new_value)
+        if hasattr(node, '__dataclass_fields__'):
+            for field_name in node.__dataclass_fields__:
+                if field_name in ('line', 'column'):
+                    continue
+                attr_value = getattr(node, field_name)
+                new_value = self._rewrite_variables(attr_value)
+                setattr(node, field_name, new_value)
 
         # 重写变量引用
         if hasattr(node, "name") and isinstance(node.name, str):
@@ -147,19 +148,6 @@ class HygieneAnalysis:
     def get_bound_variables(scope: MacroScope) -> List[str]:
         """获取绑定变量列表"""
         return [var.name for var in scope.get_used_variables() if var.is_bound]
-
-    @staticmethod
-    def get_capture_risk(scope: MacroScope) -> Dict[str, str]:
-        """分析变量捕获风险"""
-        free_vars = {var.name: var for var in scope.get_free_variables()}
-        bound_vars = {
-            var.name: var for var in scope.get_used_variables() if var.is_bound
-        }
-
-        risk_map = {}
-        for var_name, info in free_vars.items():
-            if var_name in bound_vars:
-                risk_map[var_name] = f"变量 '{var_name}' 可能被捕获（作用域冲突）"
 
     @staticmethod
     def get_capture_risk(scope: MacroScope) -> Dict[str, str]:

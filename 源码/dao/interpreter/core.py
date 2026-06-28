@@ -72,6 +72,11 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
 
             if not isinstance(env, Environment):
                 env = self.global_env
+
+        # 清理宏注册表，确保每次执行新程序时注册表是干净的
+        from ..macros.registry import MacroRegistry
+        MacroRegistry().clear()
+
         result = None
         try:
             for stmt in program.statements:

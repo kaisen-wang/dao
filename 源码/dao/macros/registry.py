@@ -17,11 +17,14 @@
 - 定义位置
 """
 
+import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from ..ast_nodes import MacroDefinition
 from ..tokens import TokenType
+
+logger = logging.getLogger('dao.macros')
 
 
 @dataclass
@@ -34,6 +37,7 @@ class MacroInfo:
     line: int
     column: int
     source_code: str  # 宏定义的源代码片段（用于调试）
+    scope_depth: int = 0  # 定义时的作用域深度
 
 
 class MacroRegistry:
@@ -50,28 +54,37 @@ class MacroRegistry:
 
     def _initialize(self):
         """初始化注册表"""
-        self.macros: Dict[str, List[MacroInfo]] = {}  # 宏名 -> 作用域链
-        self.current_scope: List[str] = []  # 当前作用域链
+        self._macros: Dict[str, List[MacroInfo]] = {}  # 宏名 → 定义栈
+        self._scope_stack: List[Set[str]] = [set()]  # 作用域栈，每层记录该层定义的宏名
+        self._scope_depth: int = 0  # 当前作用域深度
 
     def enter_scope(self, scope_name: str = None):
         """进入新的作用域"""
-        if scope_name:
-            self.current_scope.append(scope_name)
+        self._scope_stack.append(set())
+        self._scope_depth += 1
+        logger.debug("进入作用域，深度=%d", self._scope_depth)
 
     def leave_scope(self):
         """离开当前作用域"""
-        if self.current_scope:
-            scope_name = self.current_scope.pop()
-            # 移除该作用域下定义的所有宏
-            for macro_name in list(self.macros.keys()):
-                scope_macros = []
-                for info in self.macros[macro_name]:
-                    if info.line not in self._get_scope_lines(scope_name):
-                        scope_macros.append(info)
-                if not scope_macros:
-                    del self.macros[macro_name]
-                else:
-                    self.macros[macro_name] = scope_macros
+        if len(self._scope_stack) <= 1:
+            return  # 不能离开根作用域
+
+        # 获取离开的作用域中定义的宏名
+        leaving_scope = self._scope_stack.pop()
+        self._scope_depth -= 1
+
+        # 移除该作用域下定义的所有宏
+        for macro_name in leaving_scope:
+            if macro_name in self._macros:
+                # 移除该作用域深度定义的宏
+                self._macros[macro_name] = [
+                    info for info in self._macros[macro_name]
+                    if info.scope_depth != self._scope_depth + 1
+                ]
+                if not self._macros[macro_name]:
+                    del self._macros[macro_name]
+
+        logger.debug("离开作用域，深度=%d", self._scope_depth)
 
     def register_macro(self, macro_def: MacroDefinition, source_code: str = ""):
         """
@@ -85,10 +98,15 @@ class MacroRegistry:
             bool: 注册是否成功
         """
         # 检查是否已在当前作用域中定义了同名宏
-        if macro_def.name in self.macros:
-            for existing in self.macros[macro_def.name]:
-                if existing.line == macro_def.line:
-                    return False  # 同一位置的宏定义已存在
+        current_scope = self._scope_stack[-1]
+        if macro_def.name in current_scope:
+            from ..errors import 宏展开错误
+            raise 宏展开错误(
+                f"宏 '{macro_def.name}' 已在当前作用域中定义",
+                macro_def.line,
+                macro_def.column,
+                source_code,
+            )
 
         # 创建宏信息对象
         macro_info = MacroInfo(
@@ -98,13 +116,18 @@ class MacroRegistry:
             line=macro_def.line,
             column=macro_def.column,
             source_code=source_code,
+            scope_depth=self._scope_depth,
         )
 
         # 存储到注册表中
-        if macro_def.name not in self.macros:
-            self.macros[macro_def.name] = []
-        self.macros[macro_def.name].insert(0, macro_info)  # 最新的宏在作用域链顶部
+        if macro_def.name not in self._macros:
+            self._macros[macro_def.name] = []
+        self._macros[macro_def.name].insert(0, macro_info)  # 最新的宏在栈顶
 
+        # 记录到当前作用域
+        current_scope.add(macro_def.name)
+
+        logger.debug("注册宏 '%s'，作用域深度=%d", macro_def.name, self._scope_depth)
         return True
 
     def find_macro(self, name: str) -> Optional[MacroInfo]:
@@ -117,36 +140,29 @@ class MacroRegistry:
         Returns:
             MacroInfo: 宏信息（如果找到），None表示未找到
         """
-        if name not in self.macros:
+        if name not in self._macros:
             return None
 
-        return self.macros[name][0]  # 返回当前作用域链顶部的宏
+        return self._macros[name][0]  # 返回当前作用域链顶部的宏
 
     def get_macro_by_name(self, name: str, line: int = None) -> Optional[MacroInfo]:
         """
-        根据名称和位置查找宏定义
+        根据名称查找宏定义
 
         Args:
             name: 宏名称
-            line: 定义位置的行号（用于作用域解析）
+            line: 定义位置的行号（保留参数，用于兼容）
 
         Returns:
             MacroInfo: 宏信息（如果找到）
         """
-        if name not in self.macros:
-            return None
-
-        for macro in self.macros[name]:
-            if line is None or abs(macro.line - line) < 100:  # 简单的位置匹配
-                return macro
-
-        return self.macros[name][0]
+        return self.find_macro(name)
 
     def get_all_macros(self) -> List[MacroInfo]:
         """获取所有宏的列表（去重）"""
         unique_macros = []
         seen = set()
-        for macro_list in self.macros.values():
+        for macro_list in self._macros.values():
             for macro in macro_list:
                 if macro.name not in seen:
                     seen.add(macro.name)
@@ -155,59 +171,32 @@ class MacroRegistry:
 
     def clear(self):
         """清空所有宏定义"""
-        self.macros.clear()
-        self.current_scope.clear()
-        self._initialize()
+        self._macros.clear()
+        self._scope_stack = [set()]
+        self._scope_depth = 0
 
     def get_macro_count(self) -> int:
         """获取宏定义的总数"""
-        return sum(len(macros) for macros in self.macros.values())
-
-    def _get_scope_lines(self, scope_name: str) -> List[int]:
-        """获取作用域对应的行号范围（简单实现）"""
-        # 这里可以根据实际的作用域管理进行优化
-        return []
+        return sum(len(macros) for macros in self._macros.values())
 
     def __repr__(self) -> str:
         """字符串表示"""
-        macro_names = list(self.macros.keys())
+        macro_names = list(self._macros.keys())
         return (
             f"MacroRegistry("
             f"宏数量={self.get_macro_count()}, "
             f"宏名={', '.join(macro_names)}, "
-            f"作用域={'.'.join(self.current_scope)})"
+            f"作用域深度={self._scope_depth})"
         )
 
     def __str__(self) -> str:
         """字符串表示（更详细）"""
         lines = ["宏注册表："]
-        for name, info_list in self.macros.items():
+        for name, info_list in self._macros.items():
             for info in info_list:
                 lines.append(f"  宏名: {name} ({info.parameters})")
                 lines.append(f"    定义位置: 第{info.line}行")
-                lines.append(f"    作用域: {' -> '.join(self.current_scope)}")
-        if not self.macros:
+                lines.append(f"    作用域深度: {info.scope_depth}")
+        if not self._macros:
             lines.append("  无宏定义")
         return "\n".join(lines)
-
-
-# 全局注册表实例
-_registry = None
-
-
-def get_registry() -> MacroRegistry:
-    """获取全局宏注册表实例"""
-    global _registry
-    if _registry is None:
-        _registry = MacroRegistry()
-    return _registry
-
-
-def register_macro(macro_def: MacroDefinition, source_code: str = ""):
-    """注册宏定义的便捷函数"""
-    return get_registry().register_macro(macro_def, source_code)
-
-
-def find_macro(name: str) -> Optional[MacroInfo]:
-    """查找宏定义的便捷函数"""
-    return get_registry().find_macro(name)
