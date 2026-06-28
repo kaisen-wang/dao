@@ -571,18 +571,30 @@ class ExpressionParser:
     # ========================
 
     def parse_lambda(self) -> LambdaExpr:
-        """解析匿名函数"""
+        """解析匿名函数
+        
+        支持两种语法：
+        1. 无参数：函数 => 表达式
+        2. 有参数：函数(参数) => 表达式
+        """
         token = self.advance()  # 消费 函数
-        self.expect(TokenType.左括号, "匿名函数需要 '('")
-
+        
         params = []
-        while self.current.type != TokenType.右括号:
-            param = self.expect(TokenType.标识符, "期望参数名")
-            params.append(param.value)
-            if not self.match(TokenType.逗号):
-                break
-
-        self.expect(TokenType.右括号, "匿名函数需要 ')'")
+        
+        # 检查是否有参数列表
+        if self.current.type == TokenType.左括号:
+            # 有参数列表：函数(参数) => 表达式
+            self.advance()  # 消费 (
+            
+            while self.current.type != TokenType.右括号:
+                param = self.expect(TokenType.标识符, "期望参数名")
+                params.append(param.value)
+                if not self.match(TokenType.逗号):
+                    break
+            
+            self.expect(TokenType.右括号, "匿名函数需要 ')'")
+        
+        # 无论是无参数还是有参数，都需要箭头
         self.expect(TokenType.箭头, "匿名函数需要 '=>'")
         body = self.parse_expression()
 
