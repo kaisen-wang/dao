@@ -182,7 +182,7 @@ class Lexer(LexerReaders):
                         check_pos += 1
                     if check_pos < len(self.source):
                         ch = self.source[check_pos]
-                        if ch.isdigit() or ch in ('(', '（', '[', '-', '+'):
+                        if ch.isdigit() or ch in ('(', '（', '[', '-', '+') or self._is_identifier_start(ch):
                             is_floor_div = True
 
                 if is_floor_div:

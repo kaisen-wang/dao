@@ -963,7 +963,11 @@ class StatementExecutor:
         """执行解构赋值"""
         value = self.eval_expression(stmt.value, env)
 
-        # 字典解构
+        pattern = getattr(stmt, 'pattern', None)
+        if pattern is not None:
+            self._exec_destructure_pattern(pattern, value, env, stmt.is_declaration)
+            return
+
         is_dict = getattr(stmt, 'is_dict_destructure', False)
         if is_dict:
             if not isinstance(value, dict):
@@ -993,7 +997,6 @@ class StatementExecutor:
         if isinstance(value, (list, tuple)):
             rest_target = getattr(stmt, 'rest_target', None)
             if rest_target:
-                # 有剩余元素：前 N 个绑定到 targets，剩余绑定到 rest_target
                 n = len(stmt.targets)
                 if len(value) < n:
                     raise 运行时错误(
@@ -1055,6 +1058,75 @@ class StatementExecutor:
                 stmt.column,
                 self.source,
             )
+
+    def _exec_destructure_pattern(self, pattern, value, env: Environment, is_declaration: bool):
+        """递归执行嵌套解构赋值"""
+        from ..ast_nodes import DestructureTarget
+        if not isinstance(pattern, DestructureTarget):
+            return
+        if pattern.name is not None:
+            if is_declaration:
+                env.define(pattern.name, value)
+            elif env.has(pattern.name):
+                env.set(pattern.name, value)
+            else:
+                env.define(pattern.name, value)
+            return
+        if pattern.is_list:
+            if not isinstance(value, (list, tuple)):
+                raise 类型错误(
+                    f"列表解构需要一个列表或元组，但得到 {type(value).__name__}",
+                    pattern.line,
+                    pattern.column,
+                    self.source,
+                )
+            items = list(value)
+            non_rest = [t for t in pattern.list_targets if not (t.is_list or t.is_dict) or True]
+            n = len(pattern.list_targets)
+            if pattern.list_rest is None and len(items) != n:
+                raise 运行时错误(
+                    f"解构赋值：目标数量({n})与值的数量({len(items)})不匹配",
+                    pattern.line,
+                    pattern.column,
+                    self.source,
+                )
+            if pattern.list_rest is not None and len(items) < n:
+                raise 运行时错误(
+                    f"解构赋值：目标数量({n})超过值的数量({len(items)})",
+                    pattern.line,
+                    pattern.column,
+                    self.source,
+                )
+            for i, target in enumerate(pattern.list_targets):
+                if i < len(items):
+                    self._exec_destructure_pattern(target, items[i], env, is_declaration)
+            if pattern.list_rest is not None:
+                rest = items[n:]
+                if isinstance(value, tuple):
+                    rest = tuple(rest)
+                if is_declaration:
+                    env.define(pattern.list_rest, rest)
+                elif env.has(pattern.list_rest):
+                    env.set(pattern.list_rest, rest)
+                else:
+                    env.define(pattern.list_rest, rest)
+        elif pattern.is_dict:
+            if not isinstance(value, dict):
+                raise 类型错误(
+                    f"字典解构需要一个字典，但得到 {type(value).__name__}",
+                    pattern.line,
+                    pattern.column,
+                    self.source,
+                )
+            for key, target in pattern.dict_targets.items():
+                if key not in value:
+                    raise 运行时错误(
+                        f"字典解构：字典中不存在键 '{key}'",
+                        pattern.line,
+                        pattern.column,
+                        self.source,
+                    )
+                self._exec_destructure_pattern(target, value[key], env, is_declaration)
 
     def exec_macro_definition(self, stmt: MacroDefinition, env: Environment) -> object:
         """执行宏定义：将宏添加到当前环境"""

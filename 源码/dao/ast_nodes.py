@@ -517,6 +517,18 @@ class TemplateLiteral(Expression):
 
 
 @dataclass
+class DestructureTarget(ASTNode):
+    """解构目标：可以是变量名、列表解构模式或字典解构模式"""
+
+    name: str | None = None
+    list_targets: list["DestructureTarget"] = field(default_factory=list)
+    list_rest: str | None = None
+    dict_targets: dict[str, "DestructureTarget"] = field(default_factory=dict)
+    is_list: bool = False
+    is_dict: bool = False
+
+
+@dataclass
 class DestructureAssign(Statement):
     """解构赋值：[甲, 乙] = [10, 20] 或 {姓名, 年龄} = 人"""
 
@@ -526,6 +538,7 @@ class DestructureAssign(Statement):
     rest_target: str | None = None
     dict_targets: dict[str, str] = field(default_factory=dict)
     is_dict_destructure: bool = False
+    pattern: DestructureTarget | None = None
 
 
 # ========================

@@ -1,7 +1,7 @@
 """函数声明解析混入"""
 
 from ...tokens import TokenType, Token
-from ...ast_nodes import FunctionDecl, ReturnStmt, YieldStmt
+from ...ast_nodes import FunctionDecl, ReturnStmt, TupleLiteral, YieldStmt
 from ...errors import 语法错误
 
 
@@ -198,7 +198,7 @@ class FunctionDeclParser:
 
 
     def parse_return_stmt(self) -> ReturnStmt:
-        """解析返回语句"""
+        """解析返回语句，支持多返回值语法糖：返回 甲, 乙 等价于 返回 (甲, 乙)"""
         token = self.advance()  # 消费 返回
         value = None
         if (
@@ -206,6 +206,13 @@ class FunctionDeclParser:
             and self.current.type != TokenType.文件结束
         ):
             value = self.parse_expression()
+            if self.match(TokenType.逗号):
+                elements = [value]
+                while True:
+                    elements.append(self.parse_expression())
+                    if not self.match(TokenType.逗号):
+                        break
+                value = TupleLiteral(elements=elements, line=token.line, column=token.column)
         self.match(TokenType.换行)
         return ReturnStmt(value=value, line=token.line, column=token.column)
 
