@@ -17,10 +17,35 @@ __all__ = [
     "NumericRangeConstraint",
     "EqualityConstraint",
     "InequalityConstraint",
+    "AllDifferentConstraint",
     "TypeConstraint",
     "ConstraintSolver",
     "ConstraintViolationError",
     "is_constrained",
     "apply_constraints",
     "get_constraints",
+    "in_range",
+    "all_different",
 ]
+
+
+def in_range(variable, low: int, high: int):
+    """创建范围约束"""
+    from .core import NumericRangeConstraint, LogicVariable
+
+    if isinstance(variable, str):
+        variable = LogicVariable(variable)
+    return NumericRangeConstraint(variable, low, high)
+
+
+def all_different(variables):
+    """创建全不同约束"""
+    from .core import AllDifferentConstraint, LogicVariable
+
+    normalized = []
+    for v in variables:
+        if isinstance(v, str):
+            normalized.append(LogicVariable(v))
+        else:
+            normalized.append(v)
+    return AllDifferentConstraint(normalized)

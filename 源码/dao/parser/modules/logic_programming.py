@@ -5,7 +5,10 @@ from ...ast_nodes import (
     FunctionCall,
     Identifier,
     LogicBlock,
+    LogicConstraint,
+    LogicCut,
     LogicFact,
+    LogicNegation,
     LogicRule,
     NumberLiteral,
     StringLiteral,
@@ -61,8 +64,8 @@ class LogicProgrammingParser:
         # 消费冒号
         self.match(TokenType.冒号)
 
-        # 解析整个事实表达式
-        fact_expr = self.parse_expression()
+        # 解析整个事实表达式（使用 parse_pipe 避免 如果 被当作条件表达式）
+        fact_expr = self.parse_pipe()
         predicate = ""
         arguments = []
 
@@ -92,15 +95,14 @@ class LogicProgrammingParser:
         )
 
     def parse_logic_rule(self) -> LogicRule:
-        """解析规则声明：规则: 祖父母(?祖, "小明") 如果 父母(?祖, "小明")"""
+        """解析规则声明：规则: 祖父母(?祖, ?孙) 如果 父母(?祖, ?父) 并且 父母(?父, ?孙)"""
         token = self.advance()  # 消费 规则
 
         # 消费冒号
         self.match(TokenType.冒号)
 
-        # 解析规则头
-        # 期望函数调用
-        head = self.parse_expression()
+        # 解析规则头（使用 parse_pipe 避免 如果 被当作条件表达式）
+        head = self.parse_pipe()
         if not isinstance(head, FunctionCall):
             raise 语法错误("规则头必须是函数调用")
 
@@ -109,11 +111,23 @@ class LogicProgrammingParser:
         if self.match(TokenType.如果):
             # 解析规则体
             while not self.current.type in (TokenType.换行, TokenType.右花括号):
-                if self.current.type == TokenType.标识符:
-                    body.append(self.parse_expression())
+                if self.current.type == TokenType.非:
+                    body.append(self.parse_logic_negation())
+                    if self.current.type == TokenType.并且:
+                        self.advance()
+                elif self.current.type == TokenType.剪枝:
+                    body.append(self.parse_logic_cut())
+                    if self.current.type == TokenType.并且:
+                        self.advance()
+                elif self.current.type == TokenType.标识符:
+                    body.append(self.parse_pipe())
                     # 检查是否有"并且"关键字，如果有则消费
                     if self.current.type == TokenType.并且:
                         self.advance()
+                elif self.current.type in (TokenType.换行, TokenType.右花括号):
+                    break
+                else:
+                    break
 
         return LogicRule(
             head=LogicFact(
@@ -123,6 +137,47 @@ class LogicProgrammingParser:
                 column=token.column,
             ),
             body=body,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_logic_negation(self) -> LogicNegation:
+        """解析逻辑否定：非 已封禁(?用户)"""
+        token = self.advance()  # 消费 非
+        negated_expr = self.parse_pipe()
+        return LogicNegation(
+            expression=negated_expr,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_logic_cut(self) -> LogicCut:
+        """解析剪枝操作符：剪枝"""
+        token = self.advance()  # 消费 剪枝
+        return LogicCut(line=token.line, column=token.column)
+
+    def parse_logic_constraint(self) -> LogicConstraint:
+        """解析约束表达式：?x 在范围 1..10"""
+        token = self.advance()  # 消费 在范围
+
+        # 解析下界
+        low = self.parse_expression()
+
+        # 期望区间运算符 ..
+        if self.current.type != TokenType.区间:
+            raise 语法错误("约束范围需要区间运算符 '..'")
+        self.advance()  # 消费 ..
+
+        # 解析上界
+        high = self.parse_expression()
+
+        # 获取变量名（从之前的上下文推断）
+        # 这个方法由 parse_primary 中的 在范围 分支调用
+        # 变量名在调用前已经确定
+        return LogicConstraint(
+            variable="",
+            operator="在范围",
+            bounds=(0, 0),
             line=token.line,
             column=token.column,
         )

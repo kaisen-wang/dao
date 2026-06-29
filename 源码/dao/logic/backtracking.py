@@ -57,6 +57,11 @@ class TrailStack:
         return f"TrailStack(marks={len(self._marks)}, bindings={len(self._bindings)})"
 
 
+class CutSignal(Exception):
+    """剪枝信号：用于在回溯搜索中传播剪枝操作"""
+    pass
+
+
 class Backtracker:
     """Depth-first search backtracker"""
 
@@ -68,6 +73,7 @@ class Backtracker:
         from .constraints.core import ConstraintSolver
 
         self.constraint_solver = ConstraintSolver(constraints or [])
+        self._cut_active = False
 
     def search(
         self, goal: Any, substitution: Optional[Substitution] = None
@@ -89,6 +95,10 @@ class Backtracker:
         if not self.constraint_solver.check_constraints(substitution):
             return
 
+        # 检查剪枝信号
+        if self._cut_active:
+            return
+
         if isinstance(goal, LogicStruct):
             yield from self._match_struct(goal, substitution)
         elif isinstance(goal, LogicVariable):
@@ -107,6 +117,8 @@ class Backtracker:
         predicate = struct.predicate
 
         for fact in self.kb.get_facts(predicate):
+            if self._cut_active:
+                return
             mark = self.trail.mark()
             try:
                 new_subst = substitution.copy()
@@ -118,6 +130,8 @@ class Backtracker:
                 self.trail.backtrack(mark)
 
         for head, body in self.kb.get_rules(predicate):
+            if self._cut_active:
+                return
             mark = self.trail.mark()
             try:
                 new_subst = substitution.copy()
@@ -135,14 +149,38 @@ class Backtracker:
             yield substitution
             return
 
+        if self._cut_active:
+            return
+
         first = body[0]
+
+        # 检查是否是剪枝操作符
+        if isinstance(first, str) and first == "剪枝":
+            self._cut_active = True
+            yield substitution
+            return
+
         rest = body[1:]
 
         for subst in self._dfs(first, substitution):
+            if self._cut_active:
+                if rest:
+                    yield from self._solve_body(rest, subst)
+                else:
+                    yield subst
+                return
             if rest:
                 yield from self._solve_body(rest, subst)
             else:
                 yield subst
+
+    def activate_cut(self):
+        """激活剪枝"""
+        self._cut_active = True
+
+    def reset_cut(self):
+        """重置剪枝状态"""
+        self._cut_active = False
 
     def find_one(
         self, goal: Any, substitution: Optional[Substitution] = None
@@ -170,8 +208,9 @@ class Backtracker:
         return count
 
 
-def cut() -> None:
-    raise NotImplementedError("Cut operator needs integration with searcher")
+def cut() -> CutSignal:
+    """触发剪枝信号"""
+    return CutSignal()
 
 
 def once(goal: Any, backtracker: Backtracker) -> Optional[Substitution]:

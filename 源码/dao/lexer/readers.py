@@ -402,6 +402,11 @@ class LexerReaders:
             self.advance()
             return self._make_token(TokenType.展开, "...", line, col)
 
+        if two_chars == "..":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.区间, "..", line, col)
+
         if two_chars == "=>":
             self.advance()
             self.advance()

@@ -145,6 +145,9 @@ class TokenType(Enum):
     规则 = auto()  # rule - 规则声明
     查询 = auto()  # query - 查询表达式
     剪枝 = auto()  # cut - 剪枝操作符
+    非 = auto()  # not (logic) - 逻辑否定
+    在范围 = auto()  # in_range - 约束范围
+    区间 = auto()  # .. - 区间运算符
 
     # ========================
     # 宏系统关键字
@@ -253,6 +256,8 @@ KEYWORDS: dict[str, TokenType] = {
     "规则": TokenType.规则,
     "查询": TokenType.查询,
     "剪枝": TokenType.剪枝,
+    "非": TokenType.非,
+    "在范围": TokenType.在范围,
     # 宏系统
     "定义宏": TokenType.定义宏,
     "引述": TokenType.引述,

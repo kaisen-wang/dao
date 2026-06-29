@@ -565,6 +565,18 @@ class ExpressionParser:
         if token.type == TokenType.查询:
             return self.parse_logic_query()
 
+        # 逻辑否定
+        if token.type == TokenType.非:
+            return self.parse_logic_negation()
+
+        # 剪枝操作符
+        if token.type == TokenType.剪枝:
+            return self.parse_logic_cut()
+
+        # 约束范围：?x 在范围 1..10
+        if token.type == TokenType.在范围:
+            return self.parse_logic_constraint_range()
+
         # 字典字面量 {...}
         if token.type == TokenType.左花括号:
             # 只有当后面紧跟标识符和冒号时才解析为字典字面量
@@ -604,6 +616,60 @@ class ExpressionParser:
         return LogicQuery(
             knowledge_base=knowledge_base,
             goal=goal,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_logic_negation(self) -> "LogicNegation":
+        """解析逻辑否定：非 已封禁(?用户)"""
+        from ..ast_nodes import LogicNegation
+
+        token = self.advance()  # 消费 非
+        negated_expr = self.parse_expression()
+        return LogicNegation(
+            expression=negated_expr,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_logic_cut(self) -> "LogicCut":
+        """解析剪枝操作符：剪枝"""
+        from ..ast_nodes import LogicCut
+
+        token = self.advance()  # 消费 剪枝
+        return LogicCut(line=token.line, column=token.column)
+
+    def parse_logic_constraint_range(self) -> "LogicConstraint":
+        """解析约束范围：?x 在范围 1..10"""
+        from ..ast_nodes import LogicConstraint
+
+        token = self.advance()  # 消费 在范围
+
+        # 解析下界
+        low = self.parse_expression()
+
+        # 期望区间运算符 ..
+        if self.current.type != TokenType.区间:
+            raise self._error("约束范围需要区间运算符 '..'")
+        self.advance()  # 消费 ..
+
+        # 解析上界
+        high = self.parse_expression()
+
+        # 提取变量名和边界值
+        var_name = ""
+        low_val = 0
+        high_val = 0
+
+        if isinstance(low, NumberLiteral):
+            low_val = int(low.value)
+        if isinstance(high, NumberLiteral):
+            high_val = int(high.value)
+
+        return LogicConstraint(
+            variable=var_name,
+            operator="在范围",
+            bounds=(low_val, high_val),
             line=token.line,
             column=token.column,
         )

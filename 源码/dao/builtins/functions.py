@@ -258,6 +258,30 @@ def _builtin_睡眠(秒数):
     time.sleep(秒数)
 
 
+def _builtin_添加事实(kb, predicate, *args):
+    """向知识库动态添加事实"""
+    from ..logic.core import KnowledgeBase, LogicStruct, normalize_term
+
+    if not isinstance(kb, KnowledgeBase):
+        raise 类型错误("添加事实() 的第一个参数必须是知识库")
+    normalized_args = [normalize_term(arg) for arg in args]
+    fact = LogicStruct(predicate, normalized_args)
+    kb.add_fact(fact)
+    return None
+
+
+def _builtin_删除事实(kb, predicate, *args):
+    """从知识库动态删除事实"""
+    from ..logic.core import KnowledgeBase, LogicStruct, normalize_term
+
+    if not isinstance(kb, KnowledgeBase):
+        raise 类型错误("删除事实() 的第一个参数必须是知识库")
+    normalized_args = [normalize_term(arg) for arg in args]
+    fact = LogicStruct(predicate, normalized_args)
+    kb.remove_fact(fact)
+    return None
+
+
 def get_builtins() -> dict[str, BuiltinFunction]:
     """返回所有基础内置函数"""
     return {
@@ -287,4 +311,6 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         "开始事件循环": BuiltinFunction("开始事件循环", _builtin_开始事件循环, 0),
         "运行异步": BuiltinFunction("运行异步", _builtin_运行异步, 1),
         "睡眠": BuiltinFunction("睡眠", _builtin_睡眠, 1),
+        "添加事实": BuiltinFunction("添加事实", _builtin_添加事实),
+        "删除事实": BuiltinFunction("删除事实", _builtin_删除事实),
     }

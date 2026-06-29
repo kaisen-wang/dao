@@ -1155,12 +1155,25 @@ class ExpressionEvaluator:
         from ..logic.core import normalize_term
         from ..logic.solver import Solver
 
-        # 求值被否定的表达式
         negated_expr = self.eval_expression(expr.expression, env)
         normalized_negated = normalize_term(negated_expr)
 
-        # 这里我们需要上下文信息来知道当前的知识库，
-        # 暂时返回否定表达式本身，由求解器处理
+        # 尝试从环境中获取当前知识库的求解器
+        # 遍历环境链查找求解器
+        current_env = env
+        solver = None
+        while current_env is not None:
+            for name, value in current_env.values.items():
+                if isinstance(value, Solver):
+                    solver = value
+                    break
+            if solver:
+                break
+            current_env = current_env.parent
+
+        if solver:
+            return solver.solve_negation(normalized_negated)
+
         return ("非", normalized_negated)
 
     def eval_logic_cut(self, expr: LogicCut, env: Environment) -> object:
@@ -1169,6 +1182,16 @@ class ExpressionEvaluator:
 
     def eval_logic_constraint(self, expr: LogicConstraint, env: Environment) -> object:
         """求值约束表达式：?x 在范围 1..10"""
+        from ..logic.constraints.core import NumericRangeConstraint
+        from ..logic.core import LogicVariable
+
+        var = LogicVariable(expr.variable) if expr.variable else None
+        low, high = expr.bounds
+
+        if var and expr.operator == "在范围":
+            constraint = NumericRangeConstraint(var, low, high)
+            return ("约束", constraint)
+
         return ("约束", expr.variable, expr.operator, expr.bounds)
 
     def _handle_await_result(self, result):

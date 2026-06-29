@@ -149,6 +149,30 @@ class TypeConstraint(Constraint):
         return f"{self.variable} 是 {self.expected_type.__name__}"
 
 
+class AllDifferentConstraint(Constraint):
+    """全不同约束"""
+
+    def __init__(self, variables: List[LogicVariable]):
+        super().__init__(variables, ConstraintType.INEQUALITY)
+        self.variables = variables
+
+    def is_satisfied(self, substitution: "Substitution") -> bool:
+        """检查所有变量值是否互不相同"""
+        values = []
+        for var in self.variables:
+            if not substitution.is_bound(var):
+                return True
+            value = substitution.get_value(var)
+            if isinstance(value, LogicAtom):
+                value = value.value
+            values.append(value)
+        return len(values) == len(set(values))
+
+    def __repr__(self) -> str:
+        vars_str = ", ".join(v.name for v in self.variables)
+        return f"all_different({vars_str})"
+
+
 class ConstraintViolationError(QueryError):
     """约束违反错误"""
 
