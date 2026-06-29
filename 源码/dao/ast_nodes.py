@@ -215,6 +215,7 @@ class VariableDecl(Statement):
     name: str = ""
     value: Expression = field(default_factory=lambda: NullLiteral())
     is_constant: bool = False
+    is_exported: bool = False
 
 
 @dataclass
@@ -251,6 +252,7 @@ class FunctionDecl(Statement):
     is_getter: bool = False  # 是否是属性 getter
     is_setter: bool = False  # 是否是属性 setter
     rest_param: str | None = None  # 可变参数名
+    is_exported: bool = False
 
 
 @dataclass
@@ -367,6 +369,7 @@ class TraitDecl(Statement):
 
     name: str = ""
     body: list[Statement] = field(default_factory=list)
+    is_exported: bool = False
 
 
 @dataclass
@@ -384,6 +387,7 @@ class EnumDecl(Statement):
     name: str = ""
     values: list[str] = field(default_factory=list)
     variants: list[EnumVariant] = field(default_factory=list)
+    is_exported: bool = False
 
 
 @dataclass
@@ -396,6 +400,7 @@ class ClassDecl(Statement):
     body: list[Statement] = field(default_factory=list)
     is_error_class: bool = False  # 是否是错误类（继承自 错误）
     is_abstract: bool = False  # 是否是抽象类
+    is_exported: bool = False
 
 
 @dataclass
@@ -405,6 +410,7 @@ class AbstractDecl(Statement):
     name: str = ""
     parent_name: str | None = None
     body: list[Statement] = field(default_factory=list)
+    is_exported: bool = False
 
 
 @dataclass
@@ -496,14 +502,14 @@ class ImportStmt(Statement):
     """导入语句"""
 
     module_path: str = ""
-    names: list[str] = field(default_factory=list)  # 选择性导入的名称列表
+    names: list[tuple[str, str | None]] = field(default_factory=list)
     alias: str | None = None
-    is_from_import: bool = False  # 是否是 "从 模块 导入 {项}" 语法
+    is_from_import: bool = False
 
 
 @dataclass
 class ExportStmt(Statement):
-    """导出语句：导出 名称 / 导出 {名称1, 名称2}"""
+    """导出语句：导出 名称1, 名称2, ..."""
 
     names: list[str] = field(default_factory=list)
 

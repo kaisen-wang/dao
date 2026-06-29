@@ -7,7 +7,7 @@
 
 import logging
 
-from ..ast_nodes import Assignment, MacroDefinition, Statement
+from ..ast_nodes import Assignment, MacroDefinition, Statement, VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl
 from ..tokens import TokenType
 
 logger = logging.getLogger('dao.parser')
@@ -141,7 +141,19 @@ class StatementParser(
             case TokenType.导入:
                 return self.parse_import_stmt()
             case TokenType.导出:
-                return self.parse_export_stmt()
+                # 检查后面是否是定义关键字（逐项导出语法：导出 函数/常量/类型 ...）
+                next_token = self.peek()
+                if next_token.type in (
+                    TokenType.函数, TokenType.常量, TokenType.定义,
+                    TokenType.类型, TokenType.枚举, TokenType.特征, TokenType.抽象,
+                ):
+                    self.advance()  # 消费 导出
+                    stmt = self.parse_statement()
+                    if isinstance(stmt, (VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl)):
+                        stmt.is_exported = True
+                    return stmt
+                else:
+                    return self.parse_export_stmt()
             case TokenType.从:
                 # 只有在特定上下文中才是导入语句的 "从"，否则是 for 循环的 "从"
                 # 检查前面是否有导入或导出关键字，或者后面是否紧跟模块名

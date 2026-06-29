@@ -212,6 +212,8 @@ class StatementExecutor:
         """执行变量/常量声明"""
         value = self.eval_expression(stmt.value, env)
         env.define(stmt.name, value, is_constant=stmt.is_constant)
+        if stmt.is_exported:
+            env.exports.append(stmt.name)
 
     def exec_assignment(self, stmt: Assignment, env: Environment) -> None:
         """执行赋值语句"""
@@ -305,6 +307,8 @@ class StatementExecutor:
             rest_param=getattr(stmt, 'rest_param', None),
         )
         env.define(stmt.name, func)
+        if stmt.is_exported:
+            env.exports.append(stmt.name)
 
     def exec_async_function_decl(
         self, stmt: AsyncFunctionDecl, env: Environment
@@ -506,6 +510,8 @@ class StatementExecutor:
         variants = getattr(stmt, 'variants', None)
         enum_obj = DaoEnum(stmt.name, stmt.values, variants)
         env.define(stmt.name, enum_obj)
+        if stmt.is_exported:
+            env.exports.append(stmt.name)
 
     def exec_trait_decl(self, stmt: TraitDecl, env: Environment) -> None:
         """执行特征声明"""
@@ -531,6 +537,8 @@ class StatementExecutor:
 
         trait = DaoTrait(name=stmt.name, methods=methods, static_methods=static_methods)
         env.define(stmt.name, trait)
+        if stmt.is_exported:
+            env.exports.append(stmt.name)
 
     def exec_abstract_decl(self, stmt: AbstractDecl, env: Environment) -> None:
         """执行抽象类型声明"""
@@ -544,6 +552,7 @@ class StatementExecutor:
             column=stmt.column,
             is_error_class=False,
             is_abstract=True,
+            is_exported=stmt.is_exported,
         )
         self.exec_class_decl(class_stmt, env)
 
@@ -673,6 +682,8 @@ class StatementExecutor:
                 abstract_methods=abstract_methods,
             )
             env.define(stmt.name, klass)
+            if stmt.is_exported:
+                env.exports.append(stmt.name)
         else:
             klass = DaoClass(
                 name=stmt.name,
@@ -686,6 +697,8 @@ class StatementExecutor:
                 abstract_methods=abstract_methods,
             )
             env.define(stmt.name, klass)
+            if stmt.is_exported:
+                env.exports.append(stmt.name)
 
     # ========================
     # 模式匹配
@@ -867,53 +880,80 @@ class StatementExecutor:
 
     def exec_export(self, stmt: ExportStmt, env: Environment) -> None:
         """执行导出语句：标记要导出的变量名"""
-        env.exports = stmt.names
+        env.exports.extend(stmt.names)
 
     def exec_import(self, stmt: ImportStmt, env: Environment) -> None:
         """执行导入语句"""
         import os
 
-        module_path = stmt.module_path.replace(".", os.sep) + ".道"
+        # 检查模块缓存
+        if stmt.module_path in self.module_cache:
+            module_env = self.module_cache[stmt.module_path]
+        else:
+            # 循环依赖检测
+            if stmt.module_path in self._loading_modules:
+                raise 运行时错误(
+                    f"检测到循环导入: '{stmt.module_path}' 正在加载中",
+                    stmt.line,
+                    stmt.column,
+                )
 
-        if not os.path.exists(module_path):
-            raise 运行时错误(
-                f"模块 '{stmt.module_path}' 不存在 (找不到文件: {module_path}, 0, 0, self.source)",
-                stmt.line,
-                stmt.column,
-            )
+            self._loading_modules.add(stmt.module_path)
+            try:
+                module_path = stmt.module_path.replace(".", os.sep) + ".道"
 
-        with open(module_path, "r", encoding="utf-8") as f:
-            source = f.read()
+                # 在搜索路径列表中查找模块
+                found_path = None
+                search_dirs = [os.getcwd()] + self.module_search_paths
+                for search_dir in search_dirs:
+                    candidate = os.path.join(search_dir, module_path)
+                    if os.path.exists(candidate):
+                        found_path = candidate
+                        break
 
-        from ..lexer import Lexer
-        from ..parser import Parser
+                if found_path is None:
+                    raise 运行时错误(
+                        f"模块 '{stmt.module_path}' 不存在 (搜索路径: {', '.join(search_dirs)})",
+                        stmt.line,
+                        stmt.column,
+                    )
 
-        lexer = Lexer(source, module_path)
-        tokens = lexer.tokenize()
-        parser = Parser(tokens)
-        ast = parser.parse()
+                with open(found_path, "r", encoding="utf-8") as f:
+                    source = f.read()
 
-        module_env = Environment()
-        for name, func in get_builtins().items():
-            module_env.define(name, func)
-        for name, func in get_interpreter_builtins().items():
-            func.interpreter = self
-            module_env.define(name, func)
+                from ..lexer import Lexer
+                from ..parser import Parser
 
-        self.execute(ast, module_env)
+                lexer = Lexer(source, module_path)
+                tokens = lexer.tokenize()
+                parser = Parser(tokens)
+                ast = parser.parse()
 
-        # 根据导出列表过滤变量
-        if module_env.exports:
-            # 如果模块有导出列表，只导出指定的变量
-            exported_vars = {}
-            for name in module_env.exports:
-                if name in module_env.values:
-                    exported_vars[name] = module_env.values[name]
-            module_env.values = exported_vars
+                module_env = Environment()
+                for name, func in get_builtins().items():
+                    module_env.define(name, func)
+                for name, func in get_interpreter_builtins().items():
+                    func.interpreter = self
+                    module_env.define(name, func)
+
+                self.execute(ast, module_env)
+
+                # 根据导出列表过滤变量
+                if module_env.exports:
+                    exported_vars = {}
+                    for name in module_env.exports:
+                        if name in module_env.values:
+                            exported_vars[name] = module_env.values[name]
+                    module_env.values = exported_vars
+
+                # 缓存模块环境
+                self.module_cache[stmt.module_path] = module_env
+            finally:
+                self._loading_modules.discard(stmt.module_path)
 
         if stmt.is_from_import:
-            # "从 模块 导入 {项}" 语法：直接将项导入当前环境
-            for name in stmt.names:
+            # "从 模块 导入 项1, 项2" 语法：直接将项导入当前环境
+            for name, alias in stmt.names:
                 if name not in module_env.values:
                     raise 运行时错误(
                         f"模块 '{stmt.module_path}' 中没有导出 '{name}'",
@@ -921,7 +961,7 @@ class StatementExecutor:
                         stmt.column,
                         self.source,
                     )
-                env.define(name, module_env.values[name])
+                env.define(alias or name, module_env.values[name])
         else:
             # 普通 "导入 模块" 语法：将模块作为字典导入
             alias = stmt.alias or stmt.module_path.split(".")[-1]

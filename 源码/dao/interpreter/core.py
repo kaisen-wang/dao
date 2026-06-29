@@ -43,6 +43,12 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
     def __init__(self):
         # 创建全局环境，注入内置函数
         self.global_env = Environment()
+        # 模块缓存：模块路径 -> 模块环境
+        self.module_cache: dict[str, Environment] = {}
+        # 正在加载的模块集合（用于循环依赖检测）
+        self._loading_modules: set[str] = set()
+        # 模块搜索路径列表
+        self.module_search_paths: list[str] = []
 
         for name, func in get_builtins().items():
             self.global_env.define(name, func)

@@ -8,23 +8,16 @@ class ModuleSystemParser:
     """模块系统解析方法集"""
 
     def parse_export_stmt(self) -> ExportStmt:
-        """解析导出语句：导出 名称 / 导出 {名称1, 名称2}"""
+        """解析导出语句：导出 名称1, 名称2, ..."""
         token = self.advance()  # 消费 导出
 
         names = []
 
-        # 检查是否是花括号语法：导出 {名称1, 名称2}
-        if self.match(TokenType.左花括号):
-            while self.current.type != TokenType.右花括号:
-                name_token = self.expect(TokenType.标识符, "期望导出的名称")
-                names.append(name_token.value)
-                if not self.match(TokenType.逗号):
-                    break
+        name_token = self.expect(TokenType.标识符, "导出语句需要名称")
+        names.append(name_token.value)
 
-            self.expect(TokenType.右花括号, "导出语句需要 '}'")
-        else:
-            # 单个名称：导出 名称
-            name_token = self.expect(TokenType.标识符, "导出语句需要名称")
+        while self.match(TokenType.逗号):
+            name_token = self.expect(TokenType.标识符, "期望导出的名称")
             names.append(name_token.value)
 
         self.match(TokenType.换行)
@@ -52,19 +45,20 @@ class ModuleSystemParser:
             self.expect(TokenType.导入, "期望 '导入' 关键字")
 
             names = []
-            # 检查是否是花括号语法：导入 {项1, 项2}
-            if self.match(TokenType.左花括号):
-                while self.current.type != TokenType.右花括号:
-                    name_token = self.expect(TokenType.标识符, "期望导入的名称")
-                    names.append(name_token.value)
-                    if not self.match(TokenType.逗号):
-                        break
+            name_token = self.expect(TokenType.标识符, "导入语句需要名称")
+            alias = None
+            if self.match(TokenType.作为):
+                alias_token = self.expect(TokenType.标识符, "'作为' 后需要别名")
+                alias = alias_token.value
+            names.append((name_token.value, alias))
 
-                self.expect(TokenType.右花括号, "导入语句需要 '}'")
-            else:
-                # 单个名称
-                name_token = self.expect(TokenType.标识符, "导入语句需要名称")
-                names.append(name_token.value)
+            while self.match(TokenType.逗号):
+                name_token = self.expect(TokenType.标识符, "期望导入的名称")
+                alias = None
+                if self.match(TokenType.作为):
+                    alias_token = self.expect(TokenType.标识符, "'作为' 后需要别名")
+                    alias = alias_token.value
+                names.append((name_token.value, alias))
 
             self.match(TokenType.换行)
             return ImportStmt(
