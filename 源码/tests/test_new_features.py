@@ -256,6 +256,17 @@ class TestHigherOrderFunctions:
         output = capture_output(source)
         assert output.strip() == "[1, 10, 2, 20, 3, 30]"
 
+    def test_分组(self):
+        source = (
+            '定义 数列 = [1, 2, 3, 4, 5, 6]\n'
+            '定义 结果 = 分组(数列, 函数(x) => x % 2)\n'
+            '打印(结果[0])\n'
+            '打印(结果[1])\n'
+        )
+        output = capture_output(source)
+        assert "[2, 4, 6]" in output
+        assert "[1, 3, 5]" in output
+
 
 # ============================================================
 # 管道运算符
@@ -369,6 +380,79 @@ class TestPatternMatching:
         )
         output = capture_output(source)
         assert output.strip() == "匹配到1"
+
+
+class TestEnumPatternMatching:
+    """枚举模式匹配测试"""
+
+    def test_enum_variant_match(self):
+        source = (
+            '枚举 结果\n'
+            '    成功(值)\n'
+            '    失败(错误信息)\n'
+            '定义 r = 结果.成功(42)\n'
+            '匹配 r\n'
+            '    情况 结果.成功(值):\n'
+            '        打印(值)\n'
+            '    情况 结果.失败(信息):\n'
+            '        打印(信息)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "42"
+
+    def test_enum_variant_match_failure(self):
+        source = (
+            '枚举 结果\n'
+            '    成功(值)\n'
+            '    失败(错误信息)\n'
+            '定义 r = 结果.失败("未找到")\n'
+            '匹配 r\n'
+            '    情况 结果.成功(值):\n'
+            '        打印(值)\n'
+            '    情况 结果.失败(信息):\n'
+            '        打印(信息)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "未找到"
+
+    def test_enum_simple_variant_match(self):
+        source = (
+            '枚举 颜色\n'
+            '    红\n'
+            '    绿\n'
+            '    蓝\n'
+            '定义 c = 颜色.红\n'
+            '匹配 c\n'
+            '    情况 颜色.红: 打印("红色")\n'
+            '    情况 颜色.绿: 打印("绿色")\n'
+            '    情况 _: 打印("其他")\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "红色"
+
+
+class TestTypeCheckPattern:
+    """类型检查模式测试"""
+
+    def test_type_check_list(self):
+        source = (
+            '定义 x = [1, 2, 3]\n'
+            '匹配 x\n'
+            '    情况 n 当 取类型(n) == "列表": 打印("是列表")\n'
+            '    情况 _: 打印("其他")\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "是列表"
+
+    def test_type_check_number(self):
+        source = (
+            '定义 x = 42\n'
+            '匹配 x\n'
+            '    情况 n 当 取类型(n) == "数值": 打印("是数值")\n'
+            '    情况 _: 打印("其他")\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "是数值"
 
 
 # ============================================================
@@ -813,6 +897,61 @@ class TestGenerators:
             '        产出 计数器\n'
             '        计数器 = 计数器 + 1\n'
         )
+
+
+class TestLazyStream:
+    """惰性流测试"""
+
+    def test_stream_from_list(self):
+        source = (
+            '定义 数字列表 = [1, 2, 3, 4, 5]\n'
+            '定义 结果 = 取(映射流(数字列表, 函数(x) => x * x), 3)\n'
+            '打印(结果)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "[1, 4, 9]"
+
+    def test_stream_filter(self):
+        source = (
+            '定义 数字列表 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n'
+            '定义 结果 = 取(筛选流(数字列表, 函数(x) => x % 2 == 0), 3)\n'
+            '打印(结果)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "[2, 4, 6]"
+
+    def test_stream_chain(self):
+        source = (
+            '定义 数字列表 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n'
+            '定义 偶数平方流 = 筛选流(映射流(数字列表, 函数(x) => x * x), 函数(x) => x % 2 == 0)\n'
+            '定义 结果 = 取(偶数平方流, 3)\n'
+            '打印(结果)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "[4, 16, 36]"
+
+    def test_stream_from_generator(self):
+        source = (
+            '函数 自然数()\n'
+            '    定义 n = 0\n'
+            '    当 真\n'
+            '        产出 n\n'
+            '        n = n + 1\n'
+            '定义 偶数平方流 = 筛选流(映射流(自然数(), 函数(x) => x * x), 函数(x) => x % 2 == 0)\n'
+            '定义 结果 = 取(偶数平方流, 5)\n'
+            '打印(结果)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "[0, 4, 16, 36, 64]"
+
+    def test_stream_take_from_list(self):
+        source = (
+            '定义 列表 = [10, 20, 30, 40, 50]\n'
+            '定义 结果 = 取(列表, 3)\n'
+            '打印(结果)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "[10, 20, 30]"
 
 
 if __name__ == "__main__":

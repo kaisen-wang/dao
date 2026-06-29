@@ -718,7 +718,61 @@ class StatementExecutor:
 
     def _match_pattern(self, pattern, subject, env: Environment) -> bool:
         """匹配模式与主体"""
-        from ..ast_nodes import DictPattern, Identifier, ListPattern
+        from ..ast_nodes import DictPattern, EnumVariantPattern, FunctionCall, Identifier, ListPattern, MemberAccess, TypeCheckPattern
+
+        # 枚举变体模式
+        if isinstance(pattern, EnumVariantPattern):
+            if not isinstance(subject, DaoEnumVariant):
+                return False
+            if subject.enum_name != pattern.enum_name or subject.variant_name != pattern.variant_name:
+                return False
+            if pattern.binding:
+                if subject.data:
+                    if len(subject.data) == 1:
+                        env.define(pattern.binding, subject.data[0])
+                    else:
+                        env.define(pattern.binding, subject.data)
+                else:
+                    env.define(pattern.binding, None)
+            return True
+
+        # 枚举变体模式（从 FunctionCall + MemberAccess 解析而来）
+        if isinstance(pattern, FunctionCall) and isinstance(pattern.callee, MemberAccess):
+            obj = pattern.callee.object
+            if isinstance(obj, Identifier):
+                enum_name = obj.name
+                variant_name = pattern.callee.member
+                if not isinstance(subject, DaoEnumVariant):
+                    return False
+                if subject.enum_name != enum_name or subject.variant_name != variant_name:
+                    return False
+                if pattern.arguments:
+                    binding_expr = pattern.arguments[0]
+                    if isinstance(binding_expr, Identifier) and binding_expr.name != "_":
+                        if subject.data:
+                            if len(subject.data) == 1:
+                                env.define(binding_expr.name, subject.data[0])
+                            else:
+                                env.define(binding_expr.name, subject.data)
+                        else:
+                            env.define(binding_expr.name, None)
+                return True
+
+        # 类型检查模式
+        if isinstance(pattern, TypeCheckPattern):
+            type_name = pattern.type_name
+            type_checks = {
+                "列表": lambda v: isinstance(v, list),
+                "字典": lambda v: isinstance(v, dict),
+                "数值": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+                "文本": lambda v: isinstance(v, str),
+                "布尔": lambda v: isinstance(v, bool),
+                "函数": lambda v: callable(v) or hasattr(v, '__call__'),
+            }
+            checker = type_checks.get(type_name)
+            if checker:
+                return checker(subject)
+            return False
 
         # 列表模式
         if isinstance(pattern, ListPattern):

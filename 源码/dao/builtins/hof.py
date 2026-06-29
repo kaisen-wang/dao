@@ -138,6 +138,49 @@ def _hof_分组(interpreter, collection, func):
     return groups
 
 
+def _hof_映射流(interpreter, stream, func):
+    """映射流：对流惰性映射，返回新流"""
+    from .oop_types import DaoStream
+
+    if not isinstance(stream, DaoStream):
+        stream = DaoStream(stream)
+
+    return DaoStream(
+        iterable=stream,
+        transform=lambda value: interpreter.call_function(func, [value]),
+    )
+
+
+def _hof_筛选流(interpreter, stream, func):
+    """筛选流：对流惰性筛选，返回新流"""
+    from .oop_types import DaoStream
+
+    if not isinstance(stream, DaoStream):
+        stream = DaoStream(stream)
+
+    return DaoStream(
+        iterable=stream,
+        predicate=lambda value: interpreter._is_truthy(
+            interpreter.call_function(func, [value])
+        ),
+    )
+
+
+def _hof_取(interpreter, stream, n):
+    """取：从流中取前 n 个值，返回列表"""
+    from .oop_types import DaoStream
+
+    if not isinstance(stream, DaoStream):
+        stream = DaoStream(stream)
+
+    result = []
+    for i, value in enumerate(stream):
+        if i >= n:
+            break
+        result.append(value)
+    return result
+
+
 # ========================================================
 # 注册表
 # ========================================================
@@ -154,6 +197,9 @@ def get_interpreter_builtins() -> dict[str, InterpreterBuiltin]:
         "排序": InterpreterBuiltin("排序", _hof_排序),
         "展平映射": InterpreterBuiltin("展平映射", _hof_展平映射, 2),
         "分组": InterpreterBuiltin("分组", _hof_分组, 2),
+        "映射流": InterpreterBuiltin("映射流", _hof_映射流, 2),
+        "筛选流": InterpreterBuiltin("筛选流", _hof_筛选流, 2),
+        "取": InterpreterBuiltin("取", _hof_取, 2),
         "柯里化": InterpreterBuiltin("柯里化", _hof_柯里化, 1),
         "组合": InterpreterBuiltin("组合", _hof_组合),
         "管道组合": InterpreterBuiltin("管道组合", _hof_管道组合),

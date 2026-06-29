@@ -246,5 +246,68 @@ class TestInterpreterErrorHandling:
         assert "最终" in output
 
 
+class TestSpreadOperator:
+    """展开运算符测试"""
+
+    def test_list_spread(self):
+        source = (
+            '定义 原列表 = [1, 2, 3]\n'
+            '定义 新列表 = [...原列表, 4, 5]\n'
+            '打印(新列表)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "[1, 2, 3, 4, 5]"
+
+    def test_list_spread_multiple(self):
+        source = (
+            '定义 甲 = [1, 2]\n'
+            '定义 乙 = [3, 4]\n'
+            '定义 合并 = [...甲, ...乙]\n'
+            '打印(合并)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "[1, 2, 3, 4]"
+
+    def test_dict_spread(self):
+        source = (
+            '定义 原始 = {"姓名": "张三", "年龄": 25}\n'
+            '定义 更新后 = {...原始, "年龄": 26}\n'
+            '打印(更新后["姓名"])\n'
+            '打印(更新后["年龄"])\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "张三\n26"
+
+    def test_dict_spread_with_new_key(self):
+        source = (
+            '定义 原始 = {"姓名": "张三"}\n'
+            '定义 更新后 = {...原始, "城市": "北京"}\n'
+            '打印(更新后["姓名"])\n'
+            '打印(更新后["城市"])\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "张三\n北京"
+
+    def test_dict_spread_brace_syntax(self):
+        source = (
+            '定义 原始 = {"a": 1}\n'
+            '定义 更新后 = {...原始, "b": 2}\n'
+            '打印(更新后["a"])\n'
+            '打印(更新后["b"])\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "1\n2"
+
+    def test_list_spread_preserves_original(self):
+        source = (
+            '定义 原列表 = [1, 2, 3]\n'
+            '定义 新列表 = [...原列表, 4]\n'
+            '打印(原列表)\n'
+            '打印(新列表)\n'
+        )
+        output = capture_output(source)
+        assert "原列表" not in output.split("\n")[1] or output.strip() == "[1, 2, 3]\n[1, 2, 3, 4]"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -29,6 +29,7 @@ from ..ast_nodes import (
     ReturnStmt,
     SelfExpr,
     SetLiteral,
+    SpreadExpr,
     StringLiteral,
     SuperExpr,
     TemplateLiteral,
@@ -685,12 +686,16 @@ class ExpressionParser:
     # ========================
 
     def parse_list_literal(self) -> ListLiteral:
-        """解析列表字面量"""
+        """解析列表字面量，支持展开运算符：[...列表, 新元素]"""
         token = self.advance()  # 消费 [
         elements = []
 
         while self.current.type != TokenType.右方括号:
-            elements.append(self.parse_expression())
+            if self.current.type == TokenType.展开:
+                self.advance()  # 消费 ...
+                elements.append(SpreadExpr(expression=self.parse_expression()))
+            else:
+                elements.append(self.parse_expression())
             if not self.match(TokenType.逗号):
                 break
 
@@ -698,15 +703,20 @@ class ExpressionParser:
         return ListLiteral(elements=elements, line=token.line, column=token.column)
 
     def parse_dict_literal(self) -> DictLiteral:
-        """解析字典字面量"""
+        """解析字典字面量，支持展开运算符：{...字典, "新键": 值}"""
         token = self.advance()  # 消费 {
         pairs = []
 
         while self.current.type != TokenType.右花括号:
-            key = self.parse_expression()
-            self.expect(TokenType.冒号, "字典需要 ':'")
-            value = self.parse_expression()
-            pairs.append((key, value))
+            if self.current.type == TokenType.展开:
+                self.advance()  # 消费 ...
+                spread = SpreadExpr(expression=self.parse_expression())
+                pairs.append((spread, None))
+            else:
+                key = self.parse_expression()
+                self.expect(TokenType.冒号, "字典需要 ':'")
+                value = self.parse_expression()
+                pairs.append((key, value))
             if not self.match(TokenType.逗号):
                 break
 
@@ -714,8 +724,28 @@ class ExpressionParser:
         return DictLiteral(pairs=pairs, line=token.line, column=token.column)
 
     def parse_set_or_block_literal(self) -> Expression:
-        """解析集合字面量或块表达式：{1, 2, 3} 或 {语句}"""
+        """解析集合字面量或块表达式：{1, 2, 3} 或 {语句}，支持字典展开"""
         token = self.advance()  # 消费 {
+
+        if self.current.type == TokenType.展开:
+            self.advance()  # 消费 ...
+            spread = SpreadExpr(expression=self.parse_expression())
+            pairs = [(spread, None)]
+            while self.match(TokenType.逗号):
+                if self.current.type == TokenType.右花括号:
+                    break
+                if self.current.type == TokenType.展开:
+                    self.advance()
+                    spread = SpreadExpr(expression=self.parse_expression())
+                    pairs.append((spread, None))
+                else:
+                    key = self.parse_expression()
+                    self.expect(TokenType.冒号, "字典需要 ':'")
+                    value = self.parse_expression()
+                    pairs.append((key, value))
+            self.expect(TokenType.右花括号, "字典需要 '}'")
+            return DictLiteral(pairs=pairs, line=token.line, column=token.column)
+
         first = self.parse_expression()
 
         # 如果第一个表达式后紧跟冒号，说明是字典（key: value 的 key 是表达式）
@@ -728,10 +758,15 @@ class ExpressionParser:
             while self.match(TokenType.逗号):
                 if self.current.type == TokenType.右花括号:
                     break
-                key = self.parse_expression()
-                self.expect(TokenType.冒号, "字典需要 ':'")
-                value = self.parse_expression()
-                pairs.append((key, value))
+                if self.current.type == TokenType.展开:
+                    self.advance()
+                    spread = SpreadExpr(expression=self.parse_expression())
+                    pairs.append((spread, None))
+                else:
+                    key = self.parse_expression()
+                    self.expect(TokenType.冒号, "字典需要 ':'")
+                    value = self.parse_expression()
+                    pairs.append((key, value))
             self.expect(TokenType.右花括号, "字典需要 '}'")
             return DictLiteral(pairs=pairs, line=token.line, column=token.column)
 

@@ -160,41 +160,32 @@ class SuperProxy:
 
 
 class DaoGenerator:
-    """生成器对象（预生成所有值的简化实现）"""
+    """生成器对象（惰性求值）"""
 
     def __init__(self, func, args: list, kwargs: dict, interpreter):
         self.func = func
         self.args = args
         self.kwargs = kwargs
         self.interpreter = interpreter
-        self._values = self._collect_all_values()
-        self._index = 0
+        self._gen = None
+        self._started = False
 
-    def _collect_all_values(self):
-        """收集所有产出的值"""
-        from ..errors import 产出信号, 返回信号
-
-        values = []
-
-        def bind_params(func_env):
-            for i, param in enumerate(self.func.params):
-                if i < len(self.args):
-                    func_env.define(param, self.args[i])
-                elif param in self.kwargs:
-                    func_env.define(param, self.kwargs[param])
-                elif param in self.func.default_values:
-                    func_env.define(param, self.func.default_values[param])
-                else:
-                    from ..errors import 运行时错误
-
-                    raise 运行时错误(f"函数 '{self.func.name}' 缺少参数 '{param}'")
+    def _create_generator(self):
+        from ..errors import 产出信号, 返回信号, 继续信号, 跳出信号
 
         func_env = self.func.closure_env.create_child()
-        bind_params(func_env)
+        for i, param in enumerate(self.func.params):
+            if i < len(self.args):
+                func_env.define(param, self.args[i])
+            elif param in self.kwargs:
+                func_env.define(param, self.kwargs[param])
+            elif param in self.func.default_values:
+                func_env.define(param, self.func.default_values[param])
+            else:
+                from ..errors import 运行时错误
+                raise 运行时错误(f"函数 '{self.func.name}' 缺少参数 '{param}'")
 
-        def exec_block_with_yield(statements, env, values):
-            from ..errors import 继续信号, 跳出信号
-
+        def exec_block_with_yield(statements, env):
             for stmt in statements:
                 try:
                     stmt_name = stmt.__class__.__name__
@@ -205,8 +196,7 @@ class DaoGenerator:
                         ):
                             try:
                                 for s in stmt.body:
-                                    for s in [s]:
-                                        exec_block_with_yield([s], env, values)
+                                    yield from exec_block_with_yield([s], env)
                             except 跳出信号:
                                 break
                             except 继续信号:
@@ -216,13 +206,12 @@ class DaoGenerator:
                         iterable = self.interpreter.eval_expression(stmt.iterable, env)
                         if not hasattr(iterable, "__iter__"):
                             from ..errors import 类型错误
-
                             raise 类型错误(f"类型 '{type(iterable).__name__}' 不可遍历")
                         for item in iterable:
                             try:
                                 env.values[stmt.variable] = item
                                 for s in stmt.body:
-                                    exec_block_with_yield([s], env, values)
+                                    yield from exec_block_with_yield([s], env)
                             except 跳出信号:
                                 break
                             except 继续信号:
@@ -242,7 +231,7 @@ class DaoGenerator:
                             try:
                                 env.values[stmt.variable] = current
                                 for s in stmt.body:
-                                    exec_block_with_yield([s], env, values)
+                                    yield from exec_block_with_yield([s], env)
                                 current += step
                             except 跳出信号:
                                 break
@@ -254,7 +243,7 @@ class DaoGenerator:
                         self.interpreter.exec_statement(stmt, env)
 
                 except 产出信号 as e:
-                    values.append(e.value)
+                    yield e.value
                 except 跳出信号:
                     raise
                 except 继续信号:
@@ -263,23 +252,87 @@ class DaoGenerator:
                     raise
 
         try:
-            exec_block_with_yield(self.func.body, func_env, values)
+            yield from exec_block_with_yield(self.func.body, func_env)
         except 返回信号:
             pass
 
-        return values
-
     def __iter__(self):
-        """返回迭代器"""
+        if self._gen is None:
+            self._gen = self._create_generator()
         return self
 
     def __next__(self):
-        """获取下一个值"""
-        if self._index >= len(self._values):
-            raise StopIteration
-        value = self._values[self._index]
-        self._index += 1
-        return value
+        if self._gen is None:
+            self._gen = self._create_generator()
+        try:
+            return next(self._gen)
+        except StopIteration:
+            raise
 
     def __repr__(self) -> str:
-        return f"<生成器>"
+        return "<生成器>"
+
+
+class DaoStream:
+    """惰性流：按需计算的序列"""
+
+    def __init__(self, iterable=None, transform=None, predicate=None):
+        self._source = iterable
+        self._transform = transform
+        self._predicate = predicate
+        self._buffer = []
+        self._exhausted = False
+        self._source_iter = None
+
+    def _ensure_iter(self):
+        if self._source_iter is None:
+            if hasattr(self._source, '__iter__'):
+                self._source_iter = iter(self._source)
+            else:
+                self._source_iter = iter([])
+
+    def _advance(self):
+        while True:
+            self._ensure_iter()
+            try:
+                value = next(self._source_iter)
+            except StopIteration:
+                self._exhausted = True
+                return False
+
+            if self._predicate is not None:
+                try:
+                    if not self._predicate(value):
+                        continue
+                except Exception:
+                    continue
+
+            if self._transform is not None:
+                try:
+                    value = self._transform(value)
+                except Exception:
+                    continue
+
+            self._buffer.append(value)
+            return True
+
+    def __iter__(self):
+        return self._iterate()
+
+    def _iterate(self):
+        idx = 0
+        while True:
+            if idx < len(self._buffer):
+                yield self._buffer[idx]
+                idx += 1
+            elif self._exhausted:
+                break
+            else:
+                if self._advance():
+                    yield self._buffer[idx]
+                    idx += 1
+                else:
+                    break
+
+    def __repr__(self) -> str:
+        return "<流>"

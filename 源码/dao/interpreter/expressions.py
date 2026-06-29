@@ -95,16 +95,31 @@ class ExpressionEvaluator:
             case NullLiteral():
                 return None
             case ListLiteral():
-                return [self.eval_expression(e, env) for e in expr.elements]
+                result = []
+                for e in expr.elements:
+                    if isinstance(e, SpreadExpr):
+                        val = self.eval_expression(e.expression, env)
+                        if isinstance(val, list):
+                            result.extend(val)
+                        else:
+                            result.extend(list(val))
+                    else:
+                        result.append(self.eval_expression(e, env))
+                return result
             case TupleLiteral():
                 return tuple(self.eval_expression(e, env) for e in expr.elements)
             case SetLiteral():
                 return set(self.eval_expression(e, env) for e in expr.elements)
             case DictLiteral():
-                return {
-                    self.eval_expression(k, env): self.eval_expression(v, env)
-                    for k, v in expr.pairs
-                }
+                result = {}
+                for k, v in expr.pairs:
+                    if isinstance(k, SpreadExpr):
+                        val = self.eval_expression(k.expression, env)
+                        if isinstance(val, dict):
+                            result.update(val)
+                    else:
+                        result[self.eval_expression(k, env)] = self.eval_expression(v, env)
+                return result
             case SelfExpr():
                 return env.get("本对象")
             case SuperExpr():

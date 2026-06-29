@@ -102,6 +102,13 @@ class DictLiteral(Expression):
     pairs: list[tuple[Expression, Expression]] = field(default_factory=list)
 
 
+@dataclass
+class SpreadExpr(Expression):
+    """展开运算符：...表达式"""
+
+    expression: Expression = field(default_factory=lambda: Identifier())
+
+
 # ========================
 # 标识符与访问
 # ========================
