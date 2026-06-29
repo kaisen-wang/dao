@@ -170,6 +170,42 @@ class TestInterpreterFunctions:
         output = capture_output(source)
         assert output.strip() == "10"
 
+    def test_lambda_block_body(self):
+        source = (
+            '定义 处理 = 函数(x) =>\n'
+            '    定义 结果 = x * x\n'
+            '    如果 结果 > 100\n'
+            '        返回 100\n'
+            '    返回 结果\n'
+            '打印(处理(5))\n'
+            '打印(处理(15))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "25\n100"
+
+    def test_lambda_block_body_no_args(self):
+        source = (
+            '定义 取值 = 函数 =>\n'
+            '    定义 x = 42\n'
+            '    返回 x\n'
+            '打印(取值())\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "42"
+
+    def test_lambda_block_closure(self):
+        source = (
+            '函数 创建乘法器(倍数)\n'
+            '    返回 函数(x) =>\n'
+            '        返回 x * 倍数\n'
+            '定义 双倍 = 创建乘法器(2)\n'
+            '定义 三倍 = 创建乘法器(3)\n'
+            '打印(双倍(5))\n'
+            '打印(三倍(5))\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == "10\n15"
+
 
 class TestInterpreterCollections:
     """集合操作测试"""

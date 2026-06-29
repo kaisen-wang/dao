@@ -143,6 +143,14 @@ class TestParserFunctions:
         stmt = ast.statements[0]
         assert isinstance(stmt.value, LambdaExpr)
 
+    def test_lambda_block_body(self):
+        source = "定义 f = 函数(x) =>\n    定义 y = x + 1\n    返回 y\n"
+        ast = parse(source)
+        stmt = ast.statements[0]
+        assert isinstance(stmt.value, LambdaExpr)
+        assert isinstance(stmt.value.body, list)
+        assert len(stmt.value.body) == 2
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

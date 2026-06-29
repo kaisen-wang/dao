@@ -641,9 +641,10 @@ class ExpressionParser:
     def parse_lambda(self) -> LambdaExpr:
         """解析匿名函数
         
-        支持两种语法：
+        支持三种语法：
         1. 无参数：函数 => 表达式
         2. 有参数：函数(参数) => 表达式
+        3. 代码块：函数(参数) => 缩进块
         """
         token = self.advance()  # 消费 函数
         
@@ -664,7 +665,13 @@ class ExpressionParser:
         
         # 无论是无参数还是有参数，都需要箭头
         self.expect(TokenType.箭头, "匿名函数需要 '=>'")
-        body = self.parse_expression()
+
+        if self.current.type == TokenType.换行:
+            while self.current.type == TokenType.换行:
+                self.advance()
+            body = self.parse_block()
+        else:
+            body = self.parse_expression()
 
         return LambdaExpr(
             params=params,
