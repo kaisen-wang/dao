@@ -23,6 +23,7 @@ from ..builtins import (
 )
 from ..environment import Environment
 from ..errors import 产出信号, 类型错误, 运行时错误, 返回信号
+from ..package.manager import PackageManager
 from .concurrency import ConcurrencyEvaluator
 from .expressions import ExpressionEvaluator
 from .statements import StatementExecutor
@@ -40,7 +41,7 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         interpreter.execute(ast)
     """
 
-    def __init__(self):
+    def __init__(self, project_dir: str | None = None):
         # 创建全局环境，注入内置函数
         self.global_env = Environment()
         # 模块缓存：模块路径 -> 模块环境
@@ -49,6 +50,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         self._loading_modules: set[str] = set()
         # 模块搜索路径列表
         self.module_search_paths: list[str] = []
+        # 包管理器
+        self.package_manager: PackageManager = PackageManager(project_dir)
 
         for name, func in get_builtins().items():
             self.global_env.define(name, func)

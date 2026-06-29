@@ -911,6 +911,20 @@ class StatementExecutor:
                         found_path = candidate
                         break
 
+                # 如果本地未找到，尝试通过包管理器解析
+                if found_path is None and hasattr(self, 'package_manager'):
+                    pkg_path = self.package_manager.resolve_module(stmt.module_path)
+                    if pkg_path is not None:
+                        if os.path.isdir(pkg_path):
+                            config = self.package_manager.config
+                            entry = config.entry if config else None
+                            if entry:
+                                entry_path = os.path.join(pkg_path, entry)
+                                if os.path.exists(entry_path):
+                                    found_path = entry_path
+                        elif os.path.isfile(pkg_path):
+                            found_path = pkg_path
+
                 if found_path is None:
                     raise 运行时错误(
                         f"模块 '{stmt.module_path}' 不存在 (搜索路径: {', '.join(search_dirs)})",
