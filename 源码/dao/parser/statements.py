@@ -47,8 +47,8 @@ class StatementParser(
 
     def parse_statement(self) -> Statement:
         """解析一条语句 - 根据当前token类型分派到相应的解析方法"""
-        # 先跳过所有换行和缩进token，确保当前token是有效语句开头
-        while self.current.type in (TokenType.换行, TokenType.缩进):
+        # 先跳过所有换行、缩进和文档注释token，确保当前token是有效语句开头
+        while self.current.type in (TokenType.换行, TokenType.缩进, TokenType.文档注释):
             self.advance()
 
         token = self.current
