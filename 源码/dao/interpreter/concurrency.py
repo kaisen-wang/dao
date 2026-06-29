@@ -174,17 +174,27 @@ class ConcurrencyEvaluator:
     # ========================
 
     def exec_parallel_stmt(self, node: ParallelStmt, env: Environment):
-        """执行并行块"""
-        import threading
+        """执行并行块（同步入口）"""
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self._exec_parallel_stmt(node, env))
+                future.result(timeout=60)
+        except RuntimeError:
+            asyncio.run(self._exec_parallel_stmt(node, env))
 
-        threads = []
+    async def _exec_parallel_stmt(self, node: ParallelStmt, env: Environment):
+        """执行并行块（基于协程）"""
+        tasks = []
         for stmt in node.body:
-            t = threading.Thread(target=self._dispatch_statement, args=(stmt, env))
-            t.start()
-            threads.append(t)
+            tasks.append(self._exec_parallel_task(stmt, env))
+        await asyncio.gather(*tasks)
 
-        for t in threads:
-            t.join(timeout=30.0)
+    async def _exec_parallel_task(self, stmt, env: Environment):
+        """并行执行单个语句的协程任务"""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._dispatch_statement, stmt, env)
 
     # ========================
     # 通道

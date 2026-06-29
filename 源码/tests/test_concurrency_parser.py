@@ -339,3 +339,29 @@ class TestConcurrencyInterpreter:
         lines = output.strip().split('\n')
         assert lines[0] == '真'
         assert lines[1] == '20'
+
+    def test_parallel_block_with_channel(self):
+        source = (
+            '定义 ch = 通道(5)\n'
+            '并行\n'
+            '    ch.发送(1)\n'
+            '    ch.发送(2)\n'
+            '    ch.发送(3)\n'
+            '定义 a = ch.接收()\n'
+            '定义 b = ch.接收()\n'
+            '定义 c = ch.接收()\n'
+            '打印(a + b + c)\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == '6'
+
+    def test_parallel_block_with_atomic(self):
+        source = (
+            '定义 计数器 = 原子整数(0)\n'
+            '并行\n'
+            '    计数器.加(10)\n'
+            '    计数器.加(20)\n'
+            '打印(计数器.获取())\n'
+        )
+        output = capture_output(source)
+        assert output.strip() == '30'
