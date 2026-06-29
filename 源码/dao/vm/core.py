@@ -11,6 +11,17 @@ class VirtualMachine:
         self.globals: dict[str, object] = {}
         self._call_depth = 0
         self._max_call_depth = 1000
+        self._jit_enabled = False
+        self._hotspot_detector = None
+        self._type_feedback = {}
+        self._jit_compiler = None
+
+    def enable_jit(self, threshold: int = 100):
+        from ..jit.hotspot import HotspotDetector
+        from ..jit.compiler import JitCompiler
+        self._jit_enabled = True
+        self._hotspot_detector = HotspotDetector(threshold=threshold)
+        self._jit_compiler = JitCompiler(self._hotspot_detector)
 
     def run(self, code: CodeObject) -> object:
         frame = Frame(code=code)
@@ -199,10 +210,25 @@ class VirtualMachine:
         try:
             if isinstance(callee, tuple) and len(callee) == 2 and isinstance(callee[0], CodeObject):
                 func_code, closure_vars = callee
+                if self._jit_enabled and self._hotspot_detector:
+                    self._hotspot_detector.record_execution(func_code.name)
+                    if self._hotspot_detector.is_hot(func_code.name):
+                        specialized = self._jit_compiler.get_specialized(func_code.name)
+                        if specialized is None:
+                            self._jit_compiler.compile_hotspot(func_code.name, func_code, self._type_feedback)
+                            specialized = self._jit_compiler.get_specialized(func_code.name)
+                        if specialized is not None:
+                            func_code = specialized
                 frame = Frame(code=func_code, parent=None)
                 frame.locals.update(closure_vars)
                 for i, param in enumerate(func_code.local_names[:len(args)]):
                     frame.locals[param] = args[i] if i < len(args) else None
+                    if self._jit_enabled:
+                        from ..jit.type_feedback import TypeFeedbackEntry
+                        key = f"{func_code.name}.{param}"
+                        if key not in self._type_feedback:
+                            self._type_feedback[key] = TypeFeedbackEntry(code_id=key)
+                        self._type_feedback[key].record_type(args[i] if i < len(args) else None)
                 return self._execute_frame(frame)
             elif callable(callee):
                 return callee(*args)

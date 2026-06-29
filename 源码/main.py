@@ -26,7 +26,8 @@ from dao.errors import 道错误
 
 
 def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>",
-               mode: str = "interpreter", type_check: bool = False, disasm: bool = False) -> object:
+               mode: str = "interpreter", type_check: bool = False, disasm: bool = False,
+               jit: bool = False) -> object:
     lexer = Lexer(source, filename)
     tokens = lexer.tokenize()
     parser = Parser(tokens, source)
@@ -49,13 +50,16 @@ def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>"
             disassembler = Disassembler()
             print(disassembler.disassemble(code))
         vm = VirtualMachine()
+        if jit:
+            vm.enable_jit()
         return vm.run(code)
 
     result = interpreter.execute(ast, source=source)
     return result
 
 
-def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False, disasm: bool = False):
+def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False,
+             disasm: bool = False, jit: bool = False):
     """执行一个 .道 文件"""
     if not os.path.exists(filepath):
         print(f"错误：文件 '{filepath}' 不存在")
@@ -67,7 +71,8 @@ def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False,
     interpreter = Interpreter()
 
     try:
-        run_source(source, interpreter, filepath, mode=mode, type_check=type_check, disasm=disasm)
+        run_source(source, interpreter, filepath, mode=mode, type_check=type_check,
+                   disasm=disasm, jit=jit)
     except 道错误 as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
@@ -143,10 +148,11 @@ def main():
                             help="执行模式：interpreter（默认）或 vm")
     arg_parser.add_argument("--type-check", action="store_true", help="启用类型推断检查")
     arg_parser.add_argument("--disasm", action="store_true", help="输出字节码反汇编结果（仅 VM 模式）")
+    arg_parser.add_argument("--jit", action="store_true", help="启用 JIT 编译（仅 VM 模式）")
     args = arg_parser.parse_args()
 
     if args.file:
-        run_file(args.file, mode=args.mode, type_check=args.type_check, disasm=args.disasm)
+        run_file(args.file, mode=args.mode, type_check=args.type_check, disasm=args.disasm, jit=args.jit)
     else:
         run_repl()
 
