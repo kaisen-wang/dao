@@ -178,28 +178,13 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
                         return None
 
                     def set_field(self, name, value):
-                        print(
-                            f"DEBUG: Setting field '{name}' to '{value}' on error: {self.error}"
-                        )
-                        # 直接存储到错误对象上
                         setattr(self.error, name, value)
-                        # 同时也保存到实例字段中，保持一致性
                         self.fields[name] = value
 
                 temp_instance = ErrorInstanceWrapper(error)
-                print(f"DEBUG: Calling initialize method: {klass.methods['初始化']}")
-                print(f"DEBUG: Args: {args}, Kwargs: {kwargs}")
                 self._call_method(
                     temp_instance, klass.methods["初始化"], args, kwargs, call_expr
                 )
-                print(f"DEBUG: After initialization - error: {error}")
-                print(f"DEBUG: Has line number: {hasattr(error, '行号')}")
-                if hasattr(error, "行号"):
-                    print(f"DEBUG: Line number: {error.行号}")
-                print(f"DEBUG: Has time: {hasattr(error, '时间')}")
-                if hasattr(error, "时间"):
-                    print(f"DEBUG: Time: {error.时间}")
-                # 保存类型信息，以便在 eval_member_access 中访问
                 error.类型 = klass
             return error
         else:
@@ -262,22 +247,11 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
             func_env.pop_frame()
             raise new_error
         except Exception as e:
-            # 对于 DaoError 类型的异常，直接重新抛出
             from ..builtins.oop_types import DaoError
 
             if isinstance(e, DaoError):
                 func_env.pop_frame()
                 raise e
-            func_env.pop_frame()
-            raise e
-        except Exception as e:
-            # 对于 DaoError 类型的异常，直接重新抛出
-            from ..builtins.oop_types import DaoError
-
-            if isinstance(e, DaoError):
-                func_env.pop_frame()
-                raise e
-            # 对于其他异常，创建运行时错误包装
             new_error = 运行时错误(
                 str(e), 0, 0, getattr(self, "source", ""), func_env.get_stack()
             )
@@ -402,12 +376,31 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         try:
             self_obj = env.get("本对象")
             if isinstance(self_obj, DaoInstance):
-                # 检查是否是同一个类或其子类
                 k = self_obj.klass
                 while k:
                     if k is klass:
                         return True
                     k = k.parent
+            return False
+        except Exception:
+            return False
+
+    @staticmethod
+    def _in_protected_context(env: Environment, klass: DaoClass) -> bool:
+        """检查当前是否在指定类或其子类的方法内部（受保护成员可访问）"""
+        try:
+            self_obj = env.get("本对象")
+            if isinstance(self_obj, DaoInstance):
+                k = self_obj.klass
+                while k:
+                    if k is klass:
+                        return True
+                    k = k.parent
+                check = klass
+                while check:
+                    if check is self_obj.klass:
+                        return True
+                    check = check.parent
             return False
         except Exception:
             return False

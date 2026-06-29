@@ -184,8 +184,12 @@ class OOPDeclParser:
             # 修饰符
             is_static = False
             is_private = False
+            is_protected = False
             if self.current.type == TokenType.私有:
                 is_private = True
+                self.advance()
+            if self.current.type == TokenType.受保护:
+                is_protected = True
                 self.advance()
             if self.current.type == TokenType.静态:
                 is_static = True
@@ -204,12 +208,14 @@ class OOPDeclParser:
                 # 构造函数：初始化(参数) ...
                 func = self.parse_constructor()
                 func.is_private = is_private
+                func.is_protected = is_protected
                 statements.append(func)
             elif self.current.type == TokenType.函数:
                 # 方法：函数 名字(参数) ...
                 func = self.parse_function_decl()
                 func.is_static = is_static
                 func.is_private = is_private
+                func.is_protected = is_protected
                 statements.append(func)
             elif self.current.type == TokenType.抽象:
                 # 抽象方法：抽象 方法名(参数)
@@ -218,22 +224,26 @@ class OOPDeclParser:
                 func.is_abstract = True
                 func.is_static = is_static
                 func.is_private = is_private
+                func.is_protected = is_protected
                 statements.append(func)
             elif self.current.type == TokenType.运算符:
                 # 运算符重载：运算符+(参数)
                 func = self._parse_operator_overload(is_static, is_private)
+                func.is_protected = is_protected
                 statements.append(func)
             elif self.current.type == TokenType.获取:
                 # 属性 getter：获取 属性名()
                 func = self._parse_property_accessor(
                     is_static, is_private, is_getter=True
                 )
+                func.is_protected = is_protected
                 statements.append(func)
             elif self.current.type == TokenType.设置:
                 # 属性 setter：设置 属性名(value)
                 func = self._parse_property_accessor(
                     is_static, is_private, is_getter=False
                 )
+                func.is_protected = is_protected
                 statements.append(func)
             else:
                 # 其他语句（如类级别的属性声明）

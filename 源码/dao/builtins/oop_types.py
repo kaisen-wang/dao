@@ -48,6 +48,7 @@ class DaoClass(DaoCallable):
         methods: dict[str, DaoFunction],
         static_methods: dict[str, DaoFunction] | None = None,
         private_names: set[str] | None = None,
+        protected_names: set[str] | None = None,
         implemented_traits: list[DaoTrait] | None = None,
         is_abstract: bool = False,
         abstract_methods: set[str] | None = None,
@@ -57,6 +58,7 @@ class DaoClass(DaoCallable):
         self.methods = methods
         self.static_methods = static_methods or {}
         self.private_names = private_names or set()
+        self.protected_names = protected_names or set()
         self.implemented_traits = implemented_traits or []
         self.is_abstract = is_abstract
         self.abstract_methods = abstract_methods or set()
@@ -104,6 +106,8 @@ class DaoInstance:
     def __init__(self, klass: DaoClass):
         self.klass = klass
         self.fields: dict[str, object] = {}
+        self.private_fields: set[str] = set()
+        self.protected_fields: set[str] = set()
 
     def get_field(self, name: str):
         """获取实例字段或绑定方法"""

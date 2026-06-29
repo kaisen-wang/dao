@@ -216,6 +216,8 @@ class Assignment(Statement):
 
     target: Expression = field(default_factory=lambda: Identifier())
     value: Expression = field(default_factory=lambda: NullLiteral())
+    is_private: bool = False
+    is_protected: bool = False
 
 
 @dataclass
@@ -235,6 +237,7 @@ class FunctionDecl(Statement):
     body: list[Statement] = field(default_factory=list)
     is_static: bool = False
     is_private: bool = False
+    is_protected: bool = False
     is_abstract: bool = False  # 是否是抽象方法
     is_operator: bool = False  # 是否是运算符重载
     operator_symbol: str = ""  # 运算符符号（如 "+", "-", "=="）
@@ -633,6 +636,7 @@ class AsyncFunctionDecl(Statement):
     body: list[Statement] = field(default_factory=list)
     is_static: bool = False
     is_private: bool = False
+    is_protected: bool = False
 
 
 @dataclass

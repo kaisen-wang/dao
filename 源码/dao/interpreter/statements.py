@@ -229,6 +229,37 @@ class StatementExecutor:
                     self._call_method(obj, setter, [value], {}, stmt)
                     return
 
+                # 私有/受保护字段标记
+                if stmt.is_private:
+                    obj.private_fields.add(stmt.target.member)
+                elif stmt.is_protected:
+                    obj.protected_fields.add(stmt.target.member)
+                else:
+                    # 检查私有字段写入权限
+                    is_private = (
+                        stmt.target.member in obj.klass.private_names
+                        or stmt.target.member in obj.private_fields
+                    )
+                    if is_private and not self._in_method_context(env, obj.klass):
+                        raise 运行时错误(
+                            f"无法访问类型 '{obj.klass.name}' 的私有成员 '{stmt.target.member}'",
+                            stmt.line,
+                            stmt.column,
+                            self.source,
+                        )
+                    # 检查受保护字段写入权限
+                    is_protected = (
+                        stmt.target.member in obj.klass.protected_names
+                        or stmt.target.member in obj.protected_fields
+                    )
+                    if is_protected and not self._in_protected_context(env, obj.klass):
+                        raise 运行时错误(
+                            f"无法访问类型 '{obj.klass.name}' 的受保护成员 '{stmt.target.member}'",
+                            stmt.line,
+                            stmt.column,
+                            self.source,
+                        )
+
                 obj.set_field(stmt.target.member, value)
             elif isinstance(obj, dict):
                 obj[stmt.target.member] = value
@@ -552,6 +583,7 @@ class StatementExecutor:
         methods = {}
         static_methods = {}
         private_names = set()
+        protected_names = set()
         abstract_methods = set()
         for s in stmt.body:
             if isinstance(s, FunctionDecl):
@@ -585,6 +617,8 @@ class StatementExecutor:
                     )
                 if s.is_private:
                     private_names.add(s.name)
+                if s.is_protected:
+                    protected_names.add(s.name)
                 if s.is_static:
                     static_methods[s.name] = func
                 else:
@@ -627,13 +661,13 @@ class StatementExecutor:
 
         # 如果是错误类，创建 DaoError 的子类
         if is_error_class:
-            # 所有错误类都创建为普通的 DaoClass，这样它们可以被正常继承
             klass = DaoClass(
                 name=stmt.name,
                 parent=DaoError,
                 methods=methods,
                 static_methods=static_methods,
                 private_names=private_names,
+                protected_names=protected_names,
                 implemented_traits=implemented_traits,
                 is_abstract=stmt.is_abstract,
                 abstract_methods=abstract_methods,
@@ -646,6 +680,7 @@ class StatementExecutor:
                 methods=methods,
                 static_methods=static_methods,
                 private_names=private_names,
+                protected_names=protected_names,
                 implemented_traits=implemented_traits,
                 is_abstract=stmt.is_abstract,
                 abstract_methods=abstract_methods,

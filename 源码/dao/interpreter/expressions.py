@@ -203,12 +203,28 @@ class ExpressionEvaluator:
         obj = self.eval_expression(expr.object, env)
 
         if isinstance(obj, DaoInstance):
-            # 检查私有访问
-            if expr.member in obj.klass.private_names:
-                # 检查是否在类方法内部（本对象可访问）
+            # 检查私有访问（方法级 + 字段级）
+            is_private = (
+                expr.member in obj.klass.private_names
+                or expr.member in obj.private_fields
+            )
+            if is_private:
                 if not self._in_method_context(env, obj.klass):
                     raise 运行时错误(
                         f"无法访问类型 '{obj.klass.name}' 的私有成员 '{expr.member}'",
+                        expr.line,
+                        expr.column,
+                        self.source,
+                    )
+            # 检查受保护访问（方法级 + 字段级）
+            is_protected = (
+                expr.member in obj.klass.protected_names
+                or expr.member in obj.protected_fields
+            )
+            if is_protected and not is_private:
+                if not self._in_protected_context(env, obj.klass):
+                    raise 运行时错误(
+                        f"无法访问类型 '{obj.klass.name}' 的受保护成员 '{expr.member}'",
                         expr.line,
                         expr.column,
                         self.source,

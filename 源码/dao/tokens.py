@@ -123,6 +123,7 @@ class TokenType(Enum):
     本对象 = auto()  # this/self
     父对象 = auto()  # super
     私有 = auto()  # private
+    受保护 = auto()  # protected
     静态 = auto()  # static
     特征 = auto()  # trait
     实现 = auto()  # implements
@@ -222,6 +223,7 @@ KEYWORDS: dict[str, TokenType] = {
     "本对象": TokenType.本对象,
     "父对象": TokenType.父对象,
     "私有": TokenType.私有,
+    "受保护": TokenType.受保护,
     "静态": TokenType.静态,
     "特征": TokenType.特征,
     "实现": TokenType.实现,

@@ -7,7 +7,7 @@
 
 import logging
 
-from ..ast_nodes import MacroDefinition, Statement
+from ..ast_nodes import Assignment, MacroDefinition, Statement
 from ..tokens import TokenType
 
 logger = logging.getLogger('dao.parser')
@@ -63,6 +63,18 @@ class StatementParser(
             return None
 
         match token.type:
+            case TokenType.私有:
+                self.advance()
+                stmt = self.parse_statement()
+                if isinstance(stmt, Assignment):
+                    stmt.is_private = True
+                return stmt
+            case TokenType.受保护:
+                self.advance()
+                stmt = self.parse_statement()
+                if isinstance(stmt, Assignment):
+                    stmt.is_protected = True
+                return stmt
             case TokenType.定义:
                 return self.parse_variable_decl(is_constant=False)
             case TokenType.常量:
