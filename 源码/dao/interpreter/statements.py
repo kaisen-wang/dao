@@ -895,6 +895,18 @@ class StatementExecutor:
         """执行导入语句"""
         import os
 
+        from ..stdlib.loader import StdlibLoader
+
+        if StdlibLoader.is_stdlib_module(stmt.module_path):
+            if stmt.module_path in self.module_cache:
+                module_env = self.module_cache[stmt.module_path]
+            else:
+                module_env = StdlibLoader.load(stmt.module_path, self)
+                self.module_cache[stmt.module_path] = module_env
+
+            self._bind_import(stmt, module_env, env)
+            return
+
         # 检查模块缓存
         if stmt.module_path in self.module_cache:
             module_env = self.module_cache[stmt.module_path]
@@ -974,8 +986,10 @@ class StatementExecutor:
             finally:
                 self._loading_modules.discard(stmt.module_path)
 
+        self._bind_import(stmt, module_env, env)
+
+    def _bind_import(self, stmt, module_env: Environment, env: Environment) -> None:
         if stmt.is_from_import:
-            # "从 模块 导入 项1, 项2" 语法：直接将项导入当前环境
             for name, alias in stmt.names:
                 if name not in module_env.values:
                     raise 运行时错误(
@@ -986,7 +1000,6 @@ class StatementExecutor:
                     )
                 env.define(alias or name, module_env.values[name])
         else:
-            # 普通 "导入 模块" 语法：将模块作为字典导入
             alias = stmt.alias or stmt.module_path.split(".")[-1]
             module_dict = {}
             for name, value in module_env.values.items():
