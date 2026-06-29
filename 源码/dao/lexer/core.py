@@ -162,8 +162,9 @@ class Lexer(LexerReaders):
 
             # 注释 或 整除运算符
             if char == "/" and self.peek() == "/":
-                # 如果前一个 token 是数值、标识符、右括号、右方括号、右花括号等，
-                # 则 // 是整除运算符，否则是注释
+                # 判断 // 是整除运算符还是注释：
+                # 前一个 token 必须是表达式类型，且 // 后面（跳过空格）紧跟数值或左括号
+                is_floor_div = False
                 if self.tokens and self.tokens[-1].type in (
                     TokenType.数值,
                     TokenType.标识符,
@@ -176,8 +177,17 @@ class Lexer(LexerReaders):
                     TokenType.文本,
                     TokenType.模板文本,
                 ):
-                    self.advance()  # 消费第一个 /
-                    self.advance()  # 消费第二个 /
+                    check_pos = self.pos + 2
+                    while check_pos < len(self.source) and self.source[check_pos] in (' ', '\t'):
+                        check_pos += 1
+                    if check_pos < len(self.source):
+                        ch = self.source[check_pos]
+                        if ch.isdigit() or ch in ('(', '（', '[', '-', '+'):
+                            is_floor_div = True
+
+                if is_floor_div:
+                    self.advance()
+                    self.advance()
                     self.tokens.append(self._make_token(TokenType.整除, "//"))
                 else:
                     self._skip_line_comment()
