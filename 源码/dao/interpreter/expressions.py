@@ -399,6 +399,16 @@ class ExpressionEvaluator:
         if isinstance(obj, list):
             return self._get_list_method(obj, expr.member, expr)
 
+        from ..concurrency import Channel, BufferedChannel, Mutex, AtomicInt, AtomicBool
+        if isinstance(obj, (Channel, BufferedChannel)):
+            return self._get_channel_method(obj, expr.member, expr)
+        if isinstance(obj, Mutex):
+            return self._get_mutex_method(obj, expr.member, expr)
+        if isinstance(obj, AtomicInt):
+            return self._get_atomic_int_method(obj, expr.member, expr)
+        if isinstance(obj, AtomicBool):
+            return self._get_atomic_bool_method(obj, expr.member, expr)
+
         raise 名称错误(
             f"对象没有属性 '{expr.member}'", expr.line, expr.column, self.source
         )
@@ -442,6 +452,61 @@ class ExpressionEvaluator:
                 return result()
             return result
         raise 名称错误(f"列表没有方法 '{name}'", expr.line, expr.column, self.source)
+
+    def _get_channel_method(self, obj, name: str, expr) -> object:
+        methods = {
+            "发送": BuiltinFunction("发送", lambda value: obj.send(value)),
+            "接收": BuiltinFunction("接收", lambda: obj.receive()),
+            "关闭": BuiltinFunction("关闭", lambda: obj.close()),
+            "已关闭": lambda: obj.closed,
+        }
+        if name in methods:
+            result = methods[name]
+            if callable(result) and not isinstance(result, DaoCallable):
+                return result()
+            return result
+        raise 名称错误(f"通道没有方法 '{name}'", expr.line, expr.column, self.source)
+
+    def _get_mutex_method(self, obj, name: str, expr) -> object:
+        methods = {
+            "获取": BuiltinFunction("获取", lambda: obj.acquire()),
+            "释放": BuiltinFunction("释放", lambda: obj.release()),
+        }
+        if name in methods:
+            result = methods[name]
+            if callable(result) and not isinstance(result, DaoCallable):
+                return result()
+            return result
+        raise 名称错误(f"互斥锁没有方法 '{name}'", expr.line, expr.column, self.source)
+
+    def _get_atomic_int_method(self, obj, name: str, expr) -> object:
+        methods = {
+            "获取": BuiltinFunction("获取", lambda: obj.get()),
+            "设置": BuiltinFunction("设置", lambda value: obj.set(value)),
+            "加": BuiltinFunction("加", lambda delta: obj.add(delta)),
+            "递增": BuiltinFunction("递增", lambda: obj.add(1)),
+            "比较并设置": BuiltinFunction("比较并设置", lambda expected, new: obj.compare_and_set(expected, new)),
+        }
+        if name in methods:
+            result = methods[name]
+            if callable(result) and not isinstance(result, DaoCallable):
+                return result()
+            return result
+        raise 名称错误(f"原子整数没有方法 '{name}'", expr.line, expr.column, self.source)
+
+    def _get_atomic_bool_method(self, obj, name: str, expr) -> object:
+        methods = {
+            "获取": BuiltinFunction("获取", lambda: obj.get()),
+            "设置": BuiltinFunction("设置", lambda value: obj.set(value)),
+            "取反": BuiltinFunction("取反", lambda: obj.toggle()),
+            "比较并设置": BuiltinFunction("比较并设置", lambda expected, new: obj.compare_and_set(expected, new)),
+        }
+        if name in methods:
+            result = methods[name]
+            if callable(result) and not isinstance(result, DaoCallable):
+                return result()
+            return result
+        raise 名称错误(f"原子布尔没有方法 '{name}'", expr.line, expr.column, self.source)
 
     def eval_index_access(self, expr: IndexAccess, env: Environment) -> object:
         """求值索引访问"""

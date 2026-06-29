@@ -189,21 +189,21 @@ def _builtin_下一个(iterator):
 
 def _builtin_互斥锁():
     """创建互斥锁"""
-    from ..interpreter.concurrency import Mutex
+    from ..concurrency import Mutex
 
     return Mutex()
 
 
 def _builtin_原子整数(initial_value=0):
     """创建原子整数"""
-    from ..interpreter.concurrency import AtomicInt
+    from ..concurrency import AtomicInt
 
     return AtomicInt(initial_value)
 
 
 def _builtin_原子布尔(initial_value=False):
     """创建原子布尔"""
-    from ..interpreter.concurrency import AtomicBool
+    from ..concurrency import AtomicBool
 
     return AtomicBool(initial_value)
 

@@ -326,6 +326,11 @@ class ExpressionParser:
             TokenType.类型,
             TokenType.查询,
             TokenType.标识符,
+            TokenType.发送,
+            TokenType.接收,
+            TokenType.获取,
+            TokenType.设置,
+            TokenType.加,
         }
         if self.current.type in MEMBER_KEYWORDS:
             return self.advance().value
@@ -442,6 +447,15 @@ class ExpressionParser:
             # '发送' 作为函数名时应被视为标识符
             self.advance()
             return Identifier(name="发送", line=token.line, column=token.column)
+        if token.type == TokenType.互斥锁:
+            self.advance()
+            return Identifier(name="互斥锁", line=token.line, column=token.column)
+        if token.type == TokenType.原子整数:
+            self.advance()
+            return Identifier(name="原子整数", line=token.line, column=token.column)
+        if token.type == TokenType.原子布尔:
+            self.advance()
+            return Identifier(name="原子布尔", line=token.line, column=token.column)
 
         # 数值字面量
         if token.type == TokenType.数值:
