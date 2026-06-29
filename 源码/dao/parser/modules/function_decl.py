@@ -9,15 +9,21 @@ class FunctionDeclParser:
     """函数声明解析方法集"""
 
     def parse_function_decl(self) -> FunctionDecl:
-        """解析函数声明：函数 名字(参数) ..."""
+        """解析函数声明：函数 名字(参数) [-> 返回类型] ..."""
         token = self.advance()  # 消费 函数
 
         name_token = self.expect_identifier_or_keyword("函数声明需要函数名")
         self.expect(TokenType.左括号, "函数声明需要 '('")
 
-        params, default_values, rest_param = self._parse_param_list()
+        params, default_values, rest_param, param_type_annotations = self._parse_param_list()
 
         self.expect(TokenType.右括号, "函数声明需要 ')'")
+
+        return_type = None
+        if self.current.type == TokenType.返回箭头:
+            self.advance()  # 消费 ->
+            return_type = self.parse_type_annotation()
+
         self.expect(TokenType.换行, "函数头部后需要换行")
         body = self.parse_block()
 
@@ -27,6 +33,8 @@ class FunctionDeclParser:
             default_values=default_values,
             body=body,
             rest_param=rest_param,
+            param_type_annotations=param_type_annotations,
+            return_type=return_type,
             line=token.line,
             column=token.column,
         )
@@ -37,7 +45,7 @@ class FunctionDeclParser:
         name_token = self.expect_identifier_or_keyword("方法声明需要方法名")
         self.expect(TokenType.左括号, "方法声明需要 '('")
 
-        params, default_values, rest_param = self._parse_param_list()
+        params, default_values, rest_param, _ = self._parse_param_list()
 
         self.expect(TokenType.右括号, "方法声明需要 ')'")
         self.expect(TokenType.换行, "方法头部后需要换行")
@@ -90,7 +98,7 @@ class FunctionDeclParser:
 
         # 解析参数列表
         self.expect(TokenType.左括号, "运算符重载需要 '('")
-        params, default_values, rest_param = self._parse_param_list()
+        params, default_values, rest_param, _ = self._parse_param_list()
         self.expect(TokenType.右括号, "运算符重载需要 ')'")
 
         # 运算符通常接受一个参数（右操作数）
@@ -131,7 +139,7 @@ class FunctionDeclParser:
 
         # 解析参数列表
         self.expect(TokenType.左括号, "属性访问器需要 '('")
-        params, default_values, rest_param = self._parse_param_list()
+        params, default_values, rest_param, _ = self._parse_param_list()
         self.expect(TokenType.右括号, "属性访问器需要 ')'")
 
         # 验证参数
@@ -177,24 +185,33 @@ class FunctionDeclParser:
 
 
 
-    def _parse_param_list(self) -> tuple[list[str], dict, str | None]:
-        """解析参数列表，返回 (参数列表, 默认值字典, 可变参数名)"""
+    def _parse_param_list(self) -> tuple[list[str], dict, str | None, list]:
+        """解析参数列表，返回 (参数列表, 默认值字典, 可变参数名, 参数类型注解列表)"""
         params = []
         default_values = {}
         rest_param = None
+        param_type_annotations = []
         while self.current.type != TokenType.右括号:
             if self.current.type == TokenType.展开:
                 self.advance()  # 消费 ...
                 rest_token = self.expect_identifier_or_keyword("可变参数需要参数名")
                 rest_param = rest_token.value
+                param_type_annotations.append(None)
                 break
             param = self.expect_identifier_or_keyword("期望参数名")
             params.append(param.value)
+
+            type_ann = None
+            if self.current.type == TokenType.冒号:
+                self.advance()  # 消费 :
+                type_ann = self.parse_type_annotation()
+            param_type_annotations.append(type_ann)
+
             if self.match(TokenType.赋值):
                 default_values[param.value] = self.parse_expression()
             if not self.match(TokenType.逗号):
                 break
-        return params, default_values, rest_param
+        return params, default_values, rest_param, param_type_annotations
 
 
     def parse_return_stmt(self) -> ReturnStmt:

@@ -256,7 +256,7 @@ class OOPDeclParser:
         """解析构造函数：初始化(参数) ..."""
         token = self.advance()  # 消费 初始化
         self.expect(TokenType.左括号, "构造函数需要 '('")
-        params, default_values, rest_param = self._parse_param_list()
+        params, default_values, rest_param, _ = self._parse_param_list()
         self.expect(TokenType.右括号, "构造函数需要 ')'")
         self.expect(TokenType.换行, "构造函数头部后需要换行")
         body = self.parse_block()

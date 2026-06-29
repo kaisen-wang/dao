@@ -194,6 +194,8 @@ class LambdaExpr(Expression):
 
     params: list[str] = field(default_factory=list)
     body: "ASTNode" = field(default_factory=lambda: NullLiteral())
+    param_type_annotations: list["TypeAnnotation | None"] = field(default_factory=list)
+    return_type: "TypeAnnotation | None" = None
 
 
 # ========================
@@ -216,6 +218,7 @@ class VariableDecl(Statement):
     value: Expression = field(default_factory=lambda: NullLiteral())
     is_constant: bool = False
     is_exported: bool = False
+    type_annotation: "TypeAnnotation | None" = None
 
 
 @dataclass
@@ -246,13 +249,15 @@ class FunctionDecl(Statement):
     is_static: bool = False
     is_private: bool = False
     is_protected: bool = False
-    is_abstract: bool = False  # 是否是抽象方法
-    is_operator: bool = False  # 是否是运算符重载
-    operator_symbol: str = ""  # 运算符符号（如 "+", "-", "=="）
-    is_getter: bool = False  # 是否是属性 getter
-    is_setter: bool = False  # 是否是属性 setter
-    rest_param: str | None = None  # 可变参数名
+    is_abstract: bool = False
+    is_operator: bool = False
+    operator_symbol: str = ""
+    is_getter: bool = False
+    is_setter: bool = False
+    rest_param: str | None = None
     is_exported: bool = False
+    param_type_annotations: list["TypeAnnotation | None"] = field(default_factory=list)
+    return_type: "TypeAnnotation | None" = None
 
 
 @dataclass
@@ -799,3 +804,60 @@ class EnumVariantPattern(Expression):
     enum_name: str = ""
     variant_name: str = ""
     binding: str | None = None
+
+
+# ========================
+# 类型注解
+# ========================
+
+
+@dataclass
+class TypeAnnotation(ASTNode):
+    """类型注解基类"""
+
+    pass
+
+
+@dataclass
+class BasicTypeAnnotation(TypeAnnotation):
+    """基础类型注解：文本、数值、布尔等"""
+
+    name: str = ""
+
+
+@dataclass
+class GenericTypeAnnotation(TypeAnnotation):
+    """泛型类型注解：列表[数值]、字典[文本, 任意]"""
+
+    name: str = ""
+    type_args: list[TypeAnnotation] = field(default_factory=list)
+
+
+@dataclass
+class UnionTypeAnnotation(TypeAnnotation):
+    """联合类型注解：文本 | 数值"""
+
+    types: list[TypeAnnotation] = field(default_factory=list)
+
+
+@dataclass
+class OptionalTypeAnnotation(TypeAnnotation):
+    """可选类型注解：用户 | 空"""
+
+    inner: TypeAnnotation = field(default_factory=lambda: BasicTypeAnnotation())
+
+
+@dataclass
+class FunctionTypeAnnotation(TypeAnnotation):
+    """函数类型注解：函数(请求) -> 响应"""
+
+    param_types: list[TypeAnnotation] = field(default_factory=list)
+    return_type: TypeAnnotation = field(default_factory=lambda: BasicTypeAnnotation())
+
+
+@dataclass
+class TypeAliasDecl(Statement):
+    """类型别名声明：类型别名 名称 = 目标类型"""
+
+    name: str = ""
+    target_type: TypeAnnotation = field(default_factory=lambda: BasicTypeAnnotation())

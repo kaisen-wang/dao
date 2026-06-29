@@ -196,6 +196,8 @@ class StatementExecutor:
                     return self.exec_macro_definition(stmt, env)
                 except 返回信号:
                     return None
+            case TypeAliasDecl():
+                return self.exec_type_alias_decl(stmt, env)
             case _:
                 raise 运行时错误(
                     f"未知的语句类型: {type(stmt).__name__}",
@@ -214,6 +216,13 @@ class StatementExecutor:
         env.define(stmt.name, value, is_constant=stmt.is_constant)
         if stmt.is_exported:
             env.exports.append(stmt.name)
+
+    def exec_type_alias_decl(self, stmt: TypeAliasDecl, env: Environment) -> None:
+        """执行类型别名声明：在环境中存储别名映射"""
+        env.define(stmt.name, stmt.target_type, is_constant=True)
+        if not hasattr(env, 'type_aliases'):
+            env.type_aliases = {}
+        env.type_aliases[stmt.name] = stmt.target_type
 
     def exec_assignment(self, stmt: Assignment, env: Environment) -> None:
         """执行赋值语句"""

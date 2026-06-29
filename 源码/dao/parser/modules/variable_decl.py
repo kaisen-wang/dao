@@ -11,7 +11,7 @@ class VariableDeclParser:
     def parse_variable_decl(
         self, is_constant: bool
     ) -> VariableDecl | DestructureAssign:
-        """解析变量/常量声明：定义 x = 值 或 定义 [甲, 乙] = 值 或 定义 {姓名, 年龄} = 值 或 定义 (甲, 乙) = 值"""
+        """解析变量/常量声明：定义 x = 值 或 定义 x: 类型 = 值"""
         token = self.advance()  # 消费 定义/常量
 
         if self.current.type == TokenType.左方括号:
@@ -24,6 +24,12 @@ class VariableDeclParser:
             return self._parse_tuple_destructure_decl(token, is_constant)
 
         name_token = self.expect(TokenType.标识符, "变量声明需要一个变量名")
+
+        type_annotation = None
+        if self.current.type == TokenType.冒号:
+            self.advance()  # 消费 :
+            type_annotation = self.parse_type_annotation()
+
         self.expect(TokenType.赋值, "变量声明需要 '=' 赋值")
         value = self.parse_expression()
         self.match(TokenType.换行)
@@ -31,6 +37,7 @@ class VariableDeclParser:
             name=name_token.value,
             value=value,
             is_constant=is_constant,
+            type_annotation=type_annotation,
             line=token.line,
             column=token.column,
         )

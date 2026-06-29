@@ -14,6 +14,7 @@
 
 import sys
 import os
+import argparse
 
 # 确保能导入 dao 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,30 +25,37 @@ from dao.interpreter import Interpreter
 from dao.errors import 道错误
 
 
-def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>") -> object:
-    """
-    执行一段"道"源代码
-
-    参数：
-        source      : 源代码字符串
-        interpreter : 解释器实例
-        filename    : 文件名（用于错误报告）
-    返回：执行结果
-    """
-    # 1. 词法分析
+def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>",
+               mode: str = "interpreter", type_check: bool = False, disasm: bool = False) -> object:
     lexer = Lexer(source, filename)
     tokens = lexer.tokenize()
-
-    # 2. 语法分析
     parser = Parser(tokens, source)
     ast = parser.parse()
 
-    # 3. 解释执行
+    if type_check:
+        from dao.types.checker import TypeInferenceEngine
+        engine = TypeInferenceEngine()
+        reports = engine.check(ast)
+        for r in reports:
+            print(f"类型警告: {r.message} (行{r.line})")
+
+    if mode == "vm":
+        from dao.bytecode.compiler import BytecodeCompiler
+        from dao.bytecode.disassembler import Disassembler
+        from dao.vm.core import VirtualMachine
+        compiler = BytecodeCompiler()
+        code = compiler.compile(ast)
+        if disasm:
+            disassembler = Disassembler()
+            print(disassembler.disassemble(code))
+        vm = VirtualMachine()
+        return vm.run(code)
+
     result = interpreter.execute(ast, source=source)
     return result
 
 
-def run_file(filepath: str):
+def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False, disasm: bool = False):
     """执行一个 .道 文件"""
     if not os.path.exists(filepath):
         print(f"错误：文件 '{filepath}' 不存在")
@@ -59,7 +67,7 @@ def run_file(filepath: str):
     interpreter = Interpreter()
 
     try:
-        run_source(source, interpreter, filepath)
+        run_source(source, interpreter, filepath, mode=mode, type_check=type_check, disasm=disasm)
     except 道错误 as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
@@ -129,11 +137,17 @@ def run_repl():
 
 def main():
     """主函数"""
-    if len(sys.argv) > 1:
-        # 文件模式
-        run_file(sys.argv[1])
+    arg_parser = argparse.ArgumentParser(description="道（Dao）编程语言")
+    arg_parser.add_argument("file", nargs="?", help="要执行的 .道 文件")
+    arg_parser.add_argument("--mode", choices=["interpreter", "vm"], default="interpreter",
+                            help="执行模式：interpreter（默认）或 vm")
+    arg_parser.add_argument("--type-check", action="store_true", help="启用类型推断检查")
+    arg_parser.add_argument("--disasm", action="store_true", help="输出字节码反汇编结果（仅 VM 模式）")
+    args = arg_parser.parse_args()
+
+    if args.file:
+        run_file(args.file, mode=args.mode, type_check=args.type_check, disasm=args.disasm)
     else:
-        # REPL模式
         run_repl()
 
 

@@ -94,7 +94,9 @@ class TokenType(Enum):
     大于等于 = auto()  # >=
     小于等于 = auto()  # <=
     箭头 = auto()  # =>
+    返回箭头 = auto()  # ->
     管道 = auto()  # |>
+    竖线 = auto()  # |（联合类型注解）
     展开 = auto()  # ...
     点 = auto()  # .
 
@@ -175,6 +177,11 @@ class TokenType(Enum):
     原子整数 = auto()  # atomic_int - 原子整数
     原子布尔 = auto()  # atomic_bool - 原子布尔
     同步 = auto()  # sync - 同步块
+
+    # ========================
+    # 类型系统关键字
+    # ========================
+    类型别名 = auto()  # typealias
 
     # ========================
     # 缩进控制（由词法分析器生成）
@@ -303,4 +310,6 @@ KEYWORDS: dict[str, TokenType] = {
     "导入": TokenType.导入,
     "导出": TokenType.导出,
     "作为": TokenType.作为,
+    # 类型系统
+    "类型别名": TokenType.类型别名,
 }

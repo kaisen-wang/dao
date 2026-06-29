@@ -52,7 +52,7 @@ class ConcurrencyParser:
         self.expect(TokenType.左括号, "异步函数声明需要 '('")
 
         # 解析参数列表
-        params, default_values, rest_param = self._parse_param_list()
+        params, default_values, rest_param, _ = self._parse_param_list()
 
         self.expect(TokenType.右括号, "异步函数声明需要 ')'")
 

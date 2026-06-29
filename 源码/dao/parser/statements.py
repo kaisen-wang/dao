@@ -24,10 +24,14 @@ from .modules import (
     OOPDeclParser,
     PatternMatchingParser,
     VariableDeclParser,
+    TypeAnnotationParser,
+    TypeAliasParser,
 )
 
 
 class StatementParser(
+    TypeAnnotationParser,
+    TypeAliasParser,
     VariableDeclParser,
     FunctionDeclParser,
     ControlFlowParser,
@@ -177,5 +181,7 @@ class StatementParser(
                 return self.parse_select_stmt()
             case TokenType.同步:
                 return self.parse_sync_stmt()
+            case TokenType.类型别名:
+                return self.parse_type_alias_decl()
             case _:
                 return self.parse_expression_or_assignment()

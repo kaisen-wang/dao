@@ -730,6 +730,7 @@ class ExpressionParser:
         token = self.advance()  # 消费 函数
         
         params = []
+        param_type_annotations = []
         
         # 检查是否有参数列表
         if self.current.type == TokenType.左括号:
@@ -739,6 +740,13 @@ class ExpressionParser:
             while self.current.type != TokenType.右括号:
                 param = self.expect(TokenType.标识符, "期望参数名")
                 params.append(param.value)
+
+                type_ann = None
+                if self.current.type == TokenType.冒号:
+                    self.advance()  # 消费 :
+                    type_ann = self.parse_type_annotation()
+                param_type_annotations.append(type_ann)
+
                 if not self.match(TokenType.逗号):
                     break
             
@@ -757,6 +765,7 @@ class ExpressionParser:
         return LambdaExpr(
             params=params,
             body=body,
+            param_type_annotations=param_type_annotations,
             line=token.line,
             column=token.column,
         )

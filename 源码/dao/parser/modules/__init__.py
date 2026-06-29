@@ -10,6 +10,8 @@ from .oop_decl import OOPDeclParser
 from .pattern_matching import PatternMatchingParser
 from .variable_decl import VariableDeclParser
 from .currency import ConcurrencyParser
+from .type_annotation import TypeAnnotationParser
+from .type_alias import TypeAliasParser
 
 __all__ = [
     "VariableDeclParser",
@@ -22,4 +24,6 @@ __all__ = [
     "ExpressionAndAssignmentParser",
     "LogicProgrammingParser",
     "ConcurrencyParser",
+    "TypeAnnotationParser",
+    "TypeAliasParser",
 ]

@@ -411,6 +411,10 @@ class LexerReaders:
             self.advance()
             self.advance()
             return self._make_token(TokenType.箭头, "=>", line, col)
+        if two_chars == "->":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.返回箭头, "->", line, col)
         if two_chars == "|>":
             self.advance()
             self.advance()
@@ -456,6 +460,7 @@ class LexerReaders:
             "<": TokenType.小于,
             ".": TokenType.点,
             "!": TokenType.感叹号,
+            "|": TokenType.竖线,
         }
 
         # 标点符号（兼容中/西文）
