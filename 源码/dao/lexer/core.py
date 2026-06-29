@@ -30,6 +30,7 @@ class Lexer(LexerReaders):
         self.indent_stack: list[int] = [0]  # 缩进层级栈
         self._at_line_start = True  # 是否在行首（用于缩进检测）
         self._bracket_depth = 0  # 括号嵌套深度（> 0 时忽略缩进和换行）
+        self._pipe_continuation = False  # 管道续行标志：当行首为 |> 时为 True
 
     # ========================
     # 字符流基础设施
@@ -95,6 +96,15 @@ class Lexer(LexerReaders):
                     f"缩进不一致：期望 {self.indent_stack[-1]} 个空格，实际 {indent_level} 个"
                 )
 
+    def _is_line_starting_with_pipe(self, start_pos: int) -> bool:
+        """前瞻检测从 start_pos 开始是否以 |> 运算符开头（不修改词法分析器状态）"""
+        pos = start_pos
+        while pos < len(self.source) and self.source[pos] in (" ", "\t"):
+            pos += 1
+        if pos + 1 < len(self.source):
+            return self.source[pos] == "|" and self.source[pos + 1] == ">"
+        return False
+
     # ========================
     # 主循环
     # ========================
@@ -112,6 +122,7 @@ class Lexer(LexerReaders):
         self.indent_stack = [0]
         self._at_line_start = True
         self._bracket_depth = 0
+        self._pipe_continuation = False
 
         while self.pos < len(self.source):
             # 行首处理缩进
@@ -136,9 +147,13 @@ class Lexer(LexerReaders):
                     continue
 
                 self._at_line_start = False
-                # 在任何情况下都处理缩进
-                # 这对于选择语句等需要在 { ... } 内部有缩进块的结构是必要的
-                self._handle_indentation(indent_level)
+                if self._is_line_starting_with_pipe(self.pos):
+                    self._pipe_continuation = True
+                    if self.tokens and self.tokens[-1].type == TokenType.换行:
+                        self.tokens.pop()
+                else:
+                    self._pipe_continuation = False
+                    self._handle_indentation(indent_level)
 
             char = self.current_char
 
