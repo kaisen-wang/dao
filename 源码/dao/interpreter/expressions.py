@@ -96,6 +96,10 @@ class ExpressionEvaluator:
                 return None
             case ListLiteral():
                 return [self.eval_expression(e, env) for e in expr.elements]
+            case TupleLiteral():
+                return tuple(self.eval_expression(e, env) for e in expr.elements)
+            case SetLiteral():
+                return set(self.eval_expression(e, env) for e in expr.elements)
             case DictLiteral():
                 return {
                     self.eval_expression(k, env): self.eval_expression(v, env)
@@ -121,6 +125,8 @@ class ExpressionEvaluator:
                 return self.eval_lambda(expr, env)
             case PipeExpr():
                 return self.eval_pipe(expr, env)
+            case ConditionalExpr():
+                return self.eval_conditional(expr, env)
             case AwaitExpr():
                 return self.eval_await(expr, env)
             case AwaitAllExpr():
@@ -192,6 +198,8 @@ class ExpressionEvaluator:
 
     def eval_member_access(self, expr: MemberAccess, env: Environment) -> object:
         """求值成员访问"""
+        from .statements import DaoEnum, DaoEnumVariant
+
         obj = self.eval_expression(expr.object, env)
 
         if isinstance(obj, DaoInstance):
@@ -321,6 +329,21 @@ class ExpressionEvaluator:
             )
 
         from ..builtins.oop_types import DaoClass
+
+        if isinstance(obj, DaoEnum):
+            if expr.member in obj.values:
+                if obj.has_variant_params(expr.member):
+                    from ..builtins.callables import BuiltinFunction
+                    def make_variant(*args):
+                        return DaoEnumVariant(obj.name, expr.member, tuple(args))
+                    return BuiltinFunction(expr.member, make_variant)
+                return DaoEnumVariant(obj.name, expr.member)
+            raise 名称错误(
+                f"枚举 '{obj.name}' 中不存在变体 '{expr.member}'",
+                expr.line,
+                expr.column,
+                self.source,
+            )
 
         if isinstance(obj, DaoClass):
             # 先查找静态方法
@@ -476,6 +499,10 @@ class ExpressionEvaluator:
                 if right == 0:
                     raise 运行时错误("除零错误", expr.line, expr.column, self.source)
                 return left / right
+            case "//":
+                if right == 0:
+                    raise 运行时错误("除零错误", expr.line, expr.column, self.source)
+                return left // right
             case "%":
                 return left % right
             case "**":
@@ -858,6 +885,14 @@ class ExpressionEvaluator:
         except Exception as e:
             logger.debug("注入表达式求值失败: %s", e)
             raise
+
+    def eval_conditional(self, expr, env: Environment) -> object:
+        """求值条件表达式：值 如果 条件 否则 值"""
+        condition = self.eval_expression(expr.condition, env)
+        if self._is_truthy(condition):
+            return self.eval_expression(expr.true_value, env)
+        else:
+            return self.eval_expression(expr.false_value, env)
 
     def eval_lambda(self, expr: LambdaExpr, env: Environment) -> DaoFunction:
         """求值匿名函数（创建闭包）"""

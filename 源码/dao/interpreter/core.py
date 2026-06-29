@@ -355,19 +355,39 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         self, func: DaoFunction, args: list, kwargs: dict, env: Environment, call_expr
     ) -> None:
         """绑定函数参数到环境"""
-        for i, param in enumerate(func.params):
-            if i < len(args):
-                env.define(param, args[i])
-            elif param in kwargs:
-                env.define(param, kwargs[param])
-            elif param in func.default_values:
-                env.define(param, func.default_values[param])
-            else:
-                line = call_expr.line if call_expr else 0
-                col = call_expr.column if call_expr else 0
-                raise 运行时错误(
-                    f"函数 '{func.name}' 缺少参数 '{param}'", line, col, self.source
-                )
+        rest_param = getattr(func, 'rest_param', None)
+        n_required = len(func.params)
+
+        if rest_param:
+            for i, param in enumerate(func.params):
+                if i < len(args):
+                    env.define(param, args[i])
+                elif param in kwargs:
+                    env.define(param, kwargs[param])
+                elif param in func.default_values:
+                    env.define(param, func.default_values[param])
+                else:
+                    line = call_expr.line if call_expr else 0
+                    col = call_expr.column if call_expr else 0
+                    raise 运行时错误(
+                        f"函数 '{func.name}' 缺少参数 '{param}'", line, col, self.source
+                    )
+            rest_args = list(args[n_required:])
+            env.define(rest_param, rest_args)
+        else:
+            for i, param in enumerate(func.params):
+                if i < len(args):
+                    env.define(param, args[i])
+                elif param in kwargs:
+                    env.define(param, kwargs[param])
+                elif param in func.default_values:
+                    env.define(param, func.default_values[param])
+                else:
+                    line = call_expr.line if call_expr else 0
+                    col = call_expr.column if call_expr else 0
+                    raise 运行时错误(
+                        f"函数 '{func.name}' 缺少参数 '{param}'", line, col, self.source
+                    )
 
     def _exec_block(self, statements: list, env: Environment) -> object:
         """执行一个代码块"""

@@ -35,10 +35,21 @@ from ..errors import (
 class DaoEnum:
     """枚举类型"""
 
-    def __init__(self, name: str, values: list[str]):
+    def __init__(self, name: str, values: list[str], variants: list | None = None):
         self.name = name
         self.values = values
+        self.variants = variants or []
         self.value_indices = {v: i for i, v in enumerate(values)}
+        self._variant_params = {}
+        for v in self.variants:
+            if hasattr(v, 'name') and hasattr(v, 'params'):
+                self._variant_params[v.name] = v.params
+
+    def has_variant_params(self, name: str) -> bool:
+        return name in self._variant_params and len(self._variant_params[name]) > 0
+
+    def get_variant_params(self, name: str) -> list[str]:
+        return self._variant_params.get(name, [])
 
     def __getitem__(self, value: str):
         """获取枚举值的索引"""
@@ -52,6 +63,31 @@ class DaoEnum:
 
     def __repr__(self) -> str:
         return f"<枚举 {self.name}>"
+
+
+class DaoEnumVariant:
+    """枚举变体实例（带关联数据）"""
+
+    def __init__(self, enum_name: str, variant_name: str, data: tuple = ()):
+        self.enum_name = enum_name
+        self.variant_name = variant_name
+        self.data = data
+
+    def __repr__(self) -> str:
+        if self.data:
+            data_str = ", ".join(repr(d) for d in self.data)
+            return f"{self.enum_name}.{self.variant_name}({data_str})"
+        return f"{self.enum_name}.{self.variant_name}"
+
+    def __eq__(self, other):
+        if isinstance(other, DaoEnumVariant):
+            return (self.enum_name == other.enum_name and
+                    self.variant_name == other.variant_name and
+                    self.data == other.data)
+        return False
+
+    def __hash__(self):
+        return hash((self.enum_name, self.variant_name, self.data))
 
 
 class StatementExecutor:
@@ -235,6 +271,7 @@ class StatementExecutor:
             body=stmt.body,
             closure_env=env,
             is_generator=self._has_yield(stmt.body),
+            rest_param=getattr(stmt, 'rest_param', None),
         )
         env.define(stmt.name, func)
 
@@ -309,15 +346,29 @@ class StatementExecutor:
                 stmt.column,
             )
 
-        for item in iterable:
-            loop_env = env.create_child()
-            loop_env.define(stmt.variable, item)
-            try:
-                self._exec_block(stmt.body, loop_env)
-            except 跳出信号:
-                break
-            except 继续信号:
-                continue
+        second_var = getattr(stmt, 'second_variable', None)
+
+        if second_var and isinstance(iterable, dict):
+            for key, value in iterable.items():
+                loop_env = env.create_child()
+                loop_env.define(stmt.variable, key)
+                loop_env.define(second_var, value)
+                try:
+                    self._exec_block(stmt.body, loop_env)
+                except 跳出信号:
+                    break
+                except 继续信号:
+                    continue
+        else:
+            for item in iterable:
+                loop_env = env.create_child()
+                loop_env.define(stmt.variable, item)
+                try:
+                    self._exec_block(stmt.body, loop_env)
+                except 跳出信号:
+                    break
+                except 继续信号:
+                    continue
 
     def exec_for_range(self, stmt: ForRangeStmt, env: Environment) -> None:
         """执行范围循环"""
@@ -421,7 +472,8 @@ class StatementExecutor:
 
     def exec_enum_decl(self, stmt: EnumDecl, env: Environment) -> None:
         """执行枚举声明"""
-        enum_obj = DaoEnum(stmt.name, stmt.values)
+        variants = getattr(stmt, 'variants', None)
+        enum_obj = DaoEnum(stmt.name, stmt.values, variants)
         env.define(stmt.name, enum_obj)
 
     def exec_trait_decl(self, stmt: TraitDecl, env: Environment) -> None:
@@ -911,21 +963,76 @@ class StatementExecutor:
         """执行解构赋值"""
         value = self.eval_expression(stmt.value, env)
 
-        if isinstance(value, (list, tuple)):
-            if len(stmt.targets) != len(value):
-                raise 运行时错误(
-                    f"解构赋值：目标数量({len(stmt.targets)})与值的数量({len(value)})不匹配",
+        # 字典解构
+        is_dict = getattr(stmt, 'is_dict_destructure', False)
+        if is_dict:
+            if not isinstance(value, dict):
+                raise 类型错误(
+                    f"字典解构需要一个字典，但得到 {type(value).__name__}",
                     stmt.line,
                     stmt.column,
                     self.source,
                 )
-            for name, val in zip(stmt.targets, value):
+            dict_targets = getattr(stmt, 'dict_targets', {})
+            for key, var_name in dict_targets.items():
+                if key not in value:
+                    raise 运行时错误(
+                        f"字典解构：字典中不存在键 '{key}'",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
                 if stmt.is_declaration:
-                    env.define(name, val)
-                elif env.has(name):
-                    env.set(name, val)
+                    env.define(var_name, value[key])
+                elif env.has(var_name):
+                    env.set(var_name, value[key])
                 else:
-                    env.define(name, val)
+                    env.define(var_name, value[key])
+            return
+
+        if isinstance(value, (list, tuple)):
+            rest_target = getattr(stmt, 'rest_target', None)
+            if rest_target:
+                # 有剩余元素：前 N 个绑定到 targets，剩余绑定到 rest_target
+                n = len(stmt.targets)
+                if len(value) < n:
+                    raise 运行时错误(
+                        f"解构赋值：目标数量({n})超过值的数量({len(value)})",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
+                for name, val in zip(stmt.targets, value[:n]):
+                    if stmt.is_declaration:
+                        env.define(name, val)
+                    elif env.has(name):
+                        env.set(name, val)
+                    else:
+                        env.define(name, val)
+                rest_value = list(value[n:])
+                if isinstance(value, tuple):
+                    rest_value = tuple(rest_value)
+                if stmt.is_declaration:
+                    env.define(rest_target, rest_value)
+                elif env.has(rest_target):
+                    env.set(rest_target, rest_value)
+                else:
+                    env.define(rest_target, rest_value)
+            else:
+                if len(stmt.targets) != len(value):
+                    raise 运行时错误(
+                        f"解构赋值：目标数量({len(stmt.targets)})与值的数量({len(value)})不匹配",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
+                for name, val in zip(stmt.targets, value):
+                    if stmt.is_declaration:
+                        env.define(name, val)
+                    elif env.has(name):
+                        env.set(name, val)
+                    else:
+                        env.define(name, val)
         elif isinstance(value, dict):
             for name in stmt.targets:
                 if name not in value:

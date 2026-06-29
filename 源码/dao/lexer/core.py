@@ -160,9 +160,27 @@ class Lexer(LexerReaders):
                 self.advance()
                 continue
 
-            # 注释
+            # 注释 或 整除运算符
             if char == "/" and self.peek() == "/":
-                self._skip_line_comment()
+                # 如果前一个 token 是数值、标识符、右括号、右方括号、右花括号等，
+                # 则 // 是整除运算符，否则是注释
+                if self.tokens and self.tokens[-1].type in (
+                    TokenType.数值,
+                    TokenType.标识符,
+                    TokenType.右括号,
+                    TokenType.右方括号,
+                    TokenType.右花括号,
+                    TokenType.真,
+                    TokenType.假,
+                    TokenType.空,
+                    TokenType.文本,
+                    TokenType.模板文本,
+                ):
+                    self.advance()  # 消费第一个 /
+                    self.advance()  # 消费第二个 /
+                    self.tokens.append(self._make_token(TokenType.整除, "//"))
+                else:
+                    self._skip_line_comment()
                 continue
             if char == "/" and self.peek() == "*":
                 self.advance()  # 跳过 /
@@ -179,7 +197,11 @@ class Lexer(LexerReaders):
 
             # 字符串（西文引号 + 中文引号）
             if char in ('"', "'", "\u201c", "\u2018", "\u300c"):
-                self.tokens.append(self._read_string(char))
+                # 检查是否是三引号字符串
+                if char in ('"', "'") and self.peek() == char and self.peek(2) == char:
+                    self.tokens.append(self._read_triple_quoted_string(char))
+                else:
+                    self.tokens.append(self._read_string(char))
                 continue
 
             # 模板字符串

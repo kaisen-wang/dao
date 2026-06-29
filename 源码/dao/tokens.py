@@ -23,6 +23,7 @@ class TokenType(Enum):
     真 = auto()  # 真
     假 = auto()  # 假
     空 = auto()  # 空
+    文档注释 = auto()  # ///
 
     # ========================
     # 标识符

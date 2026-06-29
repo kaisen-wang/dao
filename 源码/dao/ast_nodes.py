@@ -82,6 +82,20 @@ class ListLiteral(Expression):
 
 
 @dataclass
+class TupleLiteral(Expression):
+    """元组字面量：(1, "苹果", 真)"""
+
+    elements: list[Expression] = field(default_factory=list)
+
+
+@dataclass
+class SetLiteral(Expression):
+    """集合字面量：{1, 2, 3}"""
+
+    elements: list[Expression] = field(default_factory=list)
+
+
+@dataclass
 class DictLiteral(Expression):
     """字典字面量：{"键": 值}"""
 
@@ -226,6 +240,7 @@ class FunctionDecl(Statement):
     operator_symbol: str = ""  # 运算符符号（如 "+", "-", "=="）
     is_getter: bool = False  # 是否是属性 getter
     is_setter: bool = False  # 是否是属性 setter
+    rest_param: str | None = None  # 可变参数名
 
 
 @dataclass
@@ -272,6 +287,7 @@ class ForInStmt(Statement):
     variable: str = ""
     iterable: Expression = field(default_factory=lambda: Identifier())
     body: list[Statement] = field(default_factory=list)
+    second_variable: str | None = None
 
 
 @dataclass
@@ -344,11 +360,20 @@ class TraitDecl(Statement):
 
 
 @dataclass
+class EnumVariant(ASTNode):
+    """枚举变体：简单值或带关联数据"""
+
+    name: str = ""
+    params: list[str] = field(default_factory=list)
+
+
+@dataclass
 class EnumDecl(Statement):
     """枚举声明：枚举 名字 { 枚举值1, 枚举值2, ... }"""
 
     name: str = ""
     values: list[str] = field(default_factory=list)
+    variants: list[EnumVariant] = field(default_factory=list)
 
 
 @dataclass
@@ -389,6 +414,15 @@ class SuperExpr(Expression):
 # ========================
 # 管道运算符
 # ========================
+
+
+@dataclass
+class ConditionalExpr(Expression):
+    """条件表达式：值 如果 条件 否则 值"""
+
+    true_value: Expression = field(default_factory=lambda: NullLiteral())
+    condition: Expression = field(default_factory=lambda: BooleanLiteral())
+    false_value: Expression = field(default_factory=lambda: NullLiteral())
 
 
 @dataclass
@@ -484,11 +518,14 @@ class TemplateLiteral(Expression):
 
 @dataclass
 class DestructureAssign(Statement):
-    """解构赋值：[甲, 乙] = [10, 20]"""
+    """解构赋值：[甲, 乙] = [10, 20] 或 {姓名, 年龄} = 人"""
 
     targets: list[str] = field(default_factory=list)
     value: Expression = field(default_factory=lambda: NullLiteral())
     is_declaration: bool = False
+    rest_target: str | None = None
+    dict_targets: dict[str, str] = field(default_factory=dict)
+    is_dict_destructure: bool = False
 
 
 # ========================

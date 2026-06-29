@@ -25,11 +25,22 @@ class LexerReaders:
     # ========================
 
     def _skip_line_comment(self):
-        """跳过单行注释 (// 或 注：)"""
+        """跳过单行注释 (// 或 注：)，处理文档注释 ///"""
         while self.current_char is not None and self.current_char != "\n":
             if self.current_char == "/" and self.peek() == "/":
                 self.advance()
                 self.advance()
+                # 检查是否是文档注释 ///
+                if self.current_char == "/":
+                    self.advance()
+                    content = ""
+                    while self.current_char is not None and self.current_char != "\n":
+                        content += self.current_char
+                        self.advance()
+                    self.tokens.append(
+                        self._make_token(TokenType.文档注释, content.strip())
+                    )
+                    return
                 while self.current_char is not None and self.current_char != "\n":
                     self.advance()
             elif self.current_char == "注" and self.peek() == "：":
@@ -75,7 +86,7 @@ class LexerReaders:
         """读取字符串字面量（支持中/西文引号）"""
         start_line = self.line
         start_col = self.column
-        # 确定闭合引号：中文引号左右不同，西文引号左右相同
+
         close_char = self._QUOTE_PAIRS.get(quote_char, quote_char)
         self.advance()  # 跳过开头引号
         result = []
@@ -103,6 +114,46 @@ class LexerReaders:
             raise 词法错误(f"未闭合的字符串，从第 {start_line} 行开始")
 
         self.advance()  # 跳过结束引号
+        return self._make_token(TokenType.文本, "".join(result), start_line, start_col)
+
+    def _read_triple_quoted_string(self, quote_char: str) -> Token:
+        """读取三引号字符串字面量：\"\"\"...\"\"\" 或 '''...'''"""
+        start_line = self.line
+        start_col = self.column
+        self.advance()  # 跳过第一个引号
+        self.advance()  # 跳过第二个引号
+        self.advance()  # 跳过第三个引号
+        result = []
+
+        while self.current_char is not None:
+            if self.current_char == quote_char and self.peek() == quote_char and self.peek(2) == quote_char:
+                self.advance()
+                self.advance()
+                self.advance()
+                break
+            if self.current_char == "\\":
+                self.advance()
+                escape_map = {
+                    "n": "\n",
+                    "t": "\t",
+                    "r": "\r",
+                    "\\": "\\",
+                    "'": "'",
+                    '"': '"',
+                }
+                if self.current_char in escape_map:
+                    result.append(escape_map[self.current_char])
+                    self.advance()
+                else:
+                    result.append("\\")
+                    result.append(self.current_char)
+                    self.advance()
+            else:
+                result.append(self.advance())
+
+        if self.current_char is None and not (len(result) >= 0):
+            pass
+
         return self._make_token(TokenType.文本, "".join(result), start_line, start_col)
 
     # ========================
@@ -379,6 +430,14 @@ class LexerReaders:
             self.advance()
             self.advance()
             return self._make_token(TokenType.幂, "**", line, col)
+        if two_chars == "&&":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.并且, "并且", line, col)
+        if two_chars == "||":
+            self.advance()
+            self.advance()
+            return self._make_token(TokenType.或者, "或者", line, col)
 
         # 单字符运算符
         single_ops = {

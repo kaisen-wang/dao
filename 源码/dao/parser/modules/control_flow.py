@@ -87,6 +87,21 @@ class ControlFlowParser:
                 line=token.line,
                 column=token.column,
             )
+        elif self.match(TokenType.逗号):
+            # 遍历 键, 值 在 字典
+            second_var = self.expect(TokenType.标识符, "遍历需要第二个变量名")
+            self.expect(TokenType.在, "遍历双变量需要 '在'")
+            iterable = self.parse_expression()
+            self.expect(TokenType.换行, "遍历语句后需要换行")
+            body = self.parse_block()
+            return ForInStmt(
+                variable=var_token.value,
+                second_variable=second_var.value,
+                iterable=iterable,
+                body=body,
+                line=token.line,
+                column=token.column,
+            )
         elif self.match(TokenType.从):
             # 遍历 i 从 1 到 10 [步长 2]
             start = self.parse_expression()

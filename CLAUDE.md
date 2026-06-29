@@ -66,16 +66,49 @@ dao/
 │   ├── core.py              # 核心类（初始化+基础设施）
 │   ├── statements.py        # 语句解析（声明/控制流/OOP等）
 │   ├── expressions.py       # 表达式解析（优先级/调用/字面量等）
-│   └── modules/             # 模块化解析（exception_handling.py等）
+│   └── modules/             # 模块化解析
+│       ├── variable_decl.py      # 变量/常量声明
+│       ├── function_decl.py      # 函数/方法/运算符/属性
+│       ├── control_flow.py       # if/while/for/break/continue
+│       ├── exception_handling.py # try/catch/throw/assert
+│       ├── oop_decl.py           # 类/枚举/抽象/特征
+│       ├── pattern_matching.py   # 模式匹配
+│       ├── module_system.py      # 导入/导出
+│       ├── expressions.py        # 表达式/赋值
+│       ├── logic_programming.py  # 逻辑编程
+│       ├── macros.py             # 宏解析
+│       ├── currency_parser.py    # 并发解析器
+│       └── currency.py           # 并发语句解析
 ├── builtins/                # 内置函数
 │   ├── callables.py         # 可调用类型基类
 │   ├── oop_types.py         # OOP类型（类/实例/方法）
 │   ├── functions.py         # 基础内置函数（打印/长度等）
 │   └── hof.py               # 高阶函数（映射/筛选/折叠等）
-└── interpreter/             # 解释器
-    ├── core.py              # 核心类（组合混入+辅助方法）
-    ├── statements.py        # 语句执行（声明/控制流/OOP等）
-    └── expressions.py       # 表达式求值（运算/调用/管道等）
+├── interpreter/             # 解释器
+│   ├── core.py              # 核心类（组合混入+辅助方法）
+│   ├── statements.py        # 语句执行（声明/控制流/OOP等）
+│   ├── expressions.py       # 表达式求值（运算/调用/管道等）
+│   └── concurrency.py       # 并发编程解释器（异步/协程/通道）
+├── logic/                   # 逻辑编程模块
+│   ├── core.py              # 核心逻辑引擎
+│   ├── solver.py            # 求解器
+│   ├── unification.py       # 统一算法
+│   ├── backtracking.py      # 回溯搜索
+│   ├── exceptions.py        # 逻辑异常
+│   └── constraints/         # 约束求解
+│       └── core.py          # 约束求解核心
+├── macros/                  # 宏系统模块
+│   ├── expander.py          # 宏展开器
+│   ├── hygiene.py           # 卫生宏处理
+│   ├── ast_repr.py          # AST到数据结构转换
+│   ├── ast_ops.py           # AST操作工具
+│   ├── introspection.py     # AST内省接口
+│   ├── scope.py             # 作用域管理
+│   ├── registry.py          # 宏注册表
+│   ├── pattern_engine.py    # 模式匹配引擎
+│   └── exhaustiveness.py    # 穷尽性检查器
+└── concurrency/             # 并发编程模块（开发中）
+    └── __init__.py
 ```
 
 #### 关键特性实现位置
@@ -103,6 +136,19 @@ dao/
 - 新特性测试：`tests/test_new_features.py`
 - 集成测试：`tests/test_integration.py`
 - 并发测试：`tests/test_concurrency_parser.py`
+- 枚举测试：`tests/test_enum.py`
+- 生成器测试：`tests/test_generator.py`
+- 特征测试：`tests/test_traits.py`
+- 抽象类型测试：`tests/test_abstract_type.py`
+- 运算符重载测试：`tests/test_operator_overload.py`
+- 属性访问器测试：`tests/test_property_accessor.py`
+- 模式匹配测试：`tests/test_pattern_matching.py`
+- 解构匹配测试：`tests/test_destructure_matching.py`
+- 堆栈跟踪测试：`tests/test_stack_trace.py`
+- 宏测试：`tests/test_macros.py`
+- 模式匹配宏测试：`tests/test_pattern_macro.py`
+- 逻辑编程测试：`tests/logic_programming/`（4个文件）
+- 模块系统测试：`tests/module_system/`（4个文件）
 
 ### 📚 设计文档位置
 

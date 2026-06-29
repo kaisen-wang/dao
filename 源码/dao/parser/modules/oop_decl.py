@@ -4,6 +4,7 @@ from ...ast_nodes import (
     AbstractDecl,
     ClassDecl,
     EnumDecl,
+    EnumVariant,
     FunctionDecl,
     Statement,
     TraitDecl,
@@ -25,13 +26,33 @@ class OOPDeclParser:
         self.expect(TokenType.缩进, "枚举值需要缩进块")
 
         values = []
+        variants = []
         while self.current.type not in (TokenType.回退, TokenType.文件结束):
             self.skip_newlines()
             if self.current.type in (TokenType.回退, TokenType.文件结束):
                 break
 
             value_token = self.expect(TokenType.标识符, "枚举值需要是标识符")
-            values.append(value_token.value)
+            variant_name = value_token.value
+
+            # 检查是否有参数列表：变体名(参数1, 参数2)
+            params = []
+            if self.current.type == TokenType.左括号:
+                self.advance()  # 消费 (
+                while self.current.type != TokenType.右括号:
+                    param_token = self.expect(TokenType.标识符, "枚举变体参数需要是标识符")
+                    params.append(param_token.value)
+                    if not self.match(TokenType.逗号):
+                        break
+                self.expect(TokenType.右括号, "枚举变体参数需要 ')'")
+
+            values.append(variant_name)
+            variants.append(EnumVariant(
+                name=variant_name,
+                params=params,
+                line=value_token.line,
+                column=value_token.column,
+            ))
 
             # 逗号是可选的
             self.match(TokenType.逗号)
@@ -42,6 +63,7 @@ class OOPDeclParser:
         return EnumDecl(
             name=name_token.value,
             values=values,
+            variants=variants,
             line=token.line,
             column=token.column,
         )
@@ -224,7 +246,7 @@ class OOPDeclParser:
         """解析构造函数：初始化(参数) ..."""
         token = self.advance()  # 消费 初始化
         self.expect(TokenType.左括号, "构造函数需要 '('")
-        params, default_values = self._parse_param_list()
+        params, default_values, rest_param = self._parse_param_list()
         self.expect(TokenType.右括号, "构造函数需要 ')'")
         self.expect(TokenType.换行, "构造函数头部后需要换行")
         body = self.parse_block()

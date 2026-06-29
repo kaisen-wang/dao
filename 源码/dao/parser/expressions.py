@@ -10,6 +10,7 @@ from ..ast_nodes import (
     BinaryOp,
     BooleanLiteral,
     CompareOp,
+    ConditionalExpr,
     DictLiteral,
     DictPattern,
     Expression,
@@ -27,9 +28,11 @@ from ..ast_nodes import (
     PipeExpr,
     ReturnStmt,
     SelfExpr,
+    SetLiteral,
     StringLiteral,
     SuperExpr,
     TemplateLiteral,
+    TupleLiteral,
     UnaryOp,
 )
 from ..tokens import TokenType
@@ -44,7 +47,29 @@ class ExpressionParser:
 
     def parse_expression(self) -> Expression:
         """解析表达式（入口）"""
-        return self.parse_pipe()
+        return self.parse_conditional()
+
+    # ========================
+    # 优先级 0: 条件表达式
+    # ========================
+
+    def parse_conditional(self) -> Expression:
+        """解析条件表达式：值 如果 条件 否则 值"""
+        expr = self.parse_pipe()
+        if self.current.type == TokenType.如果:
+            true_value = expr
+            self.advance()  # 消费 如果
+            condition = self.parse_pipe()
+            self.expect(TokenType.否则, "条件表达式需要 '否则'")
+            false_value = self.parse_conditional()  # 右结合
+            return ConditionalExpr(
+                true_value=true_value,
+                condition=condition,
+                false_value=false_value,
+                line=true_value.line,
+                column=true_value.column,
+            )
+        return expr
 
     # ========================
     # 优先级 1: 管道
@@ -91,7 +116,7 @@ class ExpressionParser:
         return left
 
     def parse_not(self) -> Expression:
-        """解析 不是 表达式"""
+        """解析 不是/! 表达式"""
         if self.match(TokenType.不是):
             operand = self.parse_not()
             return UnaryOp(
@@ -100,6 +125,18 @@ class ExpressionParser:
                 line=operand.line,
                 column=operand.column,
             )
+        if self.current.type == TokenType.感叹号:
+            # ! 作为逻辑非：检查后面是否紧跟标识符（宏调用）
+            # 如果 ! 后面紧跟标识符，则是宏调用；否则是逻辑非
+            if self.peek().type != TokenType.标识符:
+                self.advance()  # 消费 !
+                operand = self.parse_not()
+                return UnaryOp(
+                    operator="不是",
+                    operand=operand,
+                    line=operand.line,
+                    column=operand.column,
+                )
         return self.parse_comparison()
 
     # ========================
@@ -168,9 +205,9 @@ class ExpressionParser:
         return left
 
     def parse_multiplication(self) -> Expression:
-        """解析乘除取余"""
+        """解析乘除取余整除"""
         left = self.parse_power()
-        while self.current.type in (TokenType.乘, TokenType.除, TokenType.取余):
+        while self.current.type in (TokenType.乘, TokenType.除, TokenType.取余, TokenType.整除):
             op = self.advance()
             right = self.parse_power()
             left = BinaryOp(
@@ -320,9 +357,9 @@ class ExpressionParser:
                 column=token.column,
             )
 
-        # 检查是否是字典字面量（如 { "a": 1 } 或 { a: 1 }）
+        # 检查是否是字典字面量（如 { "a": 1 } 或 { a: 1 }）或集合字面量（如 {1, 2, 3}）
         if token.type == TokenType.左花括号:
-            # 检查下一个token是否是标识符、字符串或数字，且后面紧跟冒号
+            # 检查下一个token是否是标识符、字符串或数字，且后面紧跟冒号 → 字典
             if (
                 self.pos + 1 < len(self.tokens)
                 and self.tokens[self.pos + 1].type
@@ -332,9 +369,21 @@ class ExpressionParser:
             ):
                 return self.parse_dict_literal()
 
-            # 否则，解析为块表达式（如 { 语句 }）
-            self.advance()  # 消费左花括号
+            # 检查是否是集合字面量：{expr, expr, ...}（无冒号）
+            if (
+                self.pos + 1 < len(self.tokens)
+                and self.tokens[self.pos + 1].type != TokenType.右花括号
+            ):
+                # 尝试解析为集合字面量
+                return self.parse_set_or_block_literal()
 
+            # 空花括号 {} → 空字典
+            self.advance()  # 消费左花括号
+            if self.current.type == TokenType.右花括号:
+                self.advance()  # 消费右花括号
+                return DictLiteral(pairs=[], line=token.line, column=token.column)
+
+            # 否则，解析为块表达式（如 { 语句 }）
             # 找到匹配的右花括号
             depth = 1
             block_end = self.pos
@@ -474,19 +523,38 @@ class ExpressionParser:
         if token.type == TokenType.函数:
             return self.parse_lambda()
 
-        # 括号表达式
+        # 括号表达式 或 元组字面量
         if token.type == TokenType.左括号:
             self.advance()
+            # 空括号 → 空元组
+            if self.current.type == TokenType.右括号:
+                self.advance()
+                return TupleLiteral(elements=[], line=token.line, column=token.column)
             # 如果下一个 token 是标识符且是逻辑变量，直接返回该变量，不解析括号表达式
             if self.current.type == TokenType.标识符 and self.current.value.startswith(
                 "?"
             ):
                 expr = self.parse_primary()
+                self.expect(TokenType.右括号, "括号表达式需要 ')'")
                 return expr
-            # 否则，解析括号内的表达式
-            expr = self.parse_expression()
+            # 解析括号内的表达式
+            first = self.parse_expression()
+            # 如果后面有逗号，则是元组
+            if self.current.type == TokenType.逗号:
+                elements = [first]
+                while self.match(TokenType.逗号):
+                    if self.current.type == TokenType.右括号:
+                        break
+                    elements.append(self.parse_expression())
+                self.expect(TokenType.右括号, "元组需要 ')'")
+                return TupleLiteral(
+                    elements=elements, line=token.line, column=token.column
+                )
+            # 单元素带尾逗号 → 单元素元组
+            # 已在上方逗号分支处理
+            # 普通括号表达式
             self.expect(TokenType.右括号, "括号表达式需要 ')'")
-            return expr
+            return first
 
         # 列表字面量 [...]
         if token.type == TokenType.左方括号:
@@ -637,6 +705,43 @@ class ExpressionParser:
 
         self.expect(TokenType.右花括号, "字典需要 '}'")
         return DictLiteral(pairs=pairs, line=token.line, column=token.column)
+
+    def parse_set_or_block_literal(self) -> Expression:
+        """解析集合字面量或块表达式：{1, 2, 3} 或 {语句}"""
+        token = self.advance()  # 消费 {
+        first = self.parse_expression()
+
+        # 如果第一个表达式后紧跟冒号，说明是字典（key: value 的 key 是表达式）
+        if self.current.type == TokenType.冒号:
+            pairs = []
+            key = first
+            self.advance()  # 消费冒号
+            value = self.parse_expression()
+            pairs.append((key, value))
+            while self.match(TokenType.逗号):
+                if self.current.type == TokenType.右花括号:
+                    break
+                key = self.parse_expression()
+                self.expect(TokenType.冒号, "字典需要 ':'")
+                value = self.parse_expression()
+                pairs.append((key, value))
+            self.expect(TokenType.右花括号, "字典需要 '}'")
+            return DictLiteral(pairs=pairs, line=token.line, column=token.column)
+
+        # 如果有逗号，则是集合字面量
+        if self.current.type == TokenType.逗号:
+            elements = [first]
+            while self.match(TokenType.逗号):
+                if self.current.type == TokenType.右花括号:
+                    break
+                elements.append(self.parse_expression())
+            self.expect(TokenType.右花括号, "集合需要 '}'")
+            return SetLiteral(elements=elements, line=token.line, column=token.column)
+
+        # 单个表达式且无逗号 → 可能是集合（单元素）或块表达式
+        # 这里将其解析为集合字面量（单元素集合）
+        self.expect(TokenType.右花括号, "需要 '}'")
+        return SetLiteral(elements=[first], line=token.line, column=token.column)
 
     # ========================
     # 模式解析

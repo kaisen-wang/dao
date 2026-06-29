@@ -50,12 +50,33 @@ dao/
 ├── interpreter/        # 解释器
 │   ├── core.py         # 主类 + 入口
 │   ├── statements.py   # 语句执行
-│   └── expressions.py  # 表达式求值
-└── builtins/           # 内置函数
-    ├── callables.py    # 可调用基类
-    ├── functions.py    # 基础内置函数
-    ├── oop_types.py    # OOP类型实现
-    └── hof.py          # 高阶函数
+│   ├── expressions.py  # 表达式求值
+│   └── concurrency.py  # 并发编程解释器（异步/协程/通道）
+├── builtins/           # 内置函数
+│   ├── callables.py    # 可调用基类
+│   ├── functions.py    # 基础内置函数
+│   ├── oop_types.py    # OOP类型实现
+│   └── hof.py          # 高阶函数
+├── logic/              # 逻辑编程模块
+│   ├── core.py         # 核心逻辑引擎
+│   ├── solver.py       # 求解器
+│   ├── unification.py  # 统一算法
+│   ├── backtracking.py # 回溯搜索
+│   ├── exceptions.py   # 逻辑异常
+│   └── constraints/    # 约束求解
+│       └── core.py     # 约束求解核心
+├── macros/             # 宏系统模块
+│   ├── expander.py     # 宏展开器
+│   ├── hygiene.py      # 卫生宏处理
+│   ├── ast_repr.py     # AST到数据结构转换
+│   ├── ast_ops.py      # AST操作工具
+│   ├── introspection.py # AST内省接口
+│   ├── scope.py        # 作用域管理
+│   ├── registry.py     # 宏注册表
+│   ├── pattern_engine.py # 模式匹配引擎
+│   └── exhaustiveness.py # 穷尽性检查器
+└── concurrency/        # 并发编程模块（开发中）
+    └── __init__.py
 
 ### Parser模块化结构
 ```
@@ -71,7 +92,10 @@ dao/parser/
 │   ├── pattern_matching.py  # 模式匹配
 │   ├── module_system.py # 导入/导出
 │   ├── expressions.py   # 表达式/赋值
-│   └── logic_programming.py # 逻辑编程
+│   ├── logic_programming.py # 逻辑编程
+│   ├── macros.py        # 宏解析
+│   ├── currency_parser.py # 并发解析器
+│   └── currency.py      # 并发语句解析
 ```
 
 设计模式：使用Python混入类(Mixin)，每个模块定义解析方法，`StatementParser`通过多重继承组合所有功能。

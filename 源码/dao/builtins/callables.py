@@ -75,15 +75,17 @@ class DaoFunction(DaoCallable):
         is_generator: bool = False,
         is_getter: bool = False,
         is_setter: bool = False,
+        rest_param: str | None = None,
     ):
         self.name = name
         self.params = params
         self.default_values = default_values
         self.body = body
         self.closure_env = closure_env
-        self.is_generator = is_generator  # 是否包含产出语句
-        self.is_getter = is_getter  # 是否是属性 getter
-        self.is_setter = is_setter  # 是否是属性 setter
+        self.is_generator = is_generator
+        self.is_getter = is_getter
+        self.is_setter = is_setter
+        self.rest_param = rest_param
 
     def arity(self) -> int:
         return len(self.params)
