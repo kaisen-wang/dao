@@ -15,6 +15,8 @@
 
 ## 🚀 快速开始
 
+### 从源码运行
+
 ```bash
 # 进入源码目录
 cd 源码
@@ -28,8 +30,32 @@ python main.py
 # 执行 .道 文件
 python main.py examples/你好世界.道
 
+# 使用字节码虚拟机模式执行
+python main.py --mode vm examples/你好世界.道
+
 # 运行测试
 pytest tests/ -v
+```
+
+### 使用 Nuitka 打包为原生可执行文件
+
+```bash
+# 安装 Nuitka 及依赖
+pip install nuitka ordered-set zstandard patchelf
+
+# 打包为单文件可执行程序
+cd 源码
+python -m nuitka --onefile --standalone \
+    --enable-plugin=no-qt \
+    --include-package=dao \
+    --output-filename=道 \
+    --output-dir=../dist \
+    --assume-yes-for-downloads \
+    main.py
+
+# 运行打包后的可执行文件
+../dist/道                    # 启动 REPL
+../dist/道 examples/你好世界.道  # 执行文件
 ```
 
 **REPL 示例：**
@@ -108,12 +134,12 @@ pytest tests/ -v
 
 ## 🗺️ 开发路线图
 
-| 阶段 | 时间 | 目标 | 当前状态 |
-|------|------|------|---------|
-| **Phase 1** | 第 1-8 周 | 核心原型：Lexer + Parser + 解释器 + REPL | ✅ 完成 |
-| **Phase 2** | 第 9-20 周 | OOP + FP：类型系统、高阶函数、模式匹配、模块 | ✅ 大部分完成 |
-| **Phase 3** | 第 21-40 周 | 高级特性：逻辑引擎、宏系统、并发 | ⬜ 待开始 |
-| **Phase 4** | 第 41 周+ | 字节码编译 + GraalVM 迁移 + 生态建设 | ⬜ 待开始 |
+| 阶段 | 目标 | 当前状态 |
+|------|------|---------|
+| **Phase 1** | 核心原型：Lexer + Parser + 解释器 + REPL | ✅ 完成 |
+| **Phase 2** | OOP + FP：类型系统、高阶函数、模式匹配、模块 | ✅ 大部分完成 |
+| **Phase 3** | 高级特性：逻辑引擎、宏系统、并发 | 🔧 已实现核心功能 |
+| **Phase 4** | 字节码编译 + VM + JIT + 标准库 + 包管理 | 🔧 已实现核心功能 |
 
 ## 📁 项目结构
 
@@ -136,58 +162,151 @@ pytest tests/ -v
 │   ├── 11-关键字总表.md
 │   ├── 12-综合示例.md
 │   └── 13-结论与展望.md
+├── dist/                   ← Nuitka 打包输出
+│   └── 道                  ← 原生可执行文件（~8.5MB）
 └── 源码/                   ← 解释器源代码（Python 3.10+）
     ├── main.py             ← 主入口（REPL + 文件执行）
     ├── requirements.txt    ← Python 依赖
     ├── dao/                ← 核心解释器包
-    │   ├── tokens.py       ← 词元类型定义（32个关键字）
-    │   ├── ast_nodes.py    ← AST 节点定义（30+节点类型）
-    │   ├── environment.py  ← 词法作用域管理
-    │   ├── errors.py       ← 中文错误类型
-    │   ├── lexer/          ← 词法分析器包
-    │   │   ├── core.py        ← 核心类（初始化+主循环+缩进）
-    │   │   └── readers.py     ← Token读取（字符串/数值/运算符等）
-    │   ├── parser/         ← 语法分析器包
-    │   │   ├── core.py        ← 核心类（初始化+基础设施）
-    │   │   ├── statements.py  ← 语句解析（声明/控制流/OOP等）
-    │   │   └── expressions.py ← 表达式解析（优先级/调用/字面量等）
-    │   ├── builtins/       ← 内置函数包
-    │   │   ├── callables.py   ← 可调用类型基类
-    │   │   ├── oop_types.py   ← OOP 类型（类/实例/方法）
-    │   │   ├── functions.py   ← 基础内置函数（打印/长度等）
-    │   │   └── hof.py         ← 高阶函数（映射/筛选/折叠等）
-    │   └── interpreter/    ← 解释器包
-    │       ├── core.py        ← 核心类（组合混入+辅助方法）
-    │       ├── statements.py  ← 语句执行（声明/控制流/OOP等）
-    │       └── expressions.py ← 表达式求值（运算/调用/管道等）
-    ├── tests/              ← 测试套件（145个测试）
+    │   ├── __init__.py        ← 包初始化（版本 0.1.0）
+    │   ├── tokens.py          ← 词元类型定义（32个关键字）
+    │   ├── ast_nodes.py       ← AST 节点定义（30+节点类型）
+    │   ├── environment.py     ← 词法作用域管理
+    │   ├── errors.py          ← 中文错误类型
+    │   ├── lexer/             ← 词法分析器包
+    │   │   ├── core.py           ← 核心类（初始化+主循环+缩进）
+    │   │   └── readers.py        ← Token读取（字符串/数值/运算符等）
+    │   ├── parser/            ← 语法分析器包
+    │   │   ├── core.py           ← 核心类（初始化+基础设施）
+    │   │   ├── statements.py     ← 语句解析（声明/控制流/OOP等）
+    │   │   ├── expressions.py    ← 表达式解析（优先级/调用/字面量等）
+    │   │   └── modules/          ← 解析子模块
+    │   │       ├── control_flow.py   ← 控制流解析
+    │   │       ├── oop_decl.py       ← OOP 声明解析
+    │   │       ├── function_decl.py  ← 函数声明解析
+    │   │       ├── pattern_matching.py ← 模式匹配解析
+    │   │       ├── logic_programming.py ← 逻辑编程解析
+    │   │       ├── macros.py         ← 宏解析
+    │   │       ├── module_system.py  ← 模块系统解析
+    │   │       └── ...               ← 其他解析子模块
+    │   ├── builtins/          ← 内置函数包
+    │   │   ├── callables.py      ← 可调用类型基类
+    │   │   ├── oop_types.py      ← OOP 类型（类/实例/方法）
+    │   │   ├── functions.py      ← 基础内置函数（打印/长度等）
+    │   │   └── hof.py            ← 高阶函数（映射/筛选/折叠等）
+    │   ├── interpreter/       ← 解释器包
+    │   │   ├── core.py           ← 核心类（组合混入+辅助方法）
+    │   │   ├── statements.py     ← 语句执行（声明/控制流/OOP等）
+    │   │   ├── expressions.py    ← 表达式求值（运算/调用/管道等）
+    │   │   └── concurrency.py    ← 并发语句执行
+    │   ├── logic/             ← 逻辑编程引擎
+    │   │   ├── core.py           ← 知识库核心
+    │   │   ├── solver.py         ← 查询求解器
+    │   │   ├── unification.py    ← 合一算法
+    │   │   ├── backtracking.py   ← 回溯搜索
+    │   │   ├── exceptions.py     ← 逻辑编程异常
+    │   │   └── constraints/      ← 约束求解子模块
+    │   ├── macros/            ← 宏系统
+    │   │   ├── expander.py       ← 宏展开器
+    │   │   ├── hygiene.py        ← 卫生宏处理
+    │   │   ├── introspection.py  ← AST 内省
+    │   │   ├── ast_ops.py        ← AST 操作工具
+    │   │   ├── ast_repr.py       ← AST 数据表示
+    │   │   ├── exhaustiveness.py ← 穷尽性检查
+    │   │   ├── pattern_engine.py ← 模式引擎
+    │   │   ├── registry.py       ← 宏注册表
+    │   │   └── scope.py          ← 作用域管理
+    │   ├── concurrency/       ← 并发编程
+    │   │   └── __init__.py       ← Channel/Mutex/原子类型
+    │   ├── bytecode/          ← 字节码编译
+    │   │   ├── opcodes.py        ← 操作码定义
+    │   │   ├── code_object.py    ← 代码对象
+    │   │   ├── compiler.py       ← 字节码编译器
+    │   │   ├── disassembler.py   ← 反汇编器
+    │   │   └── frame.py          ← 栈帧
+    │   ├── vm/                ← 虚拟机
+    │   │   └── core.py           ← VM 核心
+    │   ├── jit/               ← JIT 编译
+    │   │   ├── compiler.py       ← JIT 编译器
+    │   │   ├── hotspot.py        ← 热点检测
+    │   │   └── type_feedback.py  ← 类型反馈
+    │   ├── types/             ← 类型系统
+    │   │   ├── checker.py        ← 类型检查器
+    │   │   ├── core.py           ← 类型核心
+    │   │   └── alias_registry.py ← 类型别名注册
+    │   ├── package/           ← 包管理
+    │   │   ├── config.py         ← 包配置
+    │   │   ├── manager.py        ← 包管理器
+    │   │   ├── resolver.py       ← 依赖解析
+    │   │   └── version.py        ← 版本管理
+    │   └── stdlib/            ← 标准库
+    │       ├── loader.py         ← 模块加载器
+    │       ├── registry.py       ← 模块注册表
+    │       ├── text.py           ← 文本处理
+    │       ├── math.py           ← 数学运算
+    │       ├── file.py           ← 文件操作
+    │       ├── network.py        ← 网络请求
+    │       ├── time.py           ← 时间日期
+    │       ├── encoding.py       ← 编码转换
+    │       ├── collection.py     ← 集合工具
+    │       ├── system.py         ← 系统信息
+    │       ├── log.py            ← 日志模块
+    │       └── test.py           ← 测试框架
+    ├── tests/              ← 测试套件（65个测试文件，180+测试用例）
     │   ├── test_lexer.py          ← 词法分析器测试
     │   ├── test_parser.py         ← 语法分析器测试
     │   ├── test_interpreter.py    ← 解释器测试
-    │   ├── test_new_features.py   ← 新特性测试
-    │   └── test_integration.py    ← 集成测试（运行.道示例）
-    └── examples/           ← 示例程序（8个）
+    │   ├── test_integration.py    ← 集成测试
+    │   ├── test_bytecode_*.py     ← 字节码编译测试
+    │   ├── test_vm.py             ← 虚拟机测试
+    │   ├── test_jit.py            ← JIT 测试
+    │   ├── test_logic_*.py        ← 逻辑编程测试
+    │   ├── test_macros.py         ← 宏系统测试
+    │   ├── test_traits.py         ← 特征测试
+    │   ├── test_pattern_matching.py ← 模式匹配测试
+    │   ├── test_type_*.py         ← 类型系统测试
+    │   ├── test_stdlib/           ← 标准库测试
+    │   ├── logic_programming/     ← 逻辑编程专项测试
+    │   └── module_system/         ← 模块系统专项测试
+    └── examples/           ← 示例程序（46个 .道 文件）
         ├── 你好世界.道
         ├── 基础示例.道
         ├── 斐波那契.道
         ├── 面向对象.道
         ├── 高阶函数.道
         ├── 模式匹配.道
+        ├── 宏系统示例.道
+        ├── 枚举示例.道
         ├── 综合示例.道
-        └── 新特性示例.道
+        ├── concurrency_tests/  ← 并发编程示例
+        ├── logic_programming/  ← 逻辑编程示例
+        └── ...
 ```
 
 ## 🛠️ 技术架构
 
 ```
 源代码(.道文件)
-    ↓ [词法分析 lexer.py]
+    ↓ [词法分析 lexer/]
 Token 流
-    ↓ [语法分析 parser.py]
+    ↓ [语法分析 parser/]
 抽象语法树 (AST)
-    ↓ [树遍历 interpreter.py]
-执行结果
+    ↓
+    ├── [树遍历 interpreter/]  ← 解释器模式（默认）
+    │       ↓
+    │   执行结果
+    │
+    └── [字节码编译 bytecode/]  ← VM 模式（--mode vm）
+            ↓
+        字节码 (CodeObject)
+            ↓ [虚拟机 vm/]
+            ↓ [JIT 编译 jit/]  ← 可选（--jit）
+            ↓
+        执行结果
 ```
 
-**当前实现**（Phase 1）：Python 树遍历解释器  
-**目标架构**（Phase 4）：编译到字节码 → GraalVM/Truffle JIT 执行
+**双执行模式：**
+- **解释器模式**（默认）：AST 树遍历，启动快，适合交互式开发
+- **VM 模式**（`--mode vm`）：编译至字节码后由虚拟机执行，支持 JIT 热点优化
+
+**打包部署：** 通过 Nuitka 编译为原生可执行文件，无需 Python 环境即可运行
