@@ -14,6 +14,7 @@ def _init_registry():
     from . import text, math, collection, time
     from . import encoding, file, system
     from . import test, log, network
+    from . import asyncio as _asyncio_mod
 
     register_module("文本", text.create_module_env)
     register_module("数学", math.create_module_env)
@@ -25,6 +26,7 @@ def _init_registry():
     register_module("测试", test.create_module_env)
     register_module("日志", log.create_module_env)
     register_module("网络", network.create_module_env)
+    register_module("异步IO", _asyncio_mod.create_module_env)
 
 
 _initialized = False
