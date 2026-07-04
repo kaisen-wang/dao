@@ -84,7 +84,12 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
 
         # 清理宏注册表，确保每次执行新程序时注册表是干净的
         from ..macros.registry import MacroRegistry
-        MacroRegistry().clear()
+        registry = MacroRegistry()
+        registry.clear()
+
+        # 注册内置宏
+        from ..macros.builtins import register_builtin_macros
+        register_builtin_macros(registry)
 
         result = None
         try:

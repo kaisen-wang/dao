@@ -195,36 +195,65 @@ class PatternMatchEngine:
         return MatchResult(matched=(isinstance(value, target_type)), bindings={})
 
     def _match_enum_variant(self, pattern: EnumVariantPattern, value) -> MatchResult:
-        """匹配枚举变体模式"""
-        # 检查值是否为枚举实例
-        # 道语言的枚举实例通常有 __dao_class__ 和 __variant__ 属性
-        if not hasattr(value, '__dao_class__'):
-            return MatchResult(matched=False, bindings={})
+        """匹配枚举变体模式
 
-        # 检查枚举名
-        if value.__dao_class__ != pattern.enum_name:
-            return MatchResult(matched=False, bindings={})
+        使用协议接口进行匹配，解耦与 OOP 内部实现的依赖：
+        1. 优先使用 __dao_class__ / __variant__ 协议属性
+        2. 其次尝试字典形式的 {'__type__': 'enum', '类': ..., '变体': ...}
+        3. 最后尝试鸭子类型检查（具有匹配的类名属性）
+        """
+        # 协议1: 道语言标准枚举协议 (__dao_class__ / __variant__)
+        if hasattr(value, '__dao_class__'):
+            if value.__dao_class__ != pattern.enum_name:
+                return MatchResult(matched=False, bindings={})
+            if hasattr(value, '__variant__') and value.__variant__ != pattern.variant_name:
+                return MatchResult(matched=False, bindings={})
+            return self._extract_enum_binding(pattern, value)
 
-        # 检查变体名
-        if hasattr(value, '__variant__') and value.__variant__ != pattern.variant_name:
-            return MatchResult(matched=False, bindings={})
+        # 协议2: 字典形式的枚举表示
+        if isinstance(value, dict):
+            if value.get('__type__') == 'enum':
+                if value.get('类') != pattern.enum_name:
+                    return MatchResult(matched=False, bindings={})
+                if value.get('变体') != pattern.variant_name:
+                    return MatchResult(matched=False, bindings={})
+                bindings = {}
+                if pattern.binding:
+                    inner_value = value.get('值')
+                    if inner_value is not None:
+                        bindings[pattern.binding] = inner_value
+                return MatchResult(matched=True, bindings=bindings)
 
-        # 如果有绑定变量，提取内部值
+        # 协议3: 鸭子类型检查 - 对象有匹配的类名属性
+        class_name = type(value).__name__
+        if class_name == pattern.enum_name or class_name == pattern.variant_name:
+            bindings = {}
+            if pattern.binding:
+                bindings[pattern.binding] = self._get_object_value(value)
+            return MatchResult(matched=True, bindings=bindings)
+
+        return MatchResult(matched=False, bindings={})
+
+    def _extract_enum_binding(self, pattern: EnumVariantPattern, value) -> MatchResult:
+        """从枚举实例中提取绑定变量"""
         bindings = {}
         if pattern.binding:
-            # 枚举实例的内部值通常存储在 _value 属性中
-            if hasattr(value, '_value'):
-                bindings[pattern.binding] = value._value
-            elif hasattr(value, '值'):
-                bindings[pattern.binding] = value.值
-            else:
-                # 尝试获取非特殊属性的值
-                for attr_name in dir(value):
-                    if not attr_name.startswith('_') and attr_name not in ('__dao_class__', '__variant__'):
-                        bindings[pattern.binding] = getattr(value, attr_name)
-                        break
-
+            bindings[pattern.binding] = self._get_object_value(value)
         return MatchResult(matched=True, bindings=bindings)
+
+    def _get_object_value(self, value):
+        """从对象中提取内部值，使用多种策略"""
+        # 策略1: _value 属性
+        if hasattr(value, '_value'):
+            return value._value
+        # 策略2: 值 属性
+        if hasattr(value, '值'):
+            return value.值
+        # 策略3: 第一个非特殊属性
+        for attr_name in dir(value):
+            if not attr_name.startswith('_') and attr_name not in ('__dao_class__', '__variant__'):
+                return getattr(value, attr_name)
+        return value
 
     def _extract_literal_value(self, pattern):
         """从字面量模式节点中提取值"""

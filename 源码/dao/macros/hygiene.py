@@ -151,16 +151,24 @@ class HygieneAnalysis:
 
     @staticmethod
     def get_capture_risk(scope: MacroScope) -> Dict[str, str]:
-        """分析变量捕获风险"""
-        free_vars = {var.name: var for var in scope.get_free_variables()}
-        bound_vars = {
-            var.name: var for var in scope.get_used_variables() if var.is_bound
+        """分析变量捕获风险
+
+        基于作用域链分析，返回变量名到风险描述的映射。
+        风险等级：高（跨作用域引用）、中（未定义自由变量）、低（单作用域使用）
+        """
+        risk_levels = scope.analyze_capture_risk()
+        risk_map = {}
+
+        level_descriptions = {
+            "高": "变量 '{}' 跨作用域引用，有高捕获风险",
+            "中": "变量 '{}' 为未定义的自由变量，有中等捕获风险",
+            "低": "变量 '{}' 仅在单一作用域使用，捕获风险低",
         }
 
-        risk_map = {}
-        for var_name, info in free_vars.items():
-            if var_name in bound_vars:
-                risk_map[var_name] = f"变量 '{var_name}' 可能被捕获（作用域冲突）"
+        for var_name, level in risk_levels.items():
+            template = level_descriptions.get(level, "变量 '{}' 有未知风险")
+            risk_map[var_name] = template.format(var_name)
+
         return risk_map
 
     @staticmethod

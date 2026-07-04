@@ -284,3 +284,104 @@ def test_macro_boolean_argument():
 """
     result, interpreter = run_code(code)
     assert interpreter.global_env.get("结果") == False
+
+
+# ==================== 内置宏测试 ====================
+
+
+def test_builtin_macro_除非():
+    """测试内置宏 @除非"""
+    code = """
+设 温度 = 15
+设 冷 = 假
+!除非(温度 > 20)
+    冷 = 真
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("冷") == True
+
+
+def test_builtin_macro_除非_false():
+    """测试内置宏 @除非 条件为真时不执行"""
+    code = """
+设 温度 = 25
+设 冷 = 假
+!除非(温度 > 20)
+    冷 = 真
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("冷") == False
+
+
+def test_builtin_macro_日志():
+    """测试内置宏 @日志"""
+    code = """
+设 值 = 0
+!日志("测试函数")
+    值 = 42
+"""
+    result, interpreter = run_code(code)
+    assert interpreter.global_env.get("值") == 42
+
+
+def test_builtin_macro_延迟():
+    """测试内置宏 @延迟"""
+    code = """
+设 计数 = 0
+设 结果 = !延迟(计数 + 1)
+"""
+    result, interpreter = run_code(code)
+    # 延迟宏应返回计算结果
+    assert result == 1
+
+
+def test_builtin_macro_缓存():
+    """测试内置宏 @缓存"""
+    code = """
+设 _缓存表 = {}
+设 调用次数 = 0
+设 结果1 = !缓存("键1")
+    调用次数 = 调用次数 + 1
+    调用次数
+设 结果2 = !缓存("键1")
+    调用次数 = 调用次数 + 1
+    调用次数
+"""
+    result, interpreter = run_code(code)
+    # 第一次缓存未命中，执行代码块；第二次命中，直接返回缓存
+    assert interpreter.global_env.get("结果1") == 1
+
+
+def test_builtin_macro_registration():
+    """测试内置宏注册"""
+    from dao.macros.builtins import register_builtin_macros
+    from dao.macros.registry import MacroRegistry
+
+    registry = MacroRegistry()
+    registry.clear()
+    register_builtin_macros(registry)
+
+    # 验证所有内置宏都已注册
+    assert registry.find_macro("除非") is not None
+    assert registry.find_macro("计时") is not None
+    assert registry.find_macro("重试") is not None
+    assert registry.find_macro("日志") is not None
+    assert registry.find_macro("缓存") is not None
+    assert registry.find_macro("延迟") is not None
+
+
+def test_builtin_macro_user_override():
+    """测试用户定义的宏可以覆盖内置宏"""
+    code = """
+定义宏 除非(条件, 代码块)
+    返回 引述
+        如果 $条件
+            $代码块
+
+设 结果 = 假
+!除非(真)
+    结果 = 真
+"""
+    result, interpreter = run_code(code)
+    # 用户定义的除非宏：条件为真时执行（与内置相反）
+    assert interpreter.global_env.get("结果") == True

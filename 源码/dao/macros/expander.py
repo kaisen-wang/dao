@@ -41,6 +41,7 @@ from ..ast_nodes import (
     Statement,
     StringLiteral,
     UnquoteExpr,
+    VariableDecl,
 )
 from ..tokens import TokenType
 from .hygiene import HygieneProcessor
@@ -53,11 +54,17 @@ logger = logging.getLogger('dao.macros')
 class MacroExpander:
     """宏展开器核心类"""
 
+    # 错误恢复策略
+    STRICT = "strict"      # 严格模式：出错即停止
+    PERMISSIVE = "permissive"  # 宽松模式：跳过出错的宏，继续展开
+
     def __init__(self):
         self.registry = MacroRegistry()
         self.hygiene_processor = HygieneProcessor()
         self.max_recursion = 100  # 防止无限递归的最大深度
         self.trace_expansion = False  # 是否跟踪展开过程
+        self.error_mode = self.STRICT  # 错误恢复策略
+        self.expansion_errors = []  # 展开过程中的错误列表
 
     def expand(
         self, node: Union[Expression, Statement, List], recursion_depth: int = 0
@@ -102,45 +109,78 @@ class MacroExpander:
 
     def _expand_macro_call(self, call: MacroCall, recursion_depth: int):
         """处理宏调用"""
-        # 查找宏定义
-        macro_info = self.registry.find_macro(call.name)
-        if not macro_info:
-            return call
+        try:
+            # 查找宏定义
+            macro_info = self.registry.find_macro(call.name)
+            if not macro_info:
+                return call
 
-        # 模式匹配宏分支
-        if macro_info.is_pattern_macro:
-            return self._expand_pattern_macro(call, macro_info, recursion_depth)
+            # 模式匹配宏分支
+            if macro_info.is_pattern_macro:
+                return self._expand_pattern_macro(call, macro_info, recursion_depth)
 
-        logger.debug("展开宏调用: !%s%s (深度=%d)", call.name, call.arguments, recursion_depth)
+            logger.debug("展开宏调用: !%s%s (深度=%d)", call.name, call.arguments, recursion_depth)
+            self._log_trace("开始展开", call.name, f"深度={recursion_depth}")
 
-        # 检测递归宏调用：如果宏体中包含对自身的调用，
-        # 则只做参数替换，不递归展开，让解释器在运行时处理递归
-        if self._is_recursive_macro(macro_info, call.name):
-            logger.debug("检测到递归宏 '%s'，仅做参数替换", call.name)
+            # 检测递归宏调用：如果宏体中包含对自身的调用，
+            # 则只做参数替换，不递归展开，让解释器在运行时处理递归
+            if self._is_recursive_macro(macro_info, call.name):
+                logger.debug("检测到递归宏 '%s'，仅做参数替换", call.name)
+                self._log_trace("递归检测", call.name, "仅做参数替换")
+                expanded_body = self._apply_macro_parameters(
+                    macro_info.body, macro_info.parameters, call.arguments
+                )
+                # 卫生宏处理
+                expanded_body = self._apply_hygiene(expanded_body, macro_info.parameters)
+                return expanded_body
+
+            # 评估宏参数
+            evaluated_args = [self.expand(arg, recursion_depth) for arg in call.arguments]
+
+            # 应用参数绑定
             expanded_body = self._apply_macro_parameters(
-                macro_info.body, macro_info.parameters, call.arguments
+                macro_info.body, macro_info.parameters, evaluated_args
             )
+
             # 卫生宏处理
             expanded_body = self._apply_hygiene(expanded_body, macro_info.parameters)
-            return expanded_body
 
-        # 评估宏参数
-        evaluated_args = [self.expand(arg, recursion_depth) for arg in call.arguments]
+            # 递归展开结果中的宏调用
+            expanded = self.expand(expanded_body, recursion_depth + 1)
 
-        # 应用参数绑定
-        expanded_body = self._apply_macro_parameters(
-            macro_info.body, macro_info.parameters, evaluated_args
-        )
+            logger.debug("宏调用结果: %s", expanded)
+            self._log_trace("完成展开", call.name, f"结果类型={type(expanded).__name__}")
 
-        # 卫生宏处理
-        expanded_body = self._apply_hygiene(expanded_body, macro_info.parameters)
+            return expanded
 
-        # 递归展开结果中的宏调用
-        expanded = self.expand(expanded_body, recursion_depth + 1)
+        except Exception as e:
+            # 记录展开错误，包含位置信息
+            line = getattr(call, 'line', 0)
+            column = getattr(call, 'column', 0)
+            error_info = {
+                "macro_name": call.name,
+                "line": line,
+                "column": column,
+                "error": e,
+            }
+            self.expansion_errors.append(error_info)
 
-        logger.debug("宏调用结果: %s", expanded)
-
-        return expanded
+            if self.error_mode == self.PERMISSIVE:
+                # 宽松模式：跳过出错的宏，返回原始调用
+                logger.warning(
+                    "宏 '!%s' 展开失败（行 %d, 列 %d）: %s，跳过展开",
+                    call.name, line, column, e,
+                )
+                return call
+            else:
+                # 严格模式：重新抛出异常，附加位置信息
+                from ..errors import 宏展开错误
+                raise 宏展开错误(
+                    f"宏 '!{call.name}' 展开失败: {e}",
+                    line,
+                    column,
+                    "",
+                )
 
     def _expand_pattern_macro(self, call: MacroCall, macro_info: MacroInfo, recursion_depth: int):
         """展开模式匹配宏：将宏调用展开为等价的 MatchStmt"""
@@ -427,11 +467,65 @@ class MacroExpander:
     def set_trace(self, enabled: bool):
         """设置是否跟踪展开过程"""
         self.trace_expansion = enabled
+        if enabled:
+            self._trace_log = []
+        else:
+            self._trace_log = None
+
+    def get_trace_log(self):
+        """获取展开追踪日志"""
+        return getattr(self, '_trace_log', None)
+
+    def _log_trace(self, phase: str, macro_name: str, detail: str = ""):
+        """记录展开追踪信息"""
+        if self.trace_expansion and hasattr(self, '_trace_log'):
+            self._trace_log.append({
+                "phase": phase,
+                "macro": macro_name,
+                "detail": detail,
+            })
+            logger.debug("[宏追踪] %s: %s %s", phase, macro_name, detail)
+
+    @staticmethod
+    def ast_diff(before, after) -> list[str]:
+        """比较两个 AST 节点的差异
+
+        Args:
+            before: 展开前的 AST 节点
+            after: 展开后的 AST 节点
+
+        Returns:
+            差异描述列表
+        """
+        diffs = []
+
+        def node_summary(node) -> str:
+            if node is None:
+                return "None"
+            if isinstance(node, list):
+                return f"[{', '.join(node_summary(n) for n in node)}]"
+            type_name = type(node).__name__
+            if hasattr(node, 'name'):
+                return f"{type_name}({node.name})"
+            if hasattr(node, 'value') and isinstance(node.value, (str, int, float, bool)):
+                return f"{type_name}({node.value})"
+            return type_name
+
+        before_summary = node_summary(before)
+        after_summary = node_summary(after)
+
+        if before_summary != after_summary:
+            diffs.append(f"  展开前: {before_summary}")
+            diffs.append(f"  展开后: {after_summary}")
+        else:
+            diffs.append(f"  无变化: {before_summary}")
+
+        return diffs
 
     def register_builtin_macros(self):
         """注册内置宏"""
-        # 内置宏将在后续版本中实现
-        pass
+        from .builtins import register_builtin_macros
+        register_builtin_macros(self.registry)
 
     def __repr__(self):
         return f"MacroExpander(注册表={self.registry})"

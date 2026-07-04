@@ -18,7 +18,7 @@ from ..builtins import (
     SuperProxy,
 )
 from ..environment import Environment
-from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误
+from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误, 返回信号
 
 # 导入逻辑编程相关类型
 from ..logic.core import LogicVariable
@@ -793,7 +793,10 @@ class ExpressionEvaluator:
                 elif hasattr(stmt, "expression"):
                     evaluated = self.eval_expression(stmt.expression, macro_env)
                 else:
-                    evaluated = self.exec_statement(stmt, macro_env)
+                    try:
+                        evaluated = self.exec_statement(stmt, macro_env)
+                    except 返回信号 as ret:
+                        evaluated = ret.value
         else:
             evaluated = self.eval_expression(expanded, env)
 

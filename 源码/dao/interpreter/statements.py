@@ -210,12 +210,13 @@ class StatementExecutor:
     # 基础语句
     # ========================
 
-    def exec_variable_decl(self, stmt: VariableDecl, env: Environment) -> None:
+    def exec_variable_decl(self, stmt: VariableDecl, env: Environment) -> object:
         """执行变量/常量声明"""
         value = self.eval_expression(stmt.value, env)
         env.define(stmt.name, value, is_constant=stmt.is_constant)
         if stmt.is_exported:
             env.exports.append(stmt.name)
+        return value
 
     def exec_type_alias_decl(self, stmt: TypeAliasDecl, env: Environment) -> None:
         """执行类型别名声明：在环境中存储别名映射"""

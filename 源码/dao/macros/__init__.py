@@ -32,6 +32,7 @@
 
 from .ast_ops import ASTOperations
 from .ast_repr import ASTToData, DataToAST
+from .builtins import register_builtin_macros
 from .exhaustiveness import ExhaustivenessChecker
 from .expander import MacroExpander
 from .hygiene import HygieneProcessor
@@ -52,4 +53,5 @@ __all__ = [
     "PatternMatchEngine",
     "MatchResult",
     "ExhaustivenessChecker",
+    "register_builtin_macros",
 ]

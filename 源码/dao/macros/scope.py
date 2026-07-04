@@ -165,16 +165,74 @@ class MacroScope:
         return free
 
     def analyze_captures(self) -> List[VariableInfo]:
-        """分析可能被宏捕获的变量"""
+        """分析可能被宏捕获的变量
+
+        基于作用域链分析捕获风险：
+        - 自由变量（未在宏作用域中定义）可能被外部环境捕获
+        - 跨作用域引用的变量有更高的捕获风险
+        - 绑定变量（宏内部定义的）不会产生捕获问题
+        """
         captures = []
         free_vars = self.get_free_variables()
 
         for var in free_vars:
-            # 简单的捕获检测逻辑
-            if len(var.used_lines) > 1:
+            # 检查变量是否在多个作用域中被引用
+            scope_count = self._count_scope_references(var.name)
+            if scope_count > 1:
+                # 跨作用域引用，有捕获风险
+                captures.append(var)
+            elif not var.is_bound and var.definition_line == -1:
+                # 完全未定义的自由变量，有捕获风险
                 captures.append(var)
 
         return captures
+
+    def _count_scope_references(self, var_name: str) -> int:
+        """统计变量在多少个不同作用域中被引用
+
+        Args:
+            var_name: 变量名
+
+        Returns:
+            引用该变量的作用域数量
+        """
+        count = 0
+
+        def check_scope(scope: ScopeNode):
+            nonlocal count
+            if var_name in scope.variables and scope.variables[var_name].used_lines:
+                count += 1
+            for child in scope.children:
+                check_scope(child)
+
+        check_scope(self.root)
+        return count
+
+    def analyze_capture_risk(self) -> Dict[str, str]:
+        """分析变量捕获风险等级
+
+        Returns:
+            Dict[str, str]: 变量名到风险等级的映射
+            风险等级：
+            - "高": 跨作用域引用的自由变量，极易被捕获
+            - "中": 未定义的自由变量，可能被捕获
+            - "低": 仅在单一作用域使用的自由变量
+        """
+        risk_map = {}
+        free_vars = self.get_free_variables()
+        bound_var_names = {var.name for var in self.get_used_variables() if var.is_bound}
+
+        for var in free_vars:
+            scope_count = self._count_scope_references(var.name)
+
+            if scope_count > 1:
+                risk_map[var.name] = "高"
+            elif var.definition_line == -1 and var.name not in bound_var_names:
+                risk_map[var.name] = "中"
+            else:
+                risk_map[var.name] = "低"
+
+        return risk_map
 
     def generate_unique_name(self, base_name: str, scope: ScopeNode = None) -> str:
         """
