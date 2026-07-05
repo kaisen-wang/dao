@@ -397,3 +397,168 @@ def test_exhaustiveness_checker():
     # 空分支：有警告
     warnings = checker.check([])
     assert len(warnings) > 0
+
+
+def test_exhaustiveness_boolean():
+    """测试布尔类型的穷尽性检查"""
+    from dao.ast_nodes import BooleanLiteral, NumberLiteral, PatternBranch, QuoteBlock
+    from dao.macros.exhaustiveness import ExhaustivenessChecker
+
+    checker = ExhaustivenessChecker()
+
+    # 布尔类型穷尽：同时覆盖真和假，无警告
+    branches = [
+        PatternBranch(pattern=BooleanLiteral(value=True), body=QuoteBlock()),
+        PatternBranch(pattern=BooleanLiteral(value=False), body=QuoteBlock()),
+    ]
+    warnings = checker.check(branches)
+    assert len(warnings) == 0
+
+    # 布尔类型不穷尽：只覆盖真，有警告
+    branches = [
+        PatternBranch(pattern=BooleanLiteral(value=True), body=QuoteBlock()),
+    ]
+    warnings = checker.check(branches)
+    assert any("布尔" in w for w in warnings)
+
+    # 布尔类型不穷尽：只覆盖假，有警告
+    branches = [
+        PatternBranch(pattern=BooleanLiteral(value=False), body=QuoteBlock()),
+    ]
+    warnings = checker.check(branches)
+    assert any("布尔" in w for w in warnings)
+
+    # 布尔类型不穷尽：缺少"假"
+    branches = [
+        PatternBranch(pattern=BooleanLiteral(value=True), body=QuoteBlock()),
+        PatternBranch(pattern=NumberLiteral(value=0), body=QuoteBlock()),
+    ]
+    warnings = checker.check(branches)
+    assert any("布尔" in w and "假" in w for w in warnings)
+
+
+def test_exhaustiveness_guard():
+    """测试守卫条件对穷尽性的影响"""
+    from dao.ast_nodes import Identifier, NumberLiteral, PatternBranch, QuoteBlock
+    from dao.macros.exhaustiveness import ExhaustivenessChecker
+
+    checker = ExhaustivenessChecker()
+
+    # 有守卫条件但无兜底：有警告
+    branches = [
+        PatternBranch(
+            pattern=Identifier(name="x"),
+            guard=Identifier(name="条件"),
+            body=QuoteBlock(),
+        ),
+    ]
+    warnings = checker.check(branches)
+    assert any("守卫" in w for w in warnings)
+
+    # 有守卫条件但有通配符兜底：无警告
+    branches = [
+        PatternBranch(
+            pattern=Identifier(name="x"),
+            guard=Identifier(name="条件"),
+            body=QuoteBlock(),
+        ),
+        PatternBranch(pattern=Identifier(name="_"), body=QuoteBlock()),
+    ]
+    warnings = checker.check(branches)
+    assert len(warnings) == 0
+
+    # 多个守卫条件无兜底：有警告
+    branches = [
+        PatternBranch(
+            pattern=Identifier(name="x"),
+            guard=Identifier(name="条件1"),
+            body=QuoteBlock(),
+        ),
+        PatternBranch(
+            pattern=Identifier(name="y"),
+            guard=Identifier(name="条件2"),
+            body=QuoteBlock(),
+        ),
+    ]
+    warnings = checker.check(branches)
+    assert any("守卫" in w for w in warnings)
+
+
+def test_exhaustiveness_enum():
+    """测试枚举类型的穷尽性检查"""
+    from dao.ast_nodes import EnumVariantPattern, PatternBranch, QuoteBlock
+    from dao.macros.exhaustiveness import ExhaustivenessChecker
+
+    checker = ExhaustivenessChecker()
+
+    # 枚举变体模式：部分覆盖（由于无法确定总变体数，不会产生警告）
+    branches = [
+        PatternBranch(
+            pattern=EnumVariantPattern(enum_name="结果", variant_name="成功"),
+            body=QuoteBlock(),
+        ),
+        PatternBranch(
+            pattern=EnumVariantPattern(enum_name="结果", variant_name="失败"),
+            body=QuoteBlock(),
+        ),
+    ]
+    warnings = checker.check(branches)
+    # 枚举穷尽性检查不产生警告（无法确定总变体数）
+    # 但由于没有通配符兜底，会有通用提示
+    assert any("通配符" in w or "变量绑定" in w for w in warnings)
+
+
+def test_exhaustiveness_mixed_patterns():
+    """测试混合模式的穷尽性检查"""
+    from dao.ast_nodes import (
+        BooleanLiteral, NumberLiteral, StringLiteral,
+        Identifier, PatternBranch, QuoteBlock,
+    )
+    from dao.macros.exhaustiveness import ExhaustivenessChecker
+
+    checker = ExhaustivenessChecker()
+
+    # 混合字面量模式无兜底：有警告
+    branches = [
+        PatternBranch(pattern=NumberLiteral(value=0), body=QuoteBlock()),
+        PatternBranch(pattern=StringLiteral(value="hello"), body=QuoteBlock()),
+        PatternBranch(pattern=BooleanLiteral(value=True), body=QuoteBlock()),
+    ]
+    warnings = checker.check(branches)
+    assert len(warnings) > 0
+
+    # 混合模式有通配符兜底：无警告
+    branches = [
+        PatternBranch(pattern=NumberLiteral(value=0), body=QuoteBlock()),
+        PatternBranch(pattern=StringLiteral(value="hello"), body=QuoteBlock()),
+        PatternBranch(pattern=Identifier(name="_"), body=QuoteBlock()),
+    ]
+    warnings = checker.check(branches)
+    assert len(warnings) == 0
+
+
+def test_exhaustiveness_variable_binding_no_guard():
+    """测试变量绑定无守卫条件时视为穷尽"""
+    from dao.ast_nodes import NumberLiteral, Identifier, PatternBranch, QuoteBlock
+    from dao.macros.exhaustiveness import ExhaustivenessChecker
+
+    checker = ExhaustivenessChecker()
+
+    # 变量绑定无守卫：视为穷尽
+    branches = [
+        PatternBranch(pattern=NumberLiteral(value=0), body=QuoteBlock()),
+        PatternBranch(pattern=Identifier(name="rest"), body=QuoteBlock()),
+    ]
+    warnings = checker.check(branches)
+    assert len(warnings) == 0
+
+    # 变量绑定有守卫：不视为穷尽
+    branches = [
+        PatternBranch(
+            pattern=Identifier(name="x"),
+            guard=Identifier(name="守卫"),
+            body=QuoteBlock(),
+        ),
+    ]
+    warnings = checker.check(branches)
+    assert len(warnings) > 0

@@ -81,11 +81,87 @@ def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False,
         sys.exit(130)
 
 
+def _handle_macro_debug_command(line: str, interpreter: Interpreter):
+    """处理宏调试 REPL 命令
+
+    支持的命令：
+    - :宏列表 — 列出所有已注册的宏
+    - :宏追踪 — 开启/关闭宏展开追踪
+    - :宏追踪状态 — 查看追踪状态
+    - :宏调用栈 — 显示当前宏展开调用栈
+    - :宏帮助 — 显示宏调试帮助
+    """
+    from dao.macros.registry import MacroRegistry
+
+    cmd = line.strip()
+
+    if cmd == ':宏列表':
+        registry = MacroRegistry()
+        macros = registry.get_all_macros()
+        if not macros:
+            print("当前无已注册的宏")
+        else:
+            print(f"已注册 {len(macros)} 个宏：")
+            for m in macros:
+                macro_type = "模式匹配" if m.is_pattern_macro else "普通"
+                params = ", ".join(m.parameters)
+                print(f"  !{m.name}({params}) [{macro_type}]")
+        return True
+
+    if cmd == ':宏追踪':
+        # 切换追踪状态
+        from dao.macros.expander import MacroExpander
+        # 通过 interpreter 的内部状态控制追踪
+        if not hasattr(interpreter, '_macro_trace'):
+            interpreter._macro_trace = False
+        interpreter._macro_trace = not interpreter._macro_trace
+        state = "开启" if interpreter._macro_trace else "关闭"
+        print(f"宏展开追踪已{state}")
+        return True
+
+    if cmd == ':宏追踪状态':
+        state = "开启" if getattr(interpreter, '_macro_trace', False) else "关闭"
+        print(f"宏展开追踪状态: {state}")
+        return True
+
+    if cmd == ':宏调用栈':
+        from dao.macros.expander import MacroExpander
+        # 调用栈在展开过程中才有内容，这里显示上一次展开的调用栈
+        if hasattr(interpreter, '_last_macro_call_stack'):
+            stack = interpreter._last_macro_call_stack
+            if not stack:
+                print("宏调用栈为空（无正在进行的宏展开）")
+            else:
+                print("宏展开调用栈:")
+                for i, entry in enumerate(stack):
+                    indent = "  " * i
+                    name = entry.get("name", "?")
+                    line = entry.get("line", 0)
+                    depth = entry.get("depth", 0)
+                    print(f"{indent}[{i}] !{name} (行 {line}, 深度 {depth})")
+        else:
+            print("宏调用栈为空（尚未执行过宏展开）")
+        return True
+
+    if cmd == ':宏帮助':
+        print("宏调试命令：")
+        print("  :宏列表       — 列出所有已注册的宏")
+        print("  :宏追踪       — 开启/关闭宏展开追踪")
+        print("  :宏追踪状态   — 查看追踪状态")
+        print("  :宏调用栈     — 显示当前宏展开调用栈")
+        print("  :宏帮助       — 显示此帮助信息")
+        return True
+
+    # 不是宏调试命令
+    return False
+
+
 def run_repl():
     """启动交互式命令行（REPL）"""
     print("═" * 50)
     print("  道（Dao）编程语言 v0.1.0")
     print("  交互式命令行 - 输入代码按回车执行")
+    print("  输入 ':宏帮助' 查看宏调试命令")
     print("  输入 '退出' 或按 Ctrl+C 退出")
     print("═" * 50)
     print()
@@ -102,6 +178,11 @@ def run_repl():
                 break
 
             if not line.strip():
+                continue
+
+            # 处理宏调试命令
+            if line.strip().startswith(':宏'):
+                _handle_macro_debug_command(line, interpreter)
                 continue
 
             # 处理多行输入（以冒号结尾的行表示有后续缩进块）

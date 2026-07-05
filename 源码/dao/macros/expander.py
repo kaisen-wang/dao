@@ -65,6 +65,7 @@ class MacroExpander:
         self.trace_expansion = False  # 是否跟踪展开过程
         self.error_mode = self.STRICT  # 错误恢复策略
         self.expansion_errors = []  # 展开过程中的错误列表
+        self._call_stack = []  # 宏展开调用栈
 
     def expand(
         self, node: Union[Expression, Statement, List], recursion_depth: int = 0
@@ -109,6 +110,22 @@ class MacroExpander:
 
     def _expand_macro_call(self, call: MacroCall, recursion_depth: int):
         """处理宏调用"""
+        # 记录调用栈
+        stack_entry = {
+            "name": call.name,
+            "line": getattr(call, 'line', 0),
+            "column": getattr(call, 'column', 0),
+            "depth": recursion_depth,
+        }
+        self._call_stack.append(stack_entry)
+
+        try:
+            return self._do_expand_macro_call(call, recursion_depth)
+        finally:
+            self._call_stack.pop()
+
+    def _do_expand_macro_call(self, call: MacroCall, recursion_depth: int):
+        """宏调用的实际展开逻辑"""
         try:
             # 查找宏定义
             macro_info = self.registry.find_macro(call.name)
@@ -475,6 +492,35 @@ class MacroExpander:
     def get_trace_log(self):
         """获取展开追踪日志"""
         return getattr(self, '_trace_log', None)
+
+    def get_call_stack(self):
+        """获取当前宏展开调用栈
+
+        Returns:
+            list[dict]: 调用栈列表，每个元素包含 name, line, column, depth
+        """
+        return list(self._call_stack)
+
+    def format_call_stack(self) -> str:
+        """格式化宏展开调用栈为可读字符串
+
+        Returns:
+            str: 格式化的调用栈信息
+        """
+        if not self._call_stack:
+            return "宏调用栈为空"
+
+        lines = ["宏展开调用栈:"]
+        for i, entry in enumerate(self._call_stack):
+            indent = "  " * i
+            name = entry.get("name", "?")
+            line = entry.get("line", 0)
+            column = entry.get("column", 0)
+            depth = entry.get("depth", 0)
+            lines.append(
+                f"{indent}[{i}] !{name} (行 {line}, 列 {column}, 深度 {depth})"
+            )
+        return "\n".join(lines)
 
     def _log_trace(self, phase: str, macro_name: str, detail: str = ""):
         """记录展开追踪信息"""

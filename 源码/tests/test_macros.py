@@ -385,3 +385,257 @@ def test_builtin_macro_user_override():
     result, interpreter = run_code(code)
     # 用户定义的除非宏：条件为真时执行（与内置相反）
     assert interpreter.global_env.get("结果") == True
+
+
+# ==================== @计时 宏专项测试 ====================
+
+
+def test_builtin_macro_计时_expansion():
+    """测试内置宏 @计时 展开后的 AST 结构"""
+    from dao.macros.builtins import register_builtin_macros
+    from dao.macros.registry import MacroRegistry
+    from dao.macros.expander import MacroExpander
+    from dao.ast_nodes import (
+        Identifier, StringLiteral, NumberLiteral, BinaryOp, MacroCall,
+        VariableDecl, FunctionCall, ExpressionStmt, ReturnStmt, QuoteBlock,
+    )
+
+    registry = MacroRegistry()
+    registry.clear()
+    register_builtin_macros(registry)
+
+    expander = MacroExpander()
+    expander.registry = registry
+
+    # 构造宏调用：!计时("排序", 排序(数据))
+    call = MacroCall(
+        name="计时",
+        arguments=[
+            StringLiteral(value="排序"),
+            FunctionCall(
+                callee=Identifier(name="排序"),
+                arguments=[Identifier(name="数据")],
+            ),
+        ],
+    )
+
+    # 展开宏
+    expanded = expander._expand_macro_call(call, 0)
+
+    # 验证展开结果为 QuoteBlock
+    assert isinstance(expanded, QuoteBlock)
+    body = expanded.body
+
+    # 验证展开结构：5个语句
+    # 1. 设 _计时开始 = 时间()
+    # 2. 设 _计时结果 = 代码块
+    # 3. 设 _计时结束 = 时间()
+    # 4. 打印(标签, "耗时:", _计时结束 - _计时开始, "秒")
+    # 5. 返回 _计时结果
+    assert len(body) == 5
+    assert isinstance(body[0], VariableDecl)
+    assert body[0].name == "_计时开始"
+    assert isinstance(body[1], VariableDecl)
+    assert body[1].name == "_计时结果"
+    assert isinstance(body[2], VariableDecl)
+    assert body[2].name == "_计时结束"
+    assert isinstance(body[3], ExpressionStmt)
+    assert isinstance(body[4], ReturnStmt)
+
+
+def test_builtin_macro_计时_parameter_replacement():
+    """测试内置宏 @计时 参数替换"""
+    from dao.macros.builtins import register_builtin_macros
+    from dao.macros.registry import MacroRegistry
+    from dao.macros.expander import MacroExpander
+    from dao.ast_nodes import (
+        Identifier, StringLiteral, NumberLiteral, MacroCall, QuoteBlock,
+        VariableDecl, FunctionCall,
+    )
+
+    registry = MacroRegistry()
+    registry.clear()
+    register_builtin_macros(registry)
+
+    expander = MacroExpander()
+    expander.registry = registry
+
+    # 构造宏调用：!计时("测试标签", 42)
+    call = MacroCall(
+        name="计时",
+        arguments=[
+            StringLiteral(value="测试标签"),
+            NumberLiteral(value=42),
+        ],
+    )
+
+    expanded = expander._expand_macro_call(call, 0)
+    assert isinstance(expanded, QuoteBlock)
+
+    # 验证标签参数被替换
+    body = expanded.body
+    # 第4个语句是打印，其第一个参数应为 "测试标签"
+    print_stmt = body[3]
+    from dao.ast_nodes import ExpressionStmt
+    assert isinstance(print_stmt, ExpressionStmt)
+    call_node = print_stmt.expression
+    assert isinstance(call_node, FunctionCall)
+    # 第一个参数是标签，参数替换后直接变为 StringLiteral("测试标签")
+    # （原始宏体中 BinaryOp(">>> 进入: " + 标签) 的 标签 被替换为实参后，
+    #   如果实参是 StringLiteral，BinaryOp 可能被优化为 StringLiteral）
+    first_arg = call_node.arguments[0]
+    assert isinstance(first_arg, StringLiteral)
+    assert first_arg.value == "测试标签"
+
+
+def test_builtin_macro_计时_default_label():
+    """测试内置宏 @计时 默认标签参数"""
+    from dao.macros.builtins import register_builtin_macros
+    from dao.macros.registry import MacroRegistry
+    from dao.macros.expander import MacroExpander
+    from dao.ast_nodes import (
+        Identifier, NumberLiteral, MacroCall, QuoteBlock,
+    )
+
+    registry = MacroRegistry()
+    registry.clear()
+    register_builtin_macros(registry)
+
+    expander = MacroExpander()
+    expander.registry = registry
+
+    # 构造宏调用：!计时(42) — 只传代码块，标签使用默认值
+    call = MacroCall(
+        name="计时",
+        arguments=[
+            NumberLiteral(value=42),
+        ],
+    )
+
+    expanded = expander._expand_macro_call(call, 0)
+    # 展开应成功（即使只有一个参数，标签使用默认值 ""）
+    assert expanded is not None
+
+
+# ==================== @重试 宏专项测试 ====================
+
+
+def test_builtin_macro_重试_expansion():
+    """测试内置宏 @重试 展开后的 AST 结构"""
+    from dao.macros.builtins import register_builtin_macros
+    from dao.macros.registry import MacroRegistry
+    from dao.macros.expander import MacroExpander
+    from dao.ast_nodes import (
+        Identifier, NumberLiteral, MacroCall, QuoteBlock,
+        VariableDecl, WhileStmt, TryStmt, ReturnStmt, FunctionCall,
+    )
+
+    registry = MacroRegistry()
+    registry.clear()
+    register_builtin_macros(registry)
+
+    expander = MacroExpander()
+    expander.registry = registry
+
+    # 构造宏调用：!重试(3, 连接服务器())
+    call = MacroCall(
+        name="重试",
+        arguments=[
+            NumberLiteral(value=3),
+            FunctionCall(
+                callee=Identifier(name="连接服务器"),
+            ),
+        ],
+    )
+
+    # 展开宏
+    expanded = expander._expand_macro_call(call, 0)
+
+    # 验证展开结果为 QuoteBlock
+    assert isinstance(expanded, QuoteBlock)
+    body = expanded.body
+
+    # 验证展开结构：4个语句
+    # 1. 设 _重试次数 = 0
+    # 2. 设 _重试结果 = 空
+    # 3. 当 _重试次数 < 次数 ... (WhileStmt with TryStmt)
+    # 4. 返回 _重试结果
+    assert len(body) == 4
+    assert isinstance(body[0], VariableDecl)
+    assert body[0].name == "_重试次数"
+    assert isinstance(body[1], VariableDecl)
+    assert body[1].name == "_重试结果"
+    assert isinstance(body[2], WhileStmt)
+    assert isinstance(body[3], ReturnStmt)
+
+
+def test_builtin_macro_重试_parameter_replacement():
+    """测试内置宏 @重试 参数替换"""
+    from dao.macros.builtins import register_builtin_macros
+    from dao.macros.registry import MacroRegistry
+    from dao.macros.expander import MacroExpander
+    from dao.ast_nodes import (
+        Identifier, NumberLiteral, MacroCall, QuoteBlock,
+        WhileStmt, BinaryOp,
+    )
+
+    registry = MacroRegistry()
+    registry.clear()
+    register_builtin_macros(registry)
+
+    expander = MacroExpander()
+    expander.registry = registry
+
+    # 构造宏调用：!重试(5, 代码块)
+    call = MacroCall(
+        name="重试",
+        arguments=[
+            NumberLiteral(value=5),
+            Identifier(name="代码块"),
+        ],
+    )
+
+    expanded = expander._expand_macro_call(call, 0)
+    assert isinstance(expanded, QuoteBlock)
+
+    # 验证次数参数被替换
+    body = expanded.body
+    # WhileStmt 的条件是 _重试次数 < 次数
+    # 次数参数应被替换为 NumberLiteral(5)
+    while_stmt = body[2]
+    assert isinstance(while_stmt, WhileStmt)
+    condition = while_stmt.condition
+    assert isinstance(condition, BinaryOp)
+    assert condition.operator == "<"
+    # 右侧应为 NumberLiteral(5)（替换后的次数参数）
+    assert isinstance(condition.right, NumberLiteral)
+    assert condition.right.value == 5
+
+
+def test_builtin_macro_重试_default_count():
+    """测试内置宏 @重试 默认次数参数"""
+    from dao.macros.builtins import register_builtin_macros
+    from dao.macros.registry import MacroRegistry
+    from dao.macros.expander import MacroExpander
+    from dao.ast_nodes import (
+        Identifier, MacroCall, QuoteBlock,
+    )
+
+    registry = MacroRegistry()
+    registry.clear()
+    register_builtin_macros(registry)
+
+    expander = MacroExpander()
+    expander.registry = registry
+
+    # 构造宏调用：!重试(代码块) — 只传代码块，次数使用默认值 3
+    call = MacroCall(
+        name="重试",
+        arguments=[
+            Identifier(name="代码块"),
+        ],
+    )
+
+    expanded = expander._expand_macro_call(call, 0)
+    # 展开应成功
+    assert expanded is not None

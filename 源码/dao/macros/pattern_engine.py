@@ -15,7 +15,9 @@
 """
 
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Any, Optional
 
 from ..ast_nodes import (
     BooleanLiteral,
@@ -30,6 +32,178 @@ from ..ast_nodes import (
 )
 
 logger = logging.getLogger('dao.macros')
+
+
+# ============================================================
+# 模式匹配协议接口
+# ============================================================
+
+
+class DaoEnumProtocol(ABC):
+    """道语言枚举协议接口
+
+    定义了模式匹配引擎识别枚举变体的统一协议。
+    任何实现了此协议的对象都可以参与枚举变体模式匹配。
+
+    协议层次：
+    1. DaoEnumProtocol（ABC）— 道语言标准枚举协议
+    2. DictEnumAdapter — 字典形式的枚举表示适配器
+    3. DuckTypeEnumAdapter — 鸭子类型枚举适配器
+
+    实现此协议的对象需提供：
+    - dao_class_name: 所属枚举类名
+    - dao_variant_name: 变体名称
+    - dao_inner_value: 变体内部值（可选）
+    """
+
+    @property
+    @abstractmethod
+    def dao_class_name(self) -> str:
+        """返回所属枚举类名"""
+        ...
+
+    @property
+    @abstractmethod
+    def dao_variant_name(self) -> str:
+        """返回变体名称"""
+        ...
+
+    @property
+    def dao_inner_value(self) -> Any:
+        """返回变体内部值，默认返回 None"""
+        return None
+
+    def matches_enum(self, enum_name: str, variant_name: str) -> bool:
+        """检查是否匹配指定的枚举名和变体名"""
+        return self.dao_class_name == enum_name and self.dao_variant_name == variant_name
+
+
+class DictEnumAdapter(DaoEnumProtocol):
+    """字典形式枚举适配器
+
+    将字典形式的枚举表示 {'__type__': 'enum', '类': ..., '变体': ...}
+    适配为 DaoEnumProtocol 接口。
+    """
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    @property
+    def dao_class_name(self) -> str:
+        return self._data.get('类', '')
+
+    @property
+    def dao_variant_name(self) -> str:
+        return self._data.get('变体', '')
+
+    @property
+    def dao_inner_value(self) -> Any:
+        return self._data.get('值')
+
+    @classmethod
+    def can_adapt(cls, value: Any) -> bool:
+        """检查值是否可以被此适配器适配"""
+        return isinstance(value, dict) and value.get('__type__') == 'enum'
+
+
+class DaoStandardEnumAdapter(DaoEnumProtocol):
+    """道语言标准枚举适配器
+
+    将具有 __dao_class__ / __variant__ 协议属性的对象
+    适配为 DaoEnumProtocol 接口。
+    """
+
+    def __init__(self, obj: Any):
+        self._obj = obj
+
+    @property
+    def dao_class_name(self) -> str:
+        return getattr(self._obj, '__dao_class__', '')
+
+    @property
+    def dao_variant_name(self) -> str:
+        return getattr(self._obj, '__variant__', '')
+
+    @property
+    def dao_inner_value(self) -> Any:
+        return _extract_object_value(self._obj)
+
+
+class DuckTypeEnumAdapter(DaoEnumProtocol):
+    """鸭子类型枚举适配器
+
+    通过对象的类名进行匹配，将任意对象适配为 DaoEnumProtocol 接口。
+    """
+
+    def __init__(self, obj: Any):
+        self._obj = obj
+        self._class_name = type(obj).__name__
+
+    @property
+    def dao_class_name(self) -> str:
+        return self._class_name
+
+    @property
+    def dao_variant_name(self) -> str:
+        return self._class_name
+
+    @property
+    def dao_inner_value(self) -> Any:
+        return _extract_object_value(self._obj)
+
+    @classmethod
+    def can_adapt(cls, value: Any) -> bool:
+        """检查值是否可以被此适配器适配（任何非字典、非DaoEnumProtocol对象）"""
+        return not isinstance(value, dict) and not isinstance(value, DaoEnumProtocol)
+
+
+def adapt_to_enum_protocol(value: Any) -> Optional[DaoEnumProtocol]:
+    """将任意值适配为 DaoEnumProtocol 接口
+
+    按协议层次依次尝试：
+    1. 如果值本身就是 DaoEnumProtocol 实例，直接返回
+    2. 如果值具有 __dao_class__ / __variant__ 属性，使用 DaoStandardEnumAdapter
+    3. 尝试 DictEnumAdapter 适配
+    4. 尝试 DuckTypeEnumAdapter 适配
+
+    Args:
+        value: 要适配的值
+
+    Returns:
+        DaoEnumProtocol 实例，或 None（无法适配）
+    """
+    # 层次1: 已经是 DaoEnumProtocol 实例
+    if isinstance(value, DaoEnumProtocol):
+        return value
+
+    # 层次2: 道语言标准枚举协议 (__dao_class__ / __variant__)
+    if hasattr(value, '__dao_class__'):
+        return DaoStandardEnumAdapter(value)
+
+    # 层次3: 字典形式枚举
+    if DictEnumAdapter.can_adapt(value):
+        return DictEnumAdapter(value)
+
+    # 层次4: 鸭子类型
+    if DuckTypeEnumAdapter.can_adapt(value):
+        return DuckTypeEnumAdapter(value)
+
+    return None
+
+
+def _extract_object_value(value: Any) -> Any:
+    """从对象中提取内部值，使用多种策略"""
+    # 策略1: _value 属性
+    if hasattr(value, '_value'):
+        return value._value
+    # 策略2: 值 属性
+    if hasattr(value, '值'):
+        return value.值
+    # 策略3: 第一个非特殊属性
+    for attr_name in dir(value):
+        if not attr_name.startswith('_') and attr_name not in ('__dao_class__', '__variant__'):
+            return getattr(value, attr_name)
+    return value
 
 
 @dataclass
@@ -197,63 +371,26 @@ class PatternMatchEngine:
     def _match_enum_variant(self, pattern: EnumVariantPattern, value) -> MatchResult:
         """匹配枚举变体模式
 
-        使用协议接口进行匹配，解耦与 OOP 内部实现的依赖：
-        1. 优先使用 __dao_class__ / __variant__ 协议属性
-        2. 其次尝试字典形式的 {'__type__': 'enum', '类': ..., '变体': ...}
-        3. 最后尝试鸭子类型检查（具有匹配的类名属性）
+        使用统一的 DaoEnumProtocol 协议接口进行匹配，
+        通过 adapt_to_enum_protocol() 将任意值适配为协议对象。
         """
-        # 协议1: 道语言标准枚举协议 (__dao_class__ / __variant__)
-        if hasattr(value, '__dao_class__'):
-            if value.__dao_class__ != pattern.enum_name:
-                return MatchResult(matched=False, bindings={})
-            if hasattr(value, '__variant__') and value.__variant__ != pattern.variant_name:
-                return MatchResult(matched=False, bindings={})
-            return self._extract_enum_binding(pattern, value)
+        adapted = adapt_to_enum_protocol(value)
+        if adapted is None:
+            return MatchResult(matched=False, bindings={})
 
-        # 协议2: 字典形式的枚举表示
-        if isinstance(value, dict):
-            if value.get('__type__') == 'enum':
-                if value.get('类') != pattern.enum_name:
-                    return MatchResult(matched=False, bindings={})
-                if value.get('变体') != pattern.variant_name:
-                    return MatchResult(matched=False, bindings={})
-                bindings = {}
-                if pattern.binding:
-                    inner_value = value.get('值')
-                    if inner_value is not None:
-                        bindings[pattern.binding] = inner_value
-                return MatchResult(matched=True, bindings=bindings)
+        if not adapted.matches_enum(pattern.enum_name, pattern.variant_name):
+            return MatchResult(matched=False, bindings={})
 
-        # 协议3: 鸭子类型检查 - 对象有匹配的类名属性
-        class_name = type(value).__name__
-        if class_name == pattern.enum_name or class_name == pattern.variant_name:
-            bindings = {}
-            if pattern.binding:
-                bindings[pattern.binding] = self._get_object_value(value)
-            return MatchResult(matched=True, bindings=bindings)
-
-        return MatchResult(matched=False, bindings={})
-
-    def _extract_enum_binding(self, pattern: EnumVariantPattern, value) -> MatchResult:
-        """从枚举实例中提取绑定变量"""
         bindings = {}
         if pattern.binding:
-            bindings[pattern.binding] = self._get_object_value(value)
-        return MatchResult(matched=True, bindings=bindings)
+            inner_value = adapted.dao_inner_value
+            if inner_value is not None:
+                bindings[pattern.binding] = inner_value
+            else:
+                # 回退：从原始值提取
+                bindings[pattern.binding] = _extract_object_value(value)
 
-    def _get_object_value(self, value):
-        """从对象中提取内部值，使用多种策略"""
-        # 策略1: _value 属性
-        if hasattr(value, '_value'):
-            return value._value
-        # 策略2: 值 属性
-        if hasattr(value, '值'):
-            return value.值
-        # 策略3: 第一个非特殊属性
-        for attr_name in dir(value):
-            if not attr_name.startswith('_') and attr_name not in ('__dao_class__', '__variant__'):
-                return getattr(value, attr_name)
-        return value
+        return MatchResult(matched=True, bindings=bindings)
 
     def _extract_literal_value(self, pattern):
         """从字面量模式节点中提取值"""
