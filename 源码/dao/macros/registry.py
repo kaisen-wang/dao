@@ -45,16 +45,7 @@ class MacroInfo:
 class MacroRegistry:
     """宏注册表管理类"""
 
-    _instance = None
-
-    def __new__(cls):
-        """单例模式：确保只创建一个实例"""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
-        return cls._instance
-
-    def _initialize(self):
+    def __init__(self):
         """初始化注册表"""
         self._macros: Dict[str, List[MacroInfo]] = {}  # 宏名 → 定义栈
         self._scope_stack: List[Set[str]] = [set()]  # 作用域栈，每层记录该层定义的宏名

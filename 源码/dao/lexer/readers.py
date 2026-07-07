@@ -151,8 +151,8 @@ class LexerReaders:
             else:
                 result.append(self.advance())
 
-        if self.current_char is None and not (len(result) >= 0):
-            pass
+        if self.current_char is None:
+            raise 词法错误(f"未闭合的三引号字符串，从第 {start_line} 行开始")
 
         return self._make_token(TokenType.文本, "".join(result), start_line, start_col)
 

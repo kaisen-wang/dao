@@ -49,7 +49,7 @@ class VirtualMachine:
             if name in frame.locals:
                 frame.push(frame.locals[name])
             else:
-                frame.push(None)
+                raise 运行时错误(f"未定义的变量 '{name}'")
         elif op == OpCode.STORE_LOCAL:
             name = frame.code.local_names[operand]
             frame.locals[name] = frame.pop()
@@ -60,7 +60,7 @@ class VirtualMachine:
             elif name in self.globals:
                 frame.push(self.globals[name])
             else:
-                frame.push(None)
+                raise 运行时错误(f"未定义的变量 '{name}'")
         elif op == OpCode.STORE_NAME:
             name = frame.code.constants[operand]
             self.globals[name] = frame.pop()

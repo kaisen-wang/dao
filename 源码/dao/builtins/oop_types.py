@@ -24,6 +24,28 @@ class DaoError(道错误):
         return f"{error_type_name}: {self.message}"
 
 
+class ErrorInstanceWrapper:
+    """错误实例包装器，让 DaoError 实例能够像 DaoInstance 一样工作"""
+
+    def __init__(self, error_obj, klass=None):
+        self.error = error_obj
+        self.klass = klass
+        self.fields = {}
+
+    def get_field(self, name):
+        """获取字段，返回 (value, found) 元组"""
+        if name in self.fields:
+            return self.fields[name], True
+        if hasattr(self.error, name):
+            return getattr(self.error, name), True
+        return None, False
+
+    def set_field(self, name, value):
+        """设置字段"""
+        setattr(self.error, name, value)
+        self.fields[name] = value
+
+
 class DaoTrait:
     """道语言特征 (trait)"""
 
@@ -100,6 +122,13 @@ class DaoClass(DaoCallable):
         return f"<类型 {self.name}>"
 
 
+class _Sentinel:
+    """哨兵值，用于区分 None 值和字段不存在"""
+    pass
+
+_MISSING = _Sentinel()
+
+
 class DaoInstance:
     """道语言对象实例"""
 
@@ -110,13 +139,13 @@ class DaoInstance:
         self.protected_fields: set[str] = set()
 
     def get_field(self, name: str):
-        """获取实例字段或绑定方法"""
+        """获取实例字段或绑定方法，返回 (value, found) 元组"""
         if name in self.fields:
-            return self.fields[name]
+            return self.fields[name], True
         method = self.klass.find_method(name)
         if method is not None:
-            return BoundMethod(self, method)
-        return None
+            return BoundMethod(self, method), True
+        return None, False
 
     def set_field(self, name: str, value: object):
         """设置实例字段"""
@@ -209,7 +238,10 @@ class DaoGenerator:
                             raise 类型错误(f"类型 '{type(iterable).__name__}' 不可遍历")
                         for item in iterable:
                             try:
-                                env.values[stmt.variable] = item
+                                if env.has(stmt.variable):
+                                    env.set(stmt.variable, item)
+                                else:
+                                    env.define(stmt.variable, item)
                                 for s in stmt.body:
                                     yield from exec_block_with_yield([s], env)
                             except 跳出信号:
@@ -229,7 +261,10 @@ class DaoGenerator:
                         current = start
                         while current <= end:
                             try:
-                                env.values[stmt.variable] = current
+                                if env.has(stmt.variable):
+                                    env.set(stmt.variable, current)
+                                else:
+                                    env.define(stmt.variable, current)
                                 for s in stmt.body:
                                     yield from exec_block_with_yield([s], env)
                                 current += step

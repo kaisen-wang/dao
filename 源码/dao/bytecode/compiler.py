@@ -50,6 +50,7 @@ class BytecodeCompiler:
     def __init__(self):
         self._constant_cache: dict = {}
         self._scope_stack: list[CompileScope] = [CompileScope()]
+        self._loop_stack: list[dict] = []  # 循环栈，存储 break/continue 跳转目标
 
     def compile(self, program: Program) -> CodeObject:
         code = CodeObject(name="<module>")
@@ -84,6 +85,19 @@ class BytecodeCompiler:
             code.emit(OpCode.POP_TOP, line=stmt.line)
         elif isinstance(stmt, Assignment):
             self._compile_assignment(stmt, code)
+        elif isinstance(stmt, BreakStmt):
+            if not self._loop_stack:
+                return  # 不在循环中，忽略
+            # break 跳转到循环出口，但出口偏移量在编译循环体时还不知道
+            # 先发出 JUMP 指令，稍后回填
+            break_jump = self._emit_jump(OpCode.JUMP, code, stmt.line)
+            self._loop_stack[-1]["breaks"].append(break_jump)
+        elif isinstance(stmt, ContinueStmt):
+            if not self._loop_stack:
+                return  # 不在循环中，忽略
+            # continue 跳转回循环起始
+            loop_start = self._loop_stack[-1]["start"]
+            code.emit(OpCode.LOOP, loop_start, line=stmt.line)
 
     def _compile_variable_decl(self, stmt: VariableDecl, code: CodeObject):
         self._compile_expression(stmt.value, code)
@@ -137,10 +151,17 @@ class BytecodeCompiler:
         loop_start = len(code.instructions)
         self._compile_expression(stmt.condition, code)
         exit_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, stmt.line)
+        # 记录循环信息用于 break/continue
+        loop_info = {"start": loop_start, "exit_jump": exit_jump, "breaks": []}
+        self._loop_stack.append(loop_info)
         for s in stmt.body:
             self._compile_statement(s, code)
+        self._loop_stack.pop()
         code.emit(OpCode.LOOP, loop_start, line=stmt.line)
         self._patch_jump(exit_jump, code)
+        # 回填 break 跳转
+        for break_jump in loop_info["breaks"]:
+            self._patch_jump(break_jump, code)
 
     def _compile_for_in_stmt(self, stmt: ForInStmt, code: CodeObject):
         self._compile_expression(stmt.iterable, code)
@@ -152,10 +173,17 @@ class BytecodeCompiler:
         loop_start = len(code.instructions)
         code.emit(OpCode.FOR_ITER, var_idx, line=stmt.line)
         exit_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, stmt.line)
+        # 记录循环信息用于 break/continue
+        loop_info = {"start": loop_start, "exit_jump": exit_jump, "breaks": []}
+        self._loop_stack.append(loop_info)
         for s in stmt.body:
             self._compile_statement(s, code)
+        self._loop_stack.pop()
         code.emit(OpCode.LOOP, loop_start, line=stmt.line)
         self._patch_jump(exit_jump, code)
+        # 回填 break 跳转
+        for break_jump in loop_info["breaks"]:
+            self._patch_jump(break_jump, code)
 
     def _compile_for_range_stmt(self, stmt: ForRangeStmt, code: CodeObject):
         self._compile_expression(stmt.start, code)
@@ -172,14 +200,21 @@ class BytecodeCompiler:
         self._compile_expression(stmt.end, code)
         code.emit(OpCode.COMPARE_LT, line=stmt.line)
         exit_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, stmt.line)
+        # 记录循环信息用于 break/continue
+        loop_info = {"start": loop_start, "exit_jump": exit_jump, "breaks": []}
+        self._loop_stack.append(loop_info)
         for s in stmt.body:
             self._compile_statement(s, code)
+        self._loop_stack.pop()
         code.emit(OpCode.LOAD_LOCAL, var_idx, line=stmt.line)
         code.emit(OpCode.LOAD_CONST, self._add_constant(1, code), line=stmt.line)
         code.emit(OpCode.BINARY_ADD, line=stmt.line)
         code.emit(OpCode.STORE_LOCAL, var_idx, line=stmt.line)
         code.emit(OpCode.LOOP, loop_start, line=stmt.line)
         self._patch_jump(exit_jump, code)
+        # 回填 break 跳转
+        for break_jump in loop_info["breaks"]:
+            self._patch_jump(break_jump, code)
 
     def _compile_return_stmt(self, stmt: ReturnStmt, code: CodeObject):
         if stmt.value:
@@ -293,7 +328,7 @@ class BytecodeCompiler:
 
     def _add_constant(self, value, code: CodeObject) -> int:
         for i, c in enumerate(code.constants):
-            if c is value:
+            if c == value:
                 return i
         idx = len(code.constants)
         code.constants.append(value)

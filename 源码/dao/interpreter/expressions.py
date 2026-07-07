@@ -21,7 +21,7 @@ from ..environment import Environment
 from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误, 返回信号
 
 # 导入逻辑编程相关类型
-from ..logic.core import LogicVariable
+from ..logic.core import LogicVariable as RuntimeLogicVariable
 
 
 class ExpressionEvaluator:
@@ -30,16 +30,12 @@ class ExpressionEvaluator:
     def eval_expression(self, expr: Expression, env: Environment) -> object:
         """分派并求值一个表达式"""
         # 先使用 isinstance 检查避免 match 语句作用域问题
-        if type(expr).__name__ == "LogicVariable":
-            from ..logic.core import LogicVariable
-
-            return LogicVariable(expr.name)
+        if isinstance(expr, LogicVariable):
+            return RuntimeLogicVariable(expr.name)
 
         if isinstance(expr, Identifier):
             if expr.name.startswith("?"):
-                from ..logic.core import LogicVariable
-
-                return LogicVariable(expr.name)
+                return RuntimeLogicVariable(expr.name)
             return env.get(expr.name)
 
         # 处理 ExpressionStmt 类型
@@ -250,8 +246,8 @@ class ExpressionEvaluator:
             if getter and getter.is_getter:
                 return self._call_method(obj, getter, [], {}, expr)
 
-            result = obj.get_field(expr.member)
-            if result is not None:
+            result, found = obj.get_field(expr.member)
+            if found:
                 return result
             raise 名称错误(
                 f"类型 '{obj.klass.name}' 的实例没有属性 '{expr.member}'",
@@ -289,25 +285,12 @@ class ExpressionEvaluator:
                     return obj.message  # 直接访问 message 属性
 
             # 检查错误类型是否有该属性的 getter 方法
-            from ..builtins.oop_types import DaoClass
+            from ..builtins.oop_types import DaoClass, ErrorInstanceWrapper
 
             if hasattr(obj, "类型") and isinstance(obj.类型, DaoClass):
                 getter_name = f"获取{expr.member}"
                 getter = obj.类型.find_method(getter_name)
                 if getter and getter.is_getter:
-                    # 我们需要创建一个临时的 DaoInstance 来调用方法
-                    class ErrorInstanceWrapper:
-                        def __init__(self, error_obj, klass):
-                            self.error = error_obj
-                            self.klass = klass
-                            self.fields = {}
-
-                        def get_field(self, name):
-                            return getattr(self.error, name, None)
-
-                        def set_field(self, name, value):
-                            setattr(self.error, name, value)
-
                     temp_instance = ErrorInstanceWrapper(obj, obj.类型)
                     return self._call_method(temp_instance, getter, [], {}, expr)
 
@@ -517,7 +500,7 @@ class ExpressionEvaluator:
             idx = int(index)
             if idx < -len(obj) or idx >= len(obj):
                 raise 索引错误(
-                    f"列表索引 {idx} 超出范围 (长度 {len(obj, 0, 0, self.source)})",
+                    f"列表索引 {idx} 超出范围 (长度 {len(obj)})",
                     expr.line,
                     expr.column,
                 )
@@ -532,14 +515,14 @@ class ExpressionEvaluator:
             idx = int(index)
             if idx < -len(obj) or idx >= len(obj):
                 raise 索引错误(
-                    f"字符串索引 {idx} 超出范围 (长度 {len(obj, 0, 0, self.source)})",
+                    f"字符串索引 {idx} 超出范围 (长度 {len(obj)})",
                     expr.line,
                     expr.column,
                 )
             return obj[idx]
         else:
             raise 类型错误(
-                f"类型 '{type(obj, 0, 0, self.source).__name__}' 不支持索引访问",
+                f"类型 '{type(obj).__name__}' 不支持索引访问",
                 expr.line,
                 expr.column,
             )
@@ -730,12 +713,11 @@ class ExpressionEvaluator:
         from ..ast_nodes import QuoteBlock
         from ..macros import MacroExpander
         from ..macros.ast_repr import DataToAST
-        from ..macros.registry import MacroRegistry
 
         logger = logging.getLogger('dao.macros')
 
         # 检查是否有该名称的宏定义
-        registry = MacroRegistry()
+        registry = self.macro_registry
         macro_info = registry.find_macro(expr.name)
         if not macro_info:
             raise 运行时错误(
@@ -759,7 +741,7 @@ class ExpressionEvaluator:
             body_ast = macro_info.body
 
         # 应用宏展开
-        expander = MacroExpander()
+        expander = MacroExpander(registry=self.macro_registry)
         expanded_body = expander._apply_macro_parameters(
             body_ast, macro_info.parameters, evaluated_args
         )
@@ -897,7 +879,7 @@ class ExpressionEvaluator:
                 replacements[name] = self._value_to_ast(value)
 
         # 执行参数替换
-        expander = MacroExpander()
+        expander = MacroExpander(registry=self.macro_registry)
         result = expander._replace_in_node(body, replacements)
 
         return result if isinstance(result, list) else [result]
@@ -939,10 +921,8 @@ class ExpressionEvaluator:
         """执行语句块，返回最后一个表达式的值"""
         result = None
         for stmt in stmts:
-            if hasattr(stmt, "expression"):
+            if isinstance(stmt, ExpressionStmt):
                 result = self.eval_expression(stmt.expression, env)
-            elif hasattr(stmt, "value") and isinstance(stmt, ReturnStmt):
-                result = self.eval_expression(stmt.value, env)
             else:
                 result = self.exec_statement(stmt, env)
         return result
@@ -1009,9 +989,7 @@ class ExpressionEvaluator:
         """求值管道表达式：甲 |> 乙"""
         # 检查右侧是否是宏（通过标识符查找）
         if isinstance(expr.right, Identifier):
-            from ..macros.registry import MacroRegistry
-
-            macro_info = MacroRegistry().find_macro(expr.right.name)
+            macro_info = self.macro_registry.find_macro(expr.right.name)
             if macro_info:
                 # 对于宏，我们需要保留左侧的 AST 节点原样传递，不进行求值
                 from ..ast_nodes import MacroCall
@@ -1048,9 +1026,7 @@ class ExpressionEvaluator:
 
         # 检查右侧是否是宏（通过标识符查找）
         if isinstance(expr.right, Identifier):
-            from ..macros.registry import MacroRegistry
-
-            macro_info = MacroRegistry().find_macro(expr.right.name)
+            macro_info = self.macro_registry.find_macro(expr.right.name)
             if macro_info:
                 # 创建宏调用表达式
                 from ..ast_nodes import MacroCall
@@ -1205,9 +1181,7 @@ class ExpressionEvaluator:
 
     def eval_logic_variable(self, expr: LogicVariable, env: Environment) -> object:
         """求值逻辑变量：?变量名"""
-        from ..logic.core import LogicVariable
-
-        return LogicVariable(expr.name)
+        return RuntimeLogicVariable(expr.name)
 
     def eval_logic_predicate(self, expr: LogicPredicate, env: Environment) -> object:
         """求值逻辑谓词：谓词(?x, ?y)"""
@@ -1251,9 +1225,8 @@ class ExpressionEvaluator:
     def eval_logic_constraint(self, expr: LogicConstraint, env: Environment) -> object:
         """求值约束表达式：?x 在范围 1..10"""
         from ..logic.constraints.core import NumericRangeConstraint
-        from ..logic.core import LogicVariable
 
-        var = LogicVariable(expr.variable) if expr.variable else None
+        var = RuntimeLogicVariable(expr.variable) if expr.variable else None
         low, high = expr.bounds
 
         if var and expr.operator == "在范围":

@@ -52,6 +52,9 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         self.module_search_paths: list[str] = []
         # 包管理器
         self.package_manager: PackageManager = PackageManager(project_dir)
+        # 宏注册表（每个 Interpreter 实例独立）
+        from ..macros.registry import MacroRegistry
+        self.macro_registry = MacroRegistry()
 
         for name, func in get_builtins().items():
             self.global_env.define(name, func)
@@ -83,13 +86,11 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
                 env = self.global_env
 
         # 清理宏注册表，确保每次执行新程序时注册表是干净的
-        from ..macros.registry import MacroRegistry
-        registry = MacroRegistry()
-        registry.clear()
+        self.macro_registry.clear()
 
         # 注册内置宏
         from ..macros.builtins import register_builtin_macros
-        register_builtin_macros(registry)
+        register_builtin_macros(self.macro_registry)
 
         result = None
         try:
@@ -173,29 +174,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
             error.类型 = klass
             # 处理其他参数和初始化方法
             if "初始化" in klass.methods:
-                # 直接在 DaoError 实例上调用初始化方法
-                # 我们需要创建一个包装器，让 DaoError 实例能够像 DaoInstance 一样工作
-                # 为 DaoError 添加必要的属性和方法
-                class ErrorInstanceWrapper:
-                    def __init__(self, error_obj):
-                        self.error = error_obj
-                        self.klass = klass
-                        self.fields = {}  # 用于存储实例字段
-
-                    def get_field(self, name):
-                        # 先检查是否有实例字段
-                        if name in self.fields:
-                            return self.fields[name]
-                        # 再检查是否是对象的属性
-                        if hasattr(self.error, name):
-                            return getattr(self.error, name)
-                        return None
-
-                    def set_field(self, name, value):
-                        setattr(self.error, name, value)
-                        self.fields[name] = value
-
-                temp_instance = ErrorInstanceWrapper(error)
+                from ..builtins.oop_types import ErrorInstanceWrapper
+                temp_instance = ErrorInstanceWrapper(error, klass)
                 self._call_method(
                     temp_instance, klass.methods["初始化"], args, kwargs, call_expr
                 )
@@ -376,13 +356,6 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
                     raise 运行时错误(
                         f"函数 '{func.name}' 缺少参数 '{param}'", line, col, self.source
                     )
-
-    def _exec_block(self, statements: list, env: Environment) -> object:
-        """执行一个代码块"""
-        result = None
-        for stmt in statements:
-            result = self.exec_statement(stmt, env)
-        return result
 
     @staticmethod
     def _in_method_context(env: Environment, klass: DaoClass) -> bool:

@@ -58,8 +58,8 @@ class MacroExpander:
     STRICT = "strict"      # 严格模式：出错即停止
     PERMISSIVE = "permissive"  # 宽松模式：跳过出错的宏，继续展开
 
-    def __init__(self):
-        self.registry = MacroRegistry()
+    def __init__(self, registry=None):
+        self.registry = registry or MacroRegistry()
         self.hygiene_processor = HygieneProcessor()
         self.max_recursion = 100  # 防止无限递归的最大深度
         self.trace_expansion = False  # 是否跟踪展开过程

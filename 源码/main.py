@@ -91,12 +91,11 @@ def _handle_macro_debug_command(line: str, interpreter: Interpreter):
     - :宏调用栈 — 显示当前宏展开调用栈
     - :宏帮助 — 显示宏调试帮助
     """
-    from dao.macros.registry import MacroRegistry
 
     cmd = line.strip()
 
     if cmd == ':宏列表':
-        registry = MacroRegistry()
+        registry = interpreter.macro_registry
         macros = registry.get_all_macros()
         if not macros:
             print("当前无已注册的宏")

@@ -296,7 +296,7 @@ class StatementExecutor:
                 obj[index] = value
             else:
                 raise 类型错误(
-                    f"无法给类型 '{type(obj, 0, 0, self.source).__name__}' 设置索引",
+                    f"无法给类型 '{type(obj).__name__}' 设置索引",
                     stmt.line,
                     stmt.column,
                 )
@@ -678,37 +678,22 @@ class StatementExecutor:
 
             implemented_traits.append(trait_obj)
 
-        # 如果是错误类，创建 DaoError 的子类
-        if is_error_class:
-            klass = DaoClass(
-                name=stmt.name,
-                parent=DaoError,
-                methods=methods,
-                static_methods=static_methods,
-                private_names=private_names,
-                protected_names=protected_names,
-                implemented_traits=implemented_traits,
-                is_abstract=stmt.is_abstract,
-                abstract_methods=abstract_methods,
-            )
-            env.define(stmt.name, klass)
-            if stmt.is_exported:
-                env.exports.append(stmt.name)
-        else:
-            klass = DaoClass(
-                name=stmt.name,
-                parent=parent,
-                methods=methods,
-                static_methods=static_methods,
-                private_names=private_names,
-                protected_names=protected_names,
-                implemented_traits=implemented_traits,
-                is_abstract=stmt.is_abstract,
-                abstract_methods=abstract_methods,
-            )
-            env.define(stmt.name, klass)
-            if stmt.is_exported:
-                env.exports.append(stmt.name)
+        # 如果是错误类，parent 使用 DaoError
+        effective_parent = DaoError if is_error_class else parent
+        klass = DaoClass(
+            name=stmt.name,
+            parent=effective_parent,
+            methods=methods,
+            static_methods=static_methods,
+            private_names=private_names,
+            protected_names=protected_names,
+            implemented_traits=implemented_traits,
+            is_abstract=stmt.is_abstract,
+            abstract_methods=abstract_methods,
+        )
+        env.define(stmt.name, klass)
+        if stmt.is_exported:
+            env.exports.append(stmt.name)
 
     # ========================
     # 模式匹配
@@ -1013,6 +998,31 @@ class StatementExecutor:
     # 解构赋值
     # ========================
 
+    def _parse_logic_args(self, arguments, env: Environment) -> list:
+        """解析逻辑谓词的参数列表为逻辑项"""
+        from ..logic.core import LogicAtom, LogicVariable
+
+        args = []
+        for arg in arguments:
+            if isinstance(arg, Identifier) and arg.name.startswith("?"):
+                args.append(LogicVariable(arg.name))
+            elif isinstance(arg, StringLiteral):
+                args.append(LogicAtom(arg.value))
+            elif isinstance(arg, NumberLiteral):
+                args.append(LogicAtom(arg.value))
+            elif isinstance(arg, BooleanLiteral):
+                args.append(LogicAtom(arg.value))
+            elif isinstance(arg, ListLiteral):
+                elements = [self.eval_expression(e, env) for e in arg.elements]
+                args.append(LogicAtom(elements))
+            elif isinstance(arg, DictLiteral):
+                pairs = {
+                    self.eval_expression(k, env): self.eval_expression(v, env)
+                    for k, v in arg.pairs
+                }
+                args.append(LogicAtom(pairs))
+        return args
+
     def exec_logic_block(self, stmt: LogicBlock, env: Environment) -> None:
         """执行逻辑块：创建知识库并添加事实和规则"""
         from ..logic.core import KnowledgeBase, LogicStruct, normalize_term
@@ -1042,80 +1052,11 @@ class StatementExecutor:
             rule_body = []
             for body_expr in rule.body:
                 if isinstance(body_expr, FunctionCall):
-                    # 解析函数调用作为逻辑事实
                     predicate = body_expr.callee.name
-                    body_args = []
-                    for arg in body_expr.arguments:
-                        if isinstance(arg, Identifier) and arg.name.startswith("?"):
-                            from ..logic.core import LogicVariable
-
-                            body_args.append(LogicVariable(arg.name))
-                        elif isinstance(arg, StringLiteral):
-                            from ..logic.core import LogicAtom
-
-                            body_args.append(LogicAtom(arg.value))
-                        elif isinstance(arg, NumberLiteral):
-                            from ..logic.core import LogicAtom
-
-                            body_args.append(LogicAtom(arg.value))
-                        elif isinstance(arg, BooleanLiteral):
-                            from ..logic.core import LogicAtom
-
-                            body_args.append(LogicAtom(arg.value))
-                        elif isinstance(arg, ListLiteral):
-                            from ..logic.core import LogicAtom
-
-                            elements = [
-                                self.eval_expression(e, env) for e in arg.elements
-                            ]
-                            body_args.append(LogicAtom(elements))
-                        elif isinstance(arg, DictLiteral):
-                            from ..logic.core import LogicAtom
-
-                            pairs = {
-                                self.eval_expression(k, env): self.eval_expression(
-                                    v, env
-                                )
-                                for k, v in arg.pairs
-                            }
-                            body_args.append(LogicAtom(pairs))
+                    body_args = self._parse_logic_args(body_expr.arguments, env)
                     rule_body.append(LogicStruct(predicate, body_args))
                 elif isinstance(body_expr, LogicFact):
-                    body_args = []
-                    for arg in body_expr.arguments:
-                        if isinstance(arg, Identifier) and arg.name.startswith("?"):
-                            from ..logic.core import LogicVariable
-
-                            body_args.append(LogicVariable(arg.name))
-                        elif isinstance(arg, StringLiteral):
-                            from ..logic.core import LogicAtom
-
-                            body_args.append(LogicAtom(arg.value))
-                        elif isinstance(arg, NumberLiteral):
-                            from ..logic.core import LogicAtom
-
-                            body_args.append(LogicAtom(arg.value))
-                        elif isinstance(arg, BooleanLiteral):
-                            from ..logic.core import LogicAtom
-
-                            body_args.append(LogicAtom(arg.value))
-                        elif isinstance(arg, ListLiteral):
-                            from ..logic.core import LogicAtom
-
-                            elements = [
-                                self.eval_expression(e, env) for e in arg.elements
-                            ]
-                            body_args.append(LogicAtom(elements))
-                        elif isinstance(arg, DictLiteral):
-                            from ..logic.core import LogicAtom
-
-                            pairs = {
-                                self.eval_expression(k, env): self.eval_expression(
-                                    v, env
-                                )
-                                for k, v in arg.pairs
-                            }
-                            body_args.append(LogicAtom(pairs))
+                    body_args = self._parse_logic_args(body_expr.arguments, env)
                     rule_body.append(LogicStruct(body_expr.predicate, body_args))
 
             kb.add_rule(rule_head, rule_body)
@@ -1296,8 +1237,6 @@ class StatementExecutor:
 
     def exec_macro_definition(self, stmt: MacroDefinition, env: Environment) -> object:
         """执行宏定义：将宏添加到当前环境"""
-        from ..macros.registry import MacroRegistry
-
-        registry = MacroRegistry()
+        registry = self.macro_registry
         registry.register_macro(stmt)
         return None
