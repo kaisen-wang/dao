@@ -37,7 +37,17 @@ from .exhaustiveness import ExhaustivenessChecker
 from .expander import MacroExpander
 from .hygiene import HygieneProcessor
 from .introspection import ASTIntrospector
-from .pattern_engine import MatchResult, PatternMatchEngine
+from .pattern_engine import (
+    DaoEnumProtocol,
+    DictEnumAdapter,
+    DuckTypeEnumAdapter,
+    MatchResult,
+    PatternMatchEngine,
+    PatternType,
+    adapt_to_enum_protocol,
+    classify_pattern,
+    describe_pattern,
+)
 from .registry import MacroRegistry
 from .scope import MacroScope
 
@@ -52,6 +62,13 @@ __all__ = [
     "ASTIntrospector",
     "PatternMatchEngine",
     "MatchResult",
+    "PatternType",
+    "DaoEnumProtocol",
+    "DictEnumAdapter",
+    "DuckTypeEnumAdapter",
+    "adapt_to_enum_protocol",
+    "classify_pattern",
+    "describe_pattern",
     "ExhaustivenessChecker",
     "register_builtin_macros",
 ]

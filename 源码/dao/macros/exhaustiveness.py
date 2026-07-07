@@ -43,6 +43,7 @@ class ExhaustivenessChecker:
             警告消息列表（空列表表示无警告）
         """
         warnings = []
+        self._boolean_exhaustive = False
 
         if not branches:
             warnings.append("模式匹配宏没有定义任何模式分支")
@@ -55,6 +56,10 @@ class ExhaustivenessChecker:
         # 检查布尔类型的穷尽性
         bool_warnings = self._check_boolean_exhaustiveness(branches)
         warnings.extend(bool_warnings)
+
+        # 如果布尔类型已穷尽，不再给出通用提示
+        if self._boolean_exhaustive:
+            return warnings
 
         # 检查枚举类型的穷尽性
         enum_warnings = self._check_enum_exhaustiveness(branches)
@@ -91,14 +96,18 @@ class ExhaustivenessChecker:
         """检查布尔类型的穷尽性
 
         如果所有分支都是布尔字面量，检查是否同时覆盖了真和假。
+        如果布尔类型已穷尽（同时覆盖真和假），返回空列表且标记为穷尽。
         """
         warnings = []
         bool_values = set()
+        non_bool_count = 0
 
         for branch in branches:
             pattern = branch.pattern
             if isinstance(pattern, BooleanLiteral):
                 bool_values.add(pattern.value)
+            else:
+                non_bool_count += 1
 
         # 如果有布尔模式但未覆盖全部
         if bool_values and len(bool_values) < 2:
@@ -111,6 +120,11 @@ class ExhaustivenessChecker:
                 warnings.append(
                     f"布尔模式未覆盖所有情况，缺少: {', '.join(missing)}"
                 )
+
+        # 如果布尔类型已穷尽（同时覆盖真和假）且没有非布尔分支，
+        # 标记为穷尽，阻止通用提示
+        if len(bool_values) == 2 and non_bool_count == 0:
+            self._boolean_exhaustive = True
 
         return warnings
 
