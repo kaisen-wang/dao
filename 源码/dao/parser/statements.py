@@ -7,7 +7,7 @@
 
 import logging
 
-from ..ast_nodes import Assignment, MacroDefinition, Statement, VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl
+from ..ast_nodes import Assignment, Identifier, MacroDefinition, Statement, VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl
 from ..tokens import TokenType
 
 logger = logging.getLogger('dao.parser')
@@ -84,7 +84,7 @@ class StatementParser(
             case TokenType.常量:
                 return self.parse_variable_decl(is_constant=True)
             case TokenType.设:
-                return self.parse_variable_decl(is_constant=False)
+                return self.parse_set_stmt()
             case TokenType.函数:
                 return self.parse_function_decl()
             case TokenType.初始化:

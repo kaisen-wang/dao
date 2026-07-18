@@ -10,10 +10,16 @@ from ..errors import 运行时错误, 类型错误
 
 
 def _json_encode(数据, 缩进=0):
+    def _default(o):
+        if hasattr(o, 'variant_name') and hasattr(o, 'enum_name'):
+            return str(o)
+        if hasattr(o, 'fields') and hasattr(o, 'klass'):
+            return {k: getattr(o, k) for k in dir(o) if not k.startswith('_') and not callable(getattr(o, k))}
+        raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
     try:
         if 缩进 and 缩进 > 0:
-            return json.dumps(数据, ensure_ascii=False, indent=缩进)
-        return json.dumps(数据, ensure_ascii=False)
+            return json.dumps(数据, ensure_ascii=False, indent=缩进, default=_default)
+        return json.dumps(数据, ensure_ascii=False, default=_default)
     except (TypeError, ValueError) as e:
         raise 类型错误(f"无法编码为JSON: {e}")
 

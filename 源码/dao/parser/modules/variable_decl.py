@@ -1,6 +1,6 @@
 """变量/常量声明解析混入"""
 
-from ...ast_nodes import DestructureAssign, DestructureTarget, Identifier, ListLiteral, VariableDecl
+from ...ast_nodes import Assignment, DestructureAssign, DestructureTarget, Identifier, ListLiteral, VariableDecl
 from ...errors import 语法错误
 from ...tokens import Token, TokenType
 
@@ -38,6 +38,24 @@ class VariableDeclParser:
             value=value,
             is_constant=is_constant,
             type_annotation=type_annotation,
+            line=token.line,
+            column=token.column,
+        )
+
+    def parse_set_stmt(self) -> Assignment:
+        """解析设语句：设 x = 值（重新赋值）"""
+        token = self.advance()  # 消费 设
+        name_token = self.expect(TokenType.标识符, "赋值需要一个变量名")
+        self.expect(TokenType.赋值, "赋值需要 '='")
+        value = self.parse_expression()
+        self.match(TokenType.换行)
+        return Assignment(
+            target=Identifier(
+                name=name_token.value,
+                line=name_token.line,
+                column=name_token.column,
+            ),
+            value=value,
             line=token.line,
             column=token.column,
         )

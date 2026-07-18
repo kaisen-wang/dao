@@ -124,8 +124,9 @@ class StatementExecutor:
             elif isinstance(stmt, TryStmt):
                 if self._has_yield(stmt.try_body):
                     return True
-                if stmt.catch_body and self._has_yield(stmt.catch_body):
-                    return True
+                for catch in stmt.catches:
+                    if self._has_yield(catch.get("catch_body", [])):
+                        return True
                 if stmt.finally_body and self._has_yield(stmt.finally_body):
                     return True
         return False
@@ -959,13 +960,8 @@ class StatementExecutor:
 
                 self.execute(ast, module_env)
 
-                # 根据导出列表过滤变量
-                if module_env.exports:
-                    exported_vars = {}
-                    for name in module_env.exports:
-                        if name in module_env.values:
-                            exported_vars[name] = module_env.values[name]
-                    module_env.values = exported_vars
+                # 不过滤环境值，保留原环境供闭包使用
+                # 导出控制由 _bind_import 通过检查导出列表实现
 
                 # 缓存模块环境
                 self.module_cache[stmt.module_path] = module_env
@@ -977,9 +973,17 @@ class StatementExecutor:
     def _bind_import(self, stmt, module_env: Environment, env: Environment) -> None:
         if stmt.is_from_import:
             for name, alias in stmt.names:
-                if name not in module_env.values:
+                # 检查名称是否在导出列表中（如果没有导出列表则所有定义名都可导入）
+                if module_env.exports and name not in module_env.exports:
                     raise 运行时错误(
                         f"模块 '{stmt.module_path}' 中没有导出 '{name}'",
+                        stmt.line,
+                        stmt.column,
+                        self.source,
+                    )
+                if name not in module_env.values:
+                    raise 运行时错误(
+                        f"模块 '{stmt.module_path}' 中没有定义 '{name}'",
                         stmt.line,
                         stmt.column,
                         self.source,

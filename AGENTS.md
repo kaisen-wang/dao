@@ -1,208 +1,72 @@
-# AGENTS.md - 道语言解释器开发指南
+# AGENTS.md — 道语言解释器
 
-此文件为参与道语言解释器开发的AI代理提供项目规范。
+中文多范式编程语言的 Python 解释器。所有开发在 `源码/` 下进行。
 
-## 开发环境
-
-- Python >= 3.10
-- 工作目录：`源码/` (所有开发工作在此目录下进行)
-
-## 命令参考
+## 命令（均在 `源码/` 下运行）
 
 ```bash
-cd 源码                    # 进入源码目录
-pip install -r requirements.txt  # 安装依赖
-python main.py             # 启动REPL
-python main.py examples/你好世界.道  # 执行.道文件
-pytest tests/ -v           # 运行所有测试
-pytest tests/test_lexer.py -v     # 运行单个测试文件
-pytest tests/test_lexer.py::TestLexerBasics::test_empty_source -v  # 单个测试
-pytest tests/ -v --cov=dao --cov-report=term-missing  # 覆盖率测试
-ruff check .               # 代码检查
-ruff fix .                 # 自动修复代码问题
+cd 源码
+pip install -r requirements.txt  # pytest, pytest-cov, ruff, prompt-toolkit
+python -m venv .venv && source .venv/bin/activate  # 需要 Python 3.10+
+python main.py                         # REPL
+python main.py examples/你好世界.道     # 文件执行
+python main.py --mode vm examples/你好世界.道  # 字节码 VM 模式
+python main.py --mode vm --jit --disasm examples/斐波那契.道  # JIT + 反汇编
+pytest tests/ -v                      # 全部测试
+pytest tests/test_lexer.py::TestLexerBasics::test_empty_source -v  # 单个
+pytest tests/ -v --cov=dao --cov-report=term-missing  # 覆盖率
+ruff check .
+ruff fix .
 ```
 
-## 代码风格
+## 架构
 
-### 命名约定
+- **三阶段流程**: `源代码 → Lexer (Token流) → Parser (AST) → Interpreter (结果)`
+- **双执行模式**: 默认 AST 树遍历；`--mode vm` 经 `BytecodeCompiler` → `VirtualMachine` (+ JIT)
+- **Parser Mixin**: `Parser` 多重继承自 `StatementParser`（组合 `dao/parser/modules/` 下 13 个子解析器） + `ExpressionParser` + `MacroParser` + `LogicProgrammingParser`
+- **Interpreter Mixin**: 继承自 `StatementExecutor` + `ExpressionEvaluator` + `ConcurrencyEvaluator`
+- **重大功能包**: `dao/logic/`（逻辑引擎），`dao/macros/`（宏系统），`dao/concurrency/`（通道/协程/原子），`dao/bytecode/` + `dao/vm/` + `dao/jit/`（VM 路线）
+- **代码块基于缩进**: 无花括号，Lexer 生成 INDENT/DEDENT 隐式 Token
 
-- 类名：英文命名，如 `Lexer`, `Parser`, `Environment`, `DaoClass`
-- 函数/方法名：英文命名，如 `tokenize()`, `parse()`, `execute()`
-- 变量名：英文，如 `self.pos`, `self.tokens`
-- 常量：全大写英文，如 `KEYWORDS`, `EOF`
-- 异常类：中文命名，如 `词法错误`, `语法错误`, `运行时错误`
+## 关键约定
 
-### 文件组织
+- **异常类用中文**: `词法错误`, `语法错误`, `运行时错误`, `类型错误`, `名称错误` 等（`dao/errors.py`）
+- **AST 节点**: `@dataclass` 不可变，含 `line`/`column` 位置信息
+- **所有用户可见错误消息必须使用中文**
+- **文件扩展名**: `.道`
+- **新增语法特性同步顺序**: `tokens.py` → `ast_nodes.py` → `lexer/` → `parser/` → `interpreter/` → `tests/`
 
-```
-dao/
-├── tokens.py            # TokenType枚举 + Token数据类
-├── ast_nodes.py         # AST节点定义
-├── environment.py       # 作用域管理
-├── errors.py           # 自定义异常类层次
-├── lexer/              # 词法分析器
-│   ├── core.py         # 主类 + 基础设施
-│   └── readers.py      # Token读取方法
-├── parser/             # 语法分析器
-│   ├── core.py         # 主类 + 基础设施
-│   ├── statements.py   # 语句解析
-│   └── expressions.py  # 表达式解析
-├── interpreter/        # 解释器
-│   ├── core.py         # 主类 + 入口
-│   ├── statements.py   # 语句执行
-│   ├── expressions.py  # 表达式求值
-│   └── concurrency.py  # 并发编程解释器（异步/协程/通道）
-├── builtins/           # 内置函数
-│   ├── callables.py    # 可调用基类
-│   ├── functions.py    # 基础内置函数
-│   ├── oop_types.py    # OOP类型实现
-│   └── hof.py          # 高阶函数
-├── logic/              # 逻辑编程模块
-│   ├── core.py         # 核心逻辑引擎
-│   ├── solver.py       # 求解器
-│   ├── unification.py  # 统一算法
-│   ├── backtracking.py # 回溯搜索
-│   ├── exceptions.py   # 逻辑异常
-│   └── constraints/    # 约束求解
-│       └── core.py     # 约束求解核心
-├── macros/             # 宏系统模块
-│   ├── expander.py     # 宏展开器
-│   ├── hygiene.py      # 卫生宏处理
-│   ├── ast_repr.py     # AST到数据结构转换
-│   ├── ast_ops.py      # AST操作工具
-│   ├── introspection.py # AST内省接口
-│   ├── scope.py        # 作用域管理
-│   ├── registry.py     # 宏注册表
-│   ├── pattern_engine.py # 模式匹配引擎
-│   └── exhaustiveness.py # 穷尽性检查器
-└── concurrency/        # 并发编程模块（开发中）
-    └── __init__.py
+## 测试规范
 
-### Parser模块化结构
-```
-dao/parser/
-├── statements.py          # 主入口 (89行) - 语句解析器组合类
-├── modules/              # 语句解析模块目录
-│   ├── __init__.py      # 模块初始化
-│   ├── variable_decl.py  # 变量/常量声明
-│   ├── function_decl.py  # 函数/方法/运算符/属性
-│   ├── control_flow.py   # if/while/for/break/continue
-│   ├── exception_handling.py # try/catch/throw/assert
-│   ├── oop_decl.py     # 类/枚举/抽象/特征
-│   ├── pattern_matching.py  # 模式匹配
-│   ├── module_system.py # 导入/导出
-│   ├── expressions.py   # 表达式/赋值
-│   ├── logic_programming.py # 逻辑编程
-│   ├── macros.py        # 宏解析
-│   ├── currency_parser.py # 并发解析器
-│   └── currency.py      # 并发语句解析
-```
-
-设计模式：使用Python混入类(Mixin)，每个模块定义解析方法，`StatementParser`通过多重继承组合所有功能。
-```
-
-### 导入风格
+- 测试文件均使用 `sys.path.insert(0, ...)` 导入源（非项目安装）：
 
 ```python
-# 标准库导入
-import sys
-from typing import Any
-# dao包内相对导入
-from ..tokens import Token, TokenType, KEYWORDS
-from ..errors import 词法错误
-from .readers import LexerReaders
-```
-
-### 类型注解
-
-使用Python 3.10+联合类型语法：`Type1 | Type2`，例如：`parent: "Environment | None" = None`
-
-### AST节点定义
-
-所有AST节点使用`@dataclass`，包含位置信息：
-
-```python
-@dataclass
-class Expression(ASTNode):
-    """表达式基类"""
-    line: int = 0
-    column: int = 0
-
-@dataclass
-class BinaryOp(Expression):
-    """二元运算"""
-    left: Expression
-    operator: str
-    right: Expression
-```
-
-### 错误处理
-
-使用自定义异常层次，必须包含位置信息：
-
-```python
-class 道错误(Exception):
-    def __init__(self, message: str, line: int = 0, column: int = 0):
-        self.message = message
-        self.line = line
-        self.column = column
-
-def raise_error(self, message: str):
-    raise 语法错误(message, self.line, self.column)
-```
-
-### 测试规范
-
-- 使用pytest
-- 测试类以`Test`开头，方法以`test_`开头
-- 测试文件使用`sys.path.insert(0, ...)`来导入源码：
-```python
-import sys
-import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from dao.lexer import Lexer
-from dao.tokens import TokenType
 ```
-- 使用辅助函数简化测试：
+
+- 每个新特性至少 3 个测试用例
+- 通用辅助函数模式：
+
 ```python
+# 解析器测试: 源代码 → AST
 def parse(source: str) -> Program:
     tokens = Lexer(source).tokenize()
     return Parser(tokens).parse()
 
-class TestParserVariables:
-    def test_variable_decl(self):
-        ast = parse("定义 x = 42\n")
-        assert len(ast.statements) == 1
+# 解释器测试: 源代码 → 执行结果
+def run(source: str) -> object:
+    tokens = Lexer(source).tokenize()
+    ast = Parser(tokens).parse()
+    return Interpreter().execute(ast)
+
+def capture_output(source: str) -> str:
+    from io import StringIO
+    from contextlib import redirect_stdout
+    f = StringIO()
+    with redirect_stdout(f):
+        run(source)
+    return f.getvalue()
 ```
-- 带覆盖率测试：`pytest tests/ -v --cov=dao --cov-report=term-missing`
 
-## 项目架构
-
-道语言采用三阶段处理流程：
-
-1. **词法分析** (Lexer)：源代码 → Token流
-   - 缩进处理为隐式标记(INDENT/DEDENT)
-   - 支持中文关键字和标点
-
-2. **语法分析** (Parser)：Token流 → AST
-   - 递归下降策略
-   - 运算符优先级通过方法调用层级实现
-
-3. **解释执行** (Interpreter)：AST → 执行结果
-   - 树遍历解释器
-   - 词法作用域管理
-
-## 中文关键字列表
-
-常用关键字：定义, 常量, 函数, 返回, 如果, 否则如果, 否则, 当, 遍历, 在, 匹配, 情况, 尝试, 捕获, 类型, 继承自, 初始化, 本对象, 父对象
-
-## 注意事项
-
-- 请使用UTF-8编码
-- 所有用户可见的错误消息必须使用中文
-- 保持AST节点的不可变性(frozen=True或避免修改)
-- 新增语法特性时需同步更新：tokens.py, ast_nodes.py, lexer/, parser/, interpreter/, tests/
-- 测试覆盖率目标：每个新特性至少3个测试用例
-- 如果代码文件较大尝试拆分为多个文件或合并到一个目录下
-- 开发测试完成后请提交PR
+- 集成测试 `test_integration.py` 以 subprocess 运行 `.道` 示例文件
+- 大型测试目录: `tests/logic_programming/`、`tests/module_system/`、`tests/test_stdlib/`

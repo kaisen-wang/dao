@@ -36,7 +36,16 @@ class ExpressionEvaluator:
         if isinstance(expr, Identifier):
             if expr.name.startswith("?"):
                 return RuntimeLogicVariable(expr.name)
-            return env.get(expr.name)
+            try:
+                return env.get(expr.name)
+            except 名称错误 as e:
+                raise 名称错误(
+                    e.message,
+                    expr.line,
+                    expr.column,
+                    self.source,
+                    e.stack,
+                ) from None
 
         # 处理 ExpressionStmt 类型
         if isinstance(expr, ExpressionStmt):
