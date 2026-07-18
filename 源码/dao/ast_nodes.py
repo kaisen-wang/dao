@@ -574,6 +574,7 @@ class LogicBlock(Statement):
     name: str = ""
     facts: list["LogicFact"] = field(default_factory=list)
     rules: list["LogicRule"] = field(default_factory=list)
+    is_exported: bool = False
 
 
 @dataclass
@@ -745,6 +746,7 @@ class MacroDefinition(Statement):
     name: str = ""
     parameters: list[str] = field(default_factory=list)
     body: Expression = field(default_factory=lambda: NullLiteral())
+    is_exported: bool = False
 
 
 @dataclass

@@ -801,6 +801,8 @@ class ExpressionEvaluator:
             elif isinstance(evaluated, dict) and "__type__" in evaluated:
                 evaluated = DataToAST.convert(evaluated)
                 evaluated = self.eval_expression(evaluated, env)
+            else:
+                break
 
         logger.debug("表达式求值结果: %s: %s", type(evaluated).__name__, evaluated)
 

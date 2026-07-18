@@ -109,8 +109,10 @@ class LogicProgrammingParser:
         # 解析规则体
         body = []
         if self.match(TokenType.如果):
+            self.skip_newlines()
+            self.match(TokenType.缩进)
             # 解析规则体
-            while not self.current.type in (TokenType.换行, TokenType.右花括号):
+            while self.current.type not in (TokenType.回退, TokenType.文件结束):
                 if self.current.type == TokenType.非:
                     body.append(self.parse_logic_negation())
                     if self.current.type == TokenType.并且:
@@ -121,11 +123,12 @@ class LogicProgrammingParser:
                         self.advance()
                 elif self.current.type == TokenType.标识符:
                     body.append(self.parse_pipe())
-                    # 检查是否有"并且"关键字，如果有则消费
                     if self.current.type == TokenType.并且:
                         self.advance()
-                elif self.current.type in (TokenType.换行, TokenType.右花括号):
-                    break
+                elif self.current.type == TokenType.换行:
+                    self.advance()
+                elif self.current.type == TokenType.缩进:
+                    self.advance()
                 else:
                     break
 

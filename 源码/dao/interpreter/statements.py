@@ -1004,11 +1004,14 @@ class StatementExecutor:
 
     def _parse_logic_args(self, arguments, env: Environment) -> list:
         """解析逻辑谓词的参数列表为逻辑项"""
+        from ..ast_nodes import LogicVariable as ASTLogicVariable
         from ..logic.core import LogicAtom, LogicVariable
 
         args = []
         for arg in arguments:
             if isinstance(arg, Identifier) and arg.name.startswith("?"):
+                args.append(LogicVariable(arg.name))
+            elif isinstance(arg, ASTLogicVariable):
                 args.append(LogicVariable(arg.name))
             elif isinstance(arg, StringLiteral):
                 args.append(LogicAtom(arg.value))
@@ -1069,6 +1072,8 @@ class StatementExecutor:
         solver = Solver(kb)
         env.define(stmt.name, kb)
         env.define(f"{stmt.name}_求解器", solver)
+        if stmt.is_exported:
+            env.exports.append(stmt.name)
 
     def exec_destructure(self, stmt, env: Environment) -> None:
         """执行解构赋值"""
@@ -1243,4 +1248,7 @@ class StatementExecutor:
         """执行宏定义：将宏添加到当前环境"""
         registry = self.macro_registry
         registry.register_macro(stmt)
+        env.define(stmt.name, f"<宏 {stmt.name}>")
+        if stmt.is_exported:
+            env.exports.append(stmt.name)
         return None

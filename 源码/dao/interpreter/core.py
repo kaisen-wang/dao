@@ -85,7 +85,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
             if not isinstance(env, Environment):
                 env = self.global_env
 
-        # 清理宏注册表，确保每次执行新程序时注册表是干净的
+        # 保存宏注册表状态，避免模块加载时清除已注册的宏
+        saved_macros = {m.name: m for m in self.macro_registry.get_all_macros()}
         self.macro_registry.clear()
 
         # 注册内置宏
@@ -101,6 +102,13 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
             if not hasattr(e, "stack") or not e.stack:
                 e.stack = env.get_stack()
             raise
+        finally:
+            # 恢复模块宏（新注册的宏优先级更高，不覆盖）
+            for m in self.macro_registry.get_all_macros():
+                saved_macros.pop(m.name, None)
+            for name, macro_info in saved_macros.items():
+                if name not in self.macro_registry._macros:
+                    self.macro_registry._macros[name] = [macro_info]
         return result
 
     def call_function(self, func, args, kwargs=None):
@@ -300,6 +308,7 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
                 getattr(e, "source", getattr(self, "source", "")),
                 func_env.get_stack(),
             )
+            new_error.filename = getattr(e, "filename", "")
             func_env.pop_frame()
             raise new_error
         except DaoError as e:

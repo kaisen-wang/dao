@@ -92,8 +92,12 @@ class MacroParser:
 
         if self.current.type != TokenType.右括号:
             while True:
-                param_token = self.expect(TokenType.标识符, "参数名必须是标识符")
-                param_str = param_token.value
+                if self.current.type == TokenType.标识符:
+                    param_str = self.advance().value
+                elif self.current.type in (TokenType.类型,):
+                    param_str = self.advance().value
+                else:
+                    raise self._error("参数名必须是标识符")
 
                 # 解析可选的默认值（如 x=10）
                 if self.current.type == TokenType.赋值:

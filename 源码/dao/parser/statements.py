@@ -7,7 +7,7 @@
 
 import logging
 
-from ..ast_nodes import Assignment, Identifier, MacroDefinition, Statement, VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl
+from ..ast_nodes import Assignment, Identifier, LogicBlock, MacroDefinition, Statement, VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl
 from ..tokens import TokenType
 
 logger = logging.getLogger('dao.parser')
@@ -150,10 +150,11 @@ class StatementParser(
                 if next_token.type in (
                     TokenType.函数, TokenType.常量, TokenType.定义,
                     TokenType.类型, TokenType.枚举, TokenType.特征, TokenType.抽象,
+                    TokenType.逻辑, TokenType.定义宏,
                 ):
                     self.advance()  # 消费 导出
                     stmt = self.parse_statement()
-                    if isinstance(stmt, (VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl)):
+                    if isinstance(stmt, (VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl, LogicBlock, MacroDefinition)):
                         stmt.is_exported = True
                     return stmt
                 else:

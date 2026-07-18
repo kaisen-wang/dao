@@ -29,11 +29,13 @@ class QueryResult:
         result = {}
         if self.variables:
             for var_name in self.variables:
-                result[var_name] = self._format_value(self.get_binding(var_name))
+                clean_name = var_name.lstrip("?")
+                result[clean_name] = self._format_value(self.get_binding(var_name))
         else:
             for var_name in self.substitution.keys():
                 if var_name.startswith("?"):
-                    result[var_name] = self._format_value(self.get_binding(var_name))
+                    clean_name = var_name.lstrip("?")
+                    result[clean_name] = self._format_value(self.get_binding(var_name))
         return result
 
     def _format_value(self, value: Any) -> Any:

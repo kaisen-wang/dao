@@ -442,6 +442,9 @@ class MacroExpander:
         if isinstance(node, list):
             return [self._replace_in_node(n, replacements) for n in node]
 
+        if isinstance(node, tuple):
+            return tuple(self._replace_in_node(n, replacements) for n in node)
+
         if node is None:
             return node
 
@@ -474,6 +477,9 @@ class MacroExpander:
                 attr_value = getattr(node, field_name)
                 if isinstance(attr_value, list):
                     new_value = [self._replace_in_node(n, replacements) for n in attr_value]
+                    setattr(node, field_name, new_value)
+                elif isinstance(attr_value, tuple):
+                    new_value = tuple(self._replace_in_node(n, replacements) for n in attr_value)
                     setattr(node, field_name, new_value)
                 elif hasattr(attr_value, '__dataclass_fields__') or isinstance(attr_value, (Expression, Statement)):
                     new_value = self._replace_in_node(attr_value, replacements)

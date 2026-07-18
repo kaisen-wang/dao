@@ -74,6 +74,8 @@ def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False,
         run_source(source, interpreter, filepath, mode=mode, type_check=type_check,
                    disasm=disasm, jit=jit)
     except 道错误 as e:
+        if not e.filename:
+            e.filename = filepath
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:

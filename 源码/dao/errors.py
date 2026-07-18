@@ -17,16 +17,23 @@ class 道错误(Exception):
         column: int = 0,
         source: str = "",
         stack: list | None = None,
+        filename: str = "",
     ):
         self.message = message
         self.line = line
         self.column = column
         self.source = source
         self.stack = stack or []
+        self.filename = filename
         super().__init__(self._format_message())
 
     def _format_message(self) -> str:
-        base_msg = f"[行 {self.line}, 列 {self.column}] {self.message}"
+        file_info = ""
+        if self.filename:
+            file_info = f"文件: {self.filename}, "
+        elif self.source and "\n" not in self.source:
+            file_info = f"文件: {self.source}, "
+        base_msg = f"[{file_info}行 {self.line}, 列 {self.column}] {self.message}"
         if self.line > 0 and self.source:
             lines = self.source.splitlines()
             if 0 <= self.line - 1 < len(lines):
