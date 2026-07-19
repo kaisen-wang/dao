@@ -71,6 +71,11 @@ class Channel:
             # 没有运行中的事件循环，回退到同步方式
             return self.receive()
 
+    @property
+    def queue(self):
+        """兼容 select 语句的队列访问"""
+        return self._queue
+
     def close(self):
         """关闭通道"""
         self.closed = True

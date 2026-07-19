@@ -208,8 +208,18 @@ class ConcurrencyParser:
 
         # 道语言不支持花括号语法，只支持缩进块语法
         has_braces = False
+        block_indent = None
 
         cases = []
+
+        # 对于缩进块语法，确定情况语句的缩进级别
+        if self.current.type == TokenType.左花括号:
+            has_braces = True
+            self.advance()  # 消费 {
+        else:
+            self.skip_newlines()
+            if self.current.type not in (TokenType.回退, TokenType.文件结束):
+                block_indent = self.current.column
 
         # 解析所有情况语句
         while True:
@@ -221,9 +231,12 @@ class ConcurrencyParser:
                 self.current.type == TokenType.文件结束
                 or (
                     self.current.type == TokenType.回退
-                    and self.current.value == str(token.column - 1)
+                    and block_indent is not None
+                    and self.current.value <= block_indent
                 )
             ):
+                if self.current.type == TokenType.回退:
+                    self.advance()  # 消费回退，避免外层 parse_block 误判
                 break
 
             if self.current.type == TokenType.情况:
@@ -271,11 +284,9 @@ class ConcurrencyParser:
                     self.skip_newlines()
 
                 # 如果没有 INDENT token，尝试解析单个语句作为块
-                # 这将允许选择语句在没有明确缩进的情况下工作
                 if self.current.type == TokenType.缩进:
-                    body = self.parse_block()
+                    body = self.read_block_no_consume()
                 else:
-                    # 解析单个语句作为块
                     body = []
                     stmt = self.parse_statement()
                     if stmt:
@@ -341,7 +352,7 @@ class ConcurrencyParser:
 
                 # 解析分支体（缩进块）
                 if self.current.type == TokenType.缩进:
-                    body = self.parse_block()
+                    body = self.read_block_no_consume()
                 else:
                     # 解析单个语句作为块
                     body = []
@@ -380,7 +391,7 @@ class ConcurrencyParser:
 
                 # 解析分支体（缩进块）
                 if self.current.type == TokenType.缩进:
-                    body = self.parse_block()
+                    body = self.read_block_no_consume()
                 else:
                     # 解析单个语句作为块
                     body = []
@@ -401,9 +412,16 @@ class ConcurrencyParser:
                 cases.append(select_case)
 
             else:
-                # 如果是回退 token，说明选择语句块结束
+                # 如果是回退 token，检查是分支结束还是选择块结束
                 if self.current.type == TokenType.回退:
-                    break
+                    if block_indent is not None and self.current.value <= block_indent:
+                        # 回退到情况语句层级 → 选择块结束
+                        self.advance()  # 消费回退，避免外层 parse_block 误判
+                        break
+                    else:
+                        # 回退到分支体层级 → 只是分支体结束，跳过继续
+                        self.advance()
+                        continue
                 else:
                     raise 语法错误(
                         f"选择分支必须是 '情况'、'当' 或 '默认'，但得到 {self.current.type.name}",

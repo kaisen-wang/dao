@@ -375,8 +375,9 @@ class StatementExecutor:
     def exec_while(self, stmt: WhileStmt, env: Environment) -> None:
         """执行当循环"""
         while self._is_truthy(self.eval_expression(stmt.condition, env)):
+            loop_env = env.create_child()
             try:
-                self._exec_block(stmt.body, env)
+                self._exec_block(stmt.body, loop_env)
             except 跳出信号:
                 break
             except 继续信号:

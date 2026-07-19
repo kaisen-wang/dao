@@ -241,7 +241,7 @@ class ConcurrencyEvaluator:
                     if condition_value:
                         case_env = env.create_child()
                         if case.variable:
-                            case_env.set(case.variable, condition_value)
+                            case_env.define(case.variable, condition_value)
                         self._exec_block(case.body, case_env)
                         return
 
@@ -256,7 +256,7 @@ class ConcurrencyEvaluator:
                         value = channel.queue.get_nowait()
                         case_env = env.create_child()
                         if case.variable:
-                            case_env.set(case.variable, value)
+                            case_env.define(case.variable, value)
                         self._exec_block(case.body, case_env)
                         return
                 except Exception:
@@ -283,7 +283,7 @@ class ConcurrencyEvaluator:
                                 )
                                 case_env = env.create_child()
                                 if case.variable:
-                                    case_env.set(case.variable, value)
+                                    case_env.define(case.variable, value)
                                 self._exec_block(case.body, case_env)
                                 return
                         except Exception:
@@ -304,7 +304,7 @@ class ConcurrencyEvaluator:
                             value = channel.receive()
                             case_env = env.create_child()
                             if case.variable:
-                                case_env.set(case.variable, value)
+                                case_env.define(case.variable, value)
                             self._exec_block(case.body, case_env)
                             return
                     except Exception:

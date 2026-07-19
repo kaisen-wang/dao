@@ -191,3 +191,20 @@ class Parser(StatementParser, ExpressionParser, MacroParser, LogicProgrammingPar
             statements.append(self.parse_statement())
         self.expect(TokenType.回退, "期望回退")
         return statements
+
+    def read_block_no_consume(self) -> list[Statement]:
+        """读取缩进块，但不消费最后的回退 Token
+
+        用于需要在回退后继续检查的外层解析器（如选择语句）。
+        """
+        self.expect(TokenType.缩进, "期望缩进块")
+        statements = []
+        while self.current.type not in (TokenType.回退, TokenType.文件结束):
+            self.skip_newlines()
+            while self.current.type == TokenType.缩进:
+                self.advance()
+                self.skip_newlines()
+            if self.current.type in (TokenType.回退, TokenType.文件结束):
+                break
+            statements.append(self.parse_statement())
+        return statements

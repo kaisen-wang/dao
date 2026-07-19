@@ -89,8 +89,8 @@ class Lexer(LexerReaders):
             self.tokens.append(self._make_token(TokenType.缩进, indent_level))
         elif indent_level < current:
             while self.indent_stack[-1] > indent_level:
-                self.indent_stack.pop()
-                self.tokens.append(self._make_token(TokenType.回退, indent_level))
+                source_level = self.indent_stack.pop()
+                self.tokens.append(self._make_token(TokenType.回退, source_level))
             if self.indent_stack[-1] != indent_level:
                 raise self._error(
                     f"缩进不一致：期望 {self.indent_stack[-1]} 个空格，实际 {indent_level} 个"
