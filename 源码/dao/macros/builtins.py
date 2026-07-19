@@ -140,11 +140,11 @@ def _register_计时(registry: MacroRegistry):
         _计时 结果
     """
     body = QuoteBlock(body=[
-        # 设 _计时开始 = 时间()
+        # 设 _计时开始 = 时间戳()
         VariableDecl(
             name="_计时开始",
             value=FunctionCall(
-                callee=Identifier(name="时间"),
+                callee=Identifier(name="时间戳"),
             ),
         ),
         # 设 _计时结果 = 代码块
@@ -152,11 +152,11 @@ def _register_计时(registry: MacroRegistry):
             name="_计时结果",
             value=Identifier(name="代码块"),
         ),
-        # 设 _计时结束 = 时间()
+        # 设 _计时结束 = 时间戳()
         VariableDecl(
             name="_计时结束",
             value=FunctionCall(
-                callee=Identifier(name="时间"),
+                callee=Identifier(name="时间戳"),
             ),
         ),
         # 打印(标签, "耗时:", _计时结束 - _计时开始, "秒")

@@ -332,7 +332,7 @@ def test_builtin_macro_延迟():
 """
     result, interpreter = run_code(code)
     # 延迟宏应返回计算结果
-    assert result == 1
+    assert interpreter.global_env.get("结果") == 1
 
 
 def test_builtin_macro_缓存():
@@ -434,11 +434,11 @@ def test_builtin_macro_计时_expansion():
     # 5. 返回 _计时结果
     assert len(body) == 5
     assert isinstance(body[0], VariableDecl)
-    assert body[0].name == "_计时开始"
+    assert body[0].name.startswith("_计时开始")
     assert isinstance(body[1], VariableDecl)
-    assert body[1].name == "_计时结果"
+    assert body[1].name.startswith("_计时结果")
     assert isinstance(body[2], VariableDecl)
-    assert body[2].name == "_计时结束"
+    assert body[2].name.startswith("_计时结束")
     assert isinstance(body[3], ExpressionStmt)
     assert isinstance(body[4], ReturnStmt)
 
@@ -562,9 +562,9 @@ def test_builtin_macro_重试_expansion():
     # 4. 返回 _重试结果
     assert len(body) == 4
     assert isinstance(body[0], VariableDecl)
-    assert body[0].name == "_重试次数"
+    assert body[0].name.startswith("_重试次数")
     assert isinstance(body[1], VariableDecl)
-    assert body[1].name == "_重试结果"
+    assert body[1].name.startswith("_重试结果")
     assert isinstance(body[2], WhileStmt)
     assert isinstance(body[3], ReturnStmt)
 

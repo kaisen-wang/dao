@@ -282,6 +282,11 @@ def _builtin_删除事实(kb, predicate, *args):
     return None
 
 
+def _builtin_时间戳():
+    import time as _time
+    return _time.perf_counter()
+
+
 def get_builtins() -> dict[str, BuiltinFunction]:
     """返回所有基础内置函数"""
     return {
@@ -313,4 +318,5 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         "睡眠": BuiltinFunction("睡眠", _builtin_睡眠, 1),
         "添加事实": BuiltinFunction("添加事实", _builtin_添加事实),
         "删除事实": BuiltinFunction("删除事实", _builtin_删除事实),
+        "时间戳": BuiltinFunction("时间戳", _builtin_时间戳, 0),
     }

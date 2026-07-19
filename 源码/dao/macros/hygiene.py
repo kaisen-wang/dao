@@ -50,13 +50,14 @@ class HygieneProcessor:
         self.variable_map: Dict[str, str] = {}  # 变量名映射表
         self.counter = 0
 
-    def process(self, node: any, scope: MacroScope):
+    def process(self, node: any, scope: MacroScope, exclude_params: set | None = None):
         """
         应用卫生宏处理
 
         Args:
             node: 要处理的节点
             scope: 变量作用域信息
+            exclude_params: 不重写的参数名集合
 
         Returns:
             经过卫生处理后的节点
@@ -66,11 +67,16 @@ class HygieneProcessor:
 
         self.variable_map.clear()
         self.counter = 0
+        if exclude_params is None:
+            exclude_params = set()
 
-        # 分析变量捕获
-        captures = scope.analyze_captures()
-        for var in captures:
-            self.variable_map[var.name] = self._generate_unique_name(var.name)
+        # 仅重写宏体内部定义的以下划线开头的绑定变量（如 _temp, _延迟值 等），
+        # 避免与调用者作用域中的同名变量冲突。
+        # 不重写普通变量（如 i, 总和 等），它们可能被块的参数引用。
+        # 不重写自由变量（如内置函数名 打印/抛出 等），它们应保持原名。
+        for var in scope.get_used_variables():
+            if var.is_bound and var.name not in exclude_params and var.name.startswith("_"):
+                self.variable_map[var.name] = self._generate_unique_name(var.name)
 
         return self._rewrite_variables(node)
 
@@ -81,6 +87,9 @@ class HygieneProcessor:
 
         if isinstance(node, list):
             return [self._rewrite_variables(n) for n in node]
+
+        if isinstance(node, dict):
+            return {k: self._rewrite_variables(v) for k, v in node.items()}
 
         if hasattr(node, '__dataclass_fields__'):
             for field_name in node.__dataclass_fields__:

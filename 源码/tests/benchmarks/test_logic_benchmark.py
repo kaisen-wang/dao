@@ -12,7 +12,7 @@ import sys
 import os
 import statistics
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 
 from dao.logic.core import KnowledgeBase, LogicStruct, LogicVariable, LogicAtom
 from dao.logic.solver import Solver

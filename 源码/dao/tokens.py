@@ -299,6 +299,7 @@ KEYWORDS: dict[str, TokenType] = {
     "断言": TokenType.断言,
     # 逻辑运算
     "并且": TokenType.并且,
+    "且": TokenType.并且,
     "或者": TokenType.或者,
     "不是": TokenType.不是,
     "不在": TokenType.不在,

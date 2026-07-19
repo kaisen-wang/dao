@@ -11,7 +11,7 @@ import sys
 import os
 
 # 添加源码目录到 Python 路径
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir))
 
 from dao.lexer import Lexer
 from dao.parser import Parser

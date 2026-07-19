@@ -6,8 +6,8 @@
 通过 Python mixin 模式，在运行时与 Interpreter 组合。
 """
 
-from ..ast_nodes import *
-from ..builtins import (
+from ...ast_nodes import *
+from ...builtins import (
     BoundMethod,
     BuiltinFunction,
     DaoClass,
@@ -18,9 +18,9 @@ from ..builtins import (
     get_builtins,
     get_interpreter_builtins,
 )
-from ..builtins.oop_types import DaoError, DaoTrait
-from ..environment import Environment
-from ..errors import (
+from ...builtins.oop_types import DaoError, DaoTrait
+from ...environment import Environment
+from ...errors import (
     产出信号,
     名称错误,
     断言失败,
@@ -91,12 +91,14 @@ class DaoEnumVariant:
         return hash((self.enum_name, self.variant_name, self.data))
 
 
-class StatementExecutor:
+from .logic import LogicExecutor
+
+class StatementExecutor(LogicExecutor):
     """语句执行方法集（混入类）"""
 
     def _has_yield(self, statements: list) -> bool:
         """检测语句列表中是否包含产出语句"""
-        from ..ast_nodes import (
+        from ...ast_nodes import (
             ForInStmt,
             ForRangeStmt,
             IfStmt,
@@ -232,7 +234,10 @@ class StatementExecutor:
         value = self.eval_expression(stmt.value, env)
 
         if isinstance(stmt.target, Identifier):
-            env.set(stmt.target.name, value)
+            try:
+                env.set(stmt.target.name, value)
+            except 名称错误:
+                env.define(stmt.target.name, value)
         elif isinstance(stmt.target, MemberAccess):
             obj = self.eval_expression(stmt.target.object, env)
             if isinstance(obj, DaoInstance):
@@ -326,7 +331,7 @@ class StatementExecutor:
         self, stmt: AsyncFunctionDecl, env: Environment
     ) -> None:
         """执行异步函数声明"""
-        from ..builtins.callables import DaoAsyncFunction
+        from ...builtins.callables import DaoAsyncFunction
 
         func = DaoAsyncFunction(
             name=stmt.name,
@@ -519,7 +524,7 @@ class StatementExecutor:
         if isinstance(value, str):
             raise 运行时错误(value, stmt.line, stmt.column, self.source)
         # 检查是否是 DaoError 子类的实例
-        from ..builtins.oop_types import DaoError
+        from ...builtins.oop_types import DaoError
 
         if isinstance(value, DaoError):
             raise value
@@ -592,7 +597,7 @@ class StatementExecutor:
 
     def exec_class_decl(self, stmt: ClassDecl, env: Environment) -> None:
         """执行类型声明"""
-        from ..builtins.oop_types import DaoError
+        from ...builtins.oop_types import DaoError
 
         parent = None
         is_error_class = False
@@ -750,7 +755,7 @@ class StatementExecutor:
 
     def _match_pattern(self, pattern, subject, env: Environment) -> bool:
         """匹配模式与主体"""
-        from ..ast_nodes import DictPattern, EnumVariantPattern, FunctionCall, Identifier, ListPattern, MemberAccess, TypeCheckPattern
+        from ...ast_nodes import DictPattern, EnumVariantPattern, FunctionCall, Identifier, ListPattern, MemberAccess, TypeCheckPattern
 
         # 枚举变体模式
         if isinstance(pattern, EnumVariantPattern):
@@ -905,7 +910,7 @@ class StatementExecutor:
         """执行导入语句"""
         import os
 
-        from ..stdlib.loader import StdlibLoader
+        from ...stdlib.loader import StdlibLoader
 
         if StdlibLoader.is_stdlib_module(stmt.module_path):
             if stmt.module_path in self.module_cache:
@@ -966,8 +971,8 @@ class StatementExecutor:
                 with open(found_path, "r", encoding="utf-8") as f:
                     source = f.read()
 
-                from ..lexer import Lexer
-                from ..parser import Parser
+                from ...lexer import Lexer
+                from ...parser import Parser
 
                 lexer = Lexer(source, module_path)
                 tokens = lexer.tokenize()
@@ -1025,78 +1030,7 @@ class StatementExecutor:
     # 解构赋值
     # ========================
 
-    def _parse_logic_args(self, arguments, env: Environment) -> list:
-        """解析逻辑谓词的参数列表为逻辑项"""
-        from ..ast_nodes import LogicVariable as ASTLogicVariable
-        from ..logic.core import LogicAtom, LogicVariable
 
-        args = []
-        for arg in arguments:
-            if isinstance(arg, Identifier) and arg.name.startswith("?"):
-                args.append(LogicVariable(arg.name))
-            elif isinstance(arg, ASTLogicVariable):
-                args.append(LogicVariable(arg.name))
-            elif isinstance(arg, StringLiteral):
-                args.append(LogicAtom(arg.value))
-            elif isinstance(arg, NumberLiteral):
-                args.append(LogicAtom(arg.value))
-            elif isinstance(arg, BooleanLiteral):
-                args.append(LogicAtom(arg.value))
-            elif isinstance(arg, ListLiteral):
-                elements = [self.eval_expression(e, env) for e in arg.elements]
-                args.append(LogicAtom(elements))
-            elif isinstance(arg, DictLiteral):
-                pairs = {
-                    self.eval_expression(k, env): self.eval_expression(v, env)
-                    for k, v in arg.pairs
-                }
-                args.append(LogicAtom(pairs))
-        return args
-
-    def exec_logic_block(self, stmt: LogicBlock, env: Environment) -> None:
-        """执行逻辑块：创建知识库并添加事实和规则"""
-        from ..logic.core import KnowledgeBase, LogicStruct, normalize_term
-        from ..logic.solver import Solver
-
-        # 创建知识库
-        kb = KnowledgeBase(stmt.name)
-
-        # 添加事实
-        for fact in stmt.facts:
-            # 求值事实的参数
-            evaluated_args = [self.eval_expression(arg, env) for arg in fact.arguments]
-            # 标准化为逻辑项
-            normalized_args = [normalize_term(arg) for arg in evaluated_args]
-            # 创建逻辑结构
-            logic_fact = LogicStruct(fact.predicate, normalized_args)
-            kb.add_fact(logic_fact)
-
-        # 添加规则
-        for rule in stmt.rules:
-            # 求值规则头的参数
-            head_args = [self.eval_expression(arg, env) for arg in rule.head.arguments]
-            normalized_head_args = [normalize_term(arg) for arg in head_args]
-            rule_head = LogicStruct(rule.head.predicate, normalized_head_args)
-
-            # 解析规则体，不进行求值
-            rule_body = []
-            for body_expr in rule.body:
-                if isinstance(body_expr, FunctionCall):
-                    predicate = body_expr.callee.name
-                    body_args = self._parse_logic_args(body_expr.arguments, env)
-                    rule_body.append(LogicStruct(predicate, body_args))
-                elif isinstance(body_expr, LogicFact):
-                    body_args = self._parse_logic_args(body_expr.arguments, env)
-                    rule_body.append(LogicStruct(body_expr.predicate, body_args))
-
-            kb.add_rule(rule_head, rule_body)
-
-        # 将知识库和求解器存入环境中
-        solver = Solver(kb)
-        env.define(stmt.name, kb)
-        env.define(f"{stmt.name}_求解器", solver)
-        if stmt.is_exported:
-            env.exports.append(stmt.name)
 
     def exec_destructure(self, stmt, env: Environment) -> None:
         """执行解构赋值"""
@@ -1200,7 +1134,7 @@ class StatementExecutor:
 
     def _exec_destructure_pattern(self, pattern, value, env: Environment, is_declaration: bool):
         """递归执行嵌套解构赋值"""
-        from ..ast_nodes import DestructureTarget
+        from ...ast_nodes import DestructureTarget
         if not isinstance(pattern, DestructureTarget):
             return
         if pattern.name is not None:

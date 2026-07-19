@@ -755,8 +755,10 @@ class ExpressionEvaluator:
 
         # 应用宏展开
         expander = MacroExpander(registry=self.macro_registry)
+        # 先应用卫生处理到宏体模板，再替换参数
+        hygienic_body = expander._apply_hygiene(body_ast, macro_info.parameters)
         expanded_body = expander._apply_macro_parameters(
-            body_ast, macro_info.parameters, evaluated_args
+            hygienic_body, macro_info.parameters, evaluated_args
         )
 
         # 检测递归宏：如果宏体中包含对自身的调用，

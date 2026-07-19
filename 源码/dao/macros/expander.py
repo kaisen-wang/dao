@@ -144,23 +144,21 @@ class MacroExpander:
             if self._is_recursive_macro(macro_info, call.name):
                 logger.debug("检测到递归宏 '%s'，仅做参数替换", call.name)
                 self._log_trace("递归检测", call.name, "仅做参数替换")
+                # 先应用卫生处理，再替换参数，避免污染参数中的变量
+                hygienic_body = self._apply_hygiene(macro_info.body, macro_info.parameters)
                 expanded_body = self._apply_macro_parameters(
-                    macro_info.body, macro_info.parameters, call.arguments
+                    hygienic_body, macro_info.parameters, call.arguments
                 )
-                # 卫生宏处理
-                expanded_body = self._apply_hygiene(expanded_body, macro_info.parameters)
                 return expanded_body
 
             # 评估宏参数
             evaluated_args = [self.expand(arg, recursion_depth) for arg in call.arguments]
 
-            # 应用参数绑定
+            # 先应用卫生处理到宏体模板，再替换参数
+            hygienic_body = self._apply_hygiene(macro_info.body, macro_info.parameters)
             expanded_body = self._apply_macro_parameters(
-                macro_info.body, macro_info.parameters, evaluated_args
+                hygienic_body, macro_info.parameters, evaluated_args
             )
-
-            # 卫生宏处理
-            expanded_body = self._apply_hygiene(expanded_body, macro_info.parameters)
 
             # 递归展开结果中的宏调用
             expanded = self.expand(expanded_body, recursion_depth + 1)
@@ -298,8 +296,9 @@ class MacroExpander:
                 continue
             attr = getattr(node, field_name)
 
-            # 如果属性是可迭代对象，递归处理
-            if isinstance(attr, list):
+            if isinstance(attr, dict):
+                setattr(node, field_name, {k: self.expand(v, recursion_depth) for k, v in attr.items()})
+            elif isinstance(attr, list):
                 new_value = [self.expand(item, recursion_depth) for item in attr]
                 setattr(node, field_name, new_value)
             elif isinstance(attr, (Expression, Statement)):
@@ -310,6 +309,9 @@ class MacroExpander:
 
     def _apply_hygiene(self, node, macro_parameters: List[str]):
         """应用卫生宏处理"""
+        # 深拷贝，避免修改原始宏体模板
+        node = copy.deepcopy(node)
+
         # 创建作用域分析器
         scope = MacroScope()
         param_names = set()
@@ -323,7 +325,7 @@ class MacroExpander:
         self._collect_variables(node, scope)
 
         # 应用卫生处理
-        return self.hygiene_processor.process(node, scope)
+        return self.hygiene_processor.process(node, scope, exclude_params=param_names)
 
     def _collect_variables(self, node, scope: MacroScope):
         """收集节点中的变量定义和使用信息"""
@@ -337,6 +339,8 @@ class MacroExpander:
 
         if isinstance(node, VariableDecl):
             scope.define_variable(node.name, is_bound=True)
+        elif hasattr(node, 'target') and isinstance(node.target, Identifier):
+            scope.define_variable(node.target.name, is_bound=True)
 
         if isinstance(node, Identifier):
             scope.use_variable(node.name)
@@ -346,7 +350,10 @@ class MacroExpander:
                 if field_name in ('line', 'column'):
                     continue
                 attr = getattr(node, field_name)
-                if isinstance(attr, list):
+                if isinstance(attr, dict):
+                    for v in attr.values():
+                        self._collect_variables(v, scope)
+                elif isinstance(attr, list):
                     for item in attr:
                         self._collect_variables(item, scope)
                 elif hasattr(attr, '__dataclass_fields__') or isinstance(attr, Identifier):
@@ -444,6 +451,9 @@ class MacroExpander:
 
         if isinstance(node, tuple):
             return tuple(self._replace_in_node(n, replacements) for n in node)
+
+        if isinstance(node, dict):
+            return {k: self._replace_in_node(v, replacements) for k, v in node.items()}
 
         if node is None:
             return node
