@@ -29,6 +29,7 @@ from ..errors import (
     跳出信号,
     运行时错误,
     返回信号,
+    错误信息,
 )
 
 
@@ -441,6 +442,8 @@ class StatementExecutor:
         """执行尝试-捕获-最终"""
         try:
             return self._exec_block(stmt.try_body, env)
+        except (返回信号, 跳出信号, 继续信号, 产出信号):
+            raise
         except Exception as e:
             # 检查每个捕获块
             for catch in stmt.catches:
@@ -470,18 +473,37 @@ class StatementExecutor:
                 if should_catch and catch_body:
                     catch_env = env.create_child()
                     if catch_var:
-                        # 对于 DaoError 及其子类，使用异常对象本身
+                        # 对于 DaoError 及其子类，使用异常对象本身（支持 .信息 .行 .列 等属性访问）
                         if isinstance(e, DaoError):
                             catch_env.define(catch_var, e)
                         else:
-                            # 对于 Python 异常，创建错误信息字典
+                            # 对于 Python 异常，创建包含完整上下文的错误信息
+                            error_line = getattr(e, "line", getattr(e, "lineno", 0))
+                            error_col = getattr(e, "column", getattr(e, "colno", 0))
+                            filename = getattr(e, "filename", "")
+                            error_source = getattr(e, "source", "")
+                            # 使用道语言的调用栈
+                            dao_stack = env.get_stack()
+                            stack_parts = []
+                            for i, frame in enumerate(dao_stack):
+                                func_name = frame.get("function", "<匿名>")
+                                src_file = frame.get("file", "<未知>")
+                                src_line = frame.get("line", "?")
+                                stack_parts.append(
+                                    f"  {i}. 在 {func_name}() (文件: {src_file}, 行: {src_line})"
+                                )
+                            stack_str = "\n".join(stack_parts) if stack_parts else ""
                             catch_env.define(
                                 catch_var,
-                                {
-                                    "信息": str(e),
-                                    "行": getattr(e, "line", 0),
-                                    "列": getattr(e, "column", 0),
-                                },
+                                错误信息(
+                                    信息=f"{type(e).__name__} {e}",
+                                    类型=type(e).__name__,
+                                    行=error_line,
+                                    列=error_col,
+                                    文件名=filename,
+                                    来源=error_source,
+                                    堆栈=stack_str,
+                                ),
                             )
                     return self._exec_block(catch_body, catch_env)
 

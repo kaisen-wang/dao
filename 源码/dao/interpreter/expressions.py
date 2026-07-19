@@ -386,6 +386,10 @@ class ExpressionEvaluator:
         if isinstance(obj, dict) and expr.member in obj:
             return obj[expr.member]
 
+        from ..errors import 错误信息
+        if isinstance(obj, 错误信息) and hasattr(obj, expr.member):
+            return getattr(obj, expr.member)
+
         if isinstance(obj, str):
             return self._get_str_method(obj, expr.member, expr)
         if isinstance(obj, list):

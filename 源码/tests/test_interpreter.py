@@ -245,6 +245,33 @@ class TestInterpreterErrorHandling:
         assert "尝试" in output
         assert "最终" in output
 
+    def test_catch_rich_info_dot_access(self):
+        """捕获的错误应支持 .信息 .行 等属性访问"""
+        source = '''类型 业务错误 继承自 错误
+函数 可能出错()
+    抛出 业务错误("发生错误")
+尝试
+    可能出错()
+捕获 err
+    打印(err.信息)
+    打印(err.行)
+'''
+        output = capture_output(source)
+        lines = output.strip().splitlines()
+        assert "发生错误" in lines[0]
+
+    def test_catch_throw_dao_error(self):
+        """捕获 抛出 的 DaoError 应保留字段访问"""
+        source = '''尝试
+    抛出 "测试消息"
+捕获 err
+    打印(文本(err))
+    打印(err.行)
+'''
+        output = capture_output(source)
+        lines = output.strip().splitlines()
+        assert "测试消息" in lines[0]
+
 
 class TestSpreadOperator:
     """展开运算符测试"""

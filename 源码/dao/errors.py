@@ -133,3 +133,37 @@ class 产出信号(Exception):
     def __init__(self, value):
         self.value = value
         super().__init__()
+
+
+class 错误信息:
+    """捕获到的错误信息包装，支持 .信息 .行 .列 .类型 等属性访问和友好的 str() 显示"""
+
+    def __init__(self, 信息="", 类型="", 行=0, 列=0, 文件名="", 来源="", 堆栈=""):
+        self.信息 = 信息
+        self.类型 = 类型
+        self.行 = 行
+        self.列 = 列
+        self.文件名 = 文件名
+        self.来源 = 来源
+        self.堆栈 = 堆栈
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def __contains__(self, key):
+        return hasattr(self, key)
+
+    def __str__(self):
+        msg = f"[{self.类型}] {self.信息}" if self.类型 else str(self.信息)
+        if self.行:
+            msg += f" (行 {self.行}"
+            if self.列:
+                msg += f", 列 {self.列}"
+            msg += ")"
+        if self.文件名:
+            msg += f" 文件: {self.文件名}"
+        if self.来源 and "\n" not in self.来源:
+            msg += f"\n{self.来源}"
+        if self.堆栈:
+            msg += f"\n\n调用栈:\n{self.堆栈}"
+        return msg
