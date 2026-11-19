@@ -20,7 +20,14 @@ from dao.stdlib.asyncio import (
     DaoStreamWriter,
     create_module_env,
     _stdlib_获取事件循环,
+    _stdlib_获取运行中循环,
     _stdlib_运行,
+    _stdlib_等待,
+    _stdlib_等待全部,
+    _stdlib_等待竞速,
+    _stdlib_取消任务,
+    _stdlib_超时等待,
+    _stdlib_超时上下文,
     _stdlib_创建任务,
     _stdlib_当前任务,
     _stdlib_全部任务,
@@ -34,6 +41,10 @@ from dao.stdlib.asyncio import (
     _stdlib_是否协程,
     _stdlib_是否协程函数,
     _stdlib_是否为Task,
+    _stdlib_是否为Future,
+    _stdlib_确保Future,
+    _stdlib_屏蔽取消,
+    _stdlib_组合等待,
     _stdlib_在线程中执行,
     _stdlib_异步读取文件,
     _stdlib_异步写入文件,
@@ -41,6 +52,7 @@ from dao.stdlib.asyncio import (
     _stdlib_打开连接,
 )
 from dao.stdlib.registry import STDLIB_REGISTRY
+from dao.errors import 类型错误, 运行时错误
 
 
 class TestAsyncIORegistry(unittest.TestCase):
@@ -497,6 +509,139 @@ class TestAsyncNetwork(unittest.TestCase):
         """打开连接应返回协程"""
         coro = _stdlib_打开连接("example.com", 80)
         self.assertTrue(asyncio.iscoroutine(coro))
+
+
+class TestAsyncWaitHelpers(unittest.TestCase):
+    """测试等待/取消/超时等辅助函数（覆盖异常与分支路径）"""
+
+    @staticmethod
+    async def _value(v):
+        await asyncio.sleep(0)
+        return v
+
+    def test_等待成功与超时(self):
+        async def test():
+            result, timed_out = await _stdlib_等待(self._value(7))
+            self.assertEqual(result, 7)
+            self.assertFalse(timed_out)
+
+            result, timed_out = await _stdlib_等待(_stdlib_睡眠(0.2), 超时=0.01)
+            self.assertIsNone(result)
+            self.assertTrue(timed_out)
+
+        asyncio.run(test())
+
+    def test_等待全部含普通值(self):
+        async def test():
+            results = await _stdlib_等待全部(
+                [self._value(1), self._value(2), 3]
+            )
+            self.assertEqual(results, [1, 2, 3])
+
+        asyncio.run(test())
+
+    def test_等待全部带超时(self):
+        async def test():
+            results = await _stdlib_等待全部([self._value(9)], 超时=1)
+            self.assertEqual(results, [9])
+
+        asyncio.run(test())
+
+    def test_等待竞速与空列表(self):
+        async def test():
+            # 第二个任务更慢，保证竞速结果确定
+            self.assertEqual(
+                await _stdlib_等待竞速([self._value(1), _stdlib_睡眠(0.01)]), 1
+            )
+            with self.assertRaises(运行时错误):
+                await _stdlib_等待竞速([])
+
+        asyncio.run(test())
+
+    def test_取消任务(self):
+        async def test():
+            task = asyncio.create_task(_stdlib_睡眠(1))
+            _stdlib_取消任务(task)
+            with self.assertRaises(类型错误):
+                _stdlib_取消任务(42)
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(test())
+
+    def test_超时等待成功与超时(self):
+        async def test():
+            self.assertEqual(await _stdlib_超时等待(self._value(5), 1), 5)
+            with self.assertRaises(asyncio.TimeoutError):
+                await _stdlib_超时等待(_stdlib_睡眠(0.2), 0.01)
+
+        asyncio.run(test())
+
+    def test_超时上下文(self):
+        async def test():
+            self.assertIsNotNone(_stdlib_超时上下文(1))
+
+        # asyncio.timeout 需要在运行中的事件循环内创建
+        asyncio.run(test())
+
+    def test_获取运行中循环(self):
+        async def test():
+            self.assertIsNotNone(_stdlib_获取运行中循环())
+
+        asyncio.run(test())
+        with self.assertRaises(运行时错误):
+            _stdlib_获取运行中循环()
+
+    def test_运行非法参数(self):
+        with self.assertRaises(类型错误):
+            _stdlib_运行(42)
+
+    def test_创建任务非法参数(self):
+        async def test():
+            with self.assertRaises(类型错误):
+                _stdlib_创建任务(42)
+
+        asyncio.run(test())
+
+    def test_当前任务无循环时返回空(self):
+        self.assertIsNone(_stdlib_当前任务())
+
+    def test_确保Future(self):
+        async def test():
+            future = _stdlib_确保Future(self._value(1))
+            self.assertIsInstance(future, asyncio.Future)
+            self.assertEqual(await future, 1)
+            self.assertIs(_stdlib_确保Future(future), future)
+            with self.assertRaises(类型错误):
+                _stdlib_确保Future(42)
+
+        asyncio.run(test())
+
+    def test_屏蔽取消(self):
+        async def test():
+            inner = asyncio.create_task(self._value(1))
+            self.assertEqual(await _stdlib_屏蔽取消(inner), 1)
+
+        asyncio.run(test())
+
+    def test_组合等待(self):
+        async def test():
+            results = await _stdlib_组合等待(
+                self._value(1), self._value(2), 3
+            )
+            self.assertEqual(results, [1, 2, 3])
+
+        asyncio.run(test())
+
+    def test_是否为Future(self):
+        loop = asyncio.new_event_loop()
+        try:
+            self.assertTrue(_stdlib_是否为Future(loop.create_future()))
+            self.assertFalse(_stdlib_是否为Future(42))
+        finally:
+            loop.close()
 
 
 if __name__ == "__main__":

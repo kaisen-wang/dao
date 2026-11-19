@@ -4,6 +4,7 @@ from ...ast_nodes import (
     AbstractDecl,
     ClassDecl,
     EnumDecl,
+    EnumValues,
     EnumVariant,
     FunctionDecl,
     Statement,
@@ -17,20 +18,88 @@ class OOPDeclParser:
     """面向对象声明解析方法集"""
 
     def parse_enum_decl(self) -> EnumDecl:
-        """解析枚举声明：枚举 名字 ..."""
+        """解析枚举声明：枚举 名字 [实现 特征1, 特征2] ...
+
+        支持两种写法：
+        1. ``枚举 颜色 实现 可序列化``（实现子句与声明同行）
+        2. 缩进块首行 ``实现 可序列化``（与类型声明一致）
+        枚举体内还可以定义 ``函数 方法()``。
+        """
 
         token = self.advance()  # 消费 枚举
         name_token = self.expect(TokenType.标识符, "枚举声明需要一个枚举名")
 
+        implemented_traits = []
+        # 同行写法：枚举 颜色 实现 可序列化
+        if self.match(TokenType.实现):
+            while True:
+                trait_token = self.expect(TokenType.标识符, "'实现' 后需要特征名")
+                implemented_traits.append(trait_token.value)
+                if not self.match(TokenType.逗号):
+                    break
+
         self.expect(TokenType.换行, "枚举声明后需要换行")
         self.expect(TokenType.缩进, "枚举值需要缩进块")
 
-        values = []
+        values = EnumValues()
         variants = []
+        methods = []
+        # 先创建声明节点，让值列表能通过 decl 引用到完整的枚举声明
+        decl = EnumDecl(
+            name=name_token.value,
+            values=values,
+            variants=variants,
+            implemented_traits=implemented_traits,
+            methods=methods,
+            line=token.line,
+            column=token.column,
+        )
+        values.decl = decl
+
         while self.current.type not in (TokenType.回退, TokenType.文件结束):
             self.skip_newlines()
             if self.current.type in (TokenType.回退, TokenType.文件结束):
                 break
+
+            # 缩进块内的实现子句（与类型声明的写法一致）
+            if self.match(TokenType.实现):
+                while True:
+                    trait_token = self.expect(TokenType.标识符, "'实现' 后需要特征名")
+                    implemented_traits.append(trait_token.value)
+                    if not self.match(TokenType.逗号):
+                        break
+                self.skip_newlines()
+                continue
+
+            # 枚举方法：函数 方法(参数) ...，实例可调用
+            if self.current.type in (
+                TokenType.静态,
+                TokenType.私有,
+                TokenType.受保护,
+                TokenType.函数,
+            ):
+                is_static = False
+                is_private = False
+                is_protected = False
+                while self.current.type in (
+                    TokenType.静态,
+                    TokenType.私有,
+                    TokenType.受保护,
+                ):
+                    if self.current.type == TokenType.静态:
+                        is_static = True
+                    elif self.current.type == TokenType.私有:
+                        is_private = True
+                    else:
+                        is_protected = True
+                    self.advance()
+                func = self.parse_function_decl()
+                func.is_static = is_static
+                func.is_private = is_private
+                func.is_protected = is_protected
+                methods.append(func)
+                self.skip_newlines()
+                continue
 
             value_token = self.expect(TokenType.标识符, "枚举值需要是标识符")
             variant_name = value_token.value
@@ -60,13 +129,7 @@ class OOPDeclParser:
 
         self.expect(TokenType.回退, "枚举声明需要回退")
 
-        return EnumDecl(
-            name=name_token.value,
-            values=values,
-            variants=variants,
-            line=token.line,
-            column=token.column,
-        )
+        return decl
 
     def parse_abstract_decl(self) -> AbstractDecl:
         """解析抽象类型声明：抽象 类型 名字 [继承自 父类] ..."""

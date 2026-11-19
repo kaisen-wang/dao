@@ -129,8 +129,11 @@ class MacroScope:
         if variable:
             variable.add_use(line)
         else:
-            # 如果变量未定义，视为自由变量
+            # 如果变量未定义，视为自由变量（仍需记录使用位置）
             self.current.add_variable(name, False, -1)
+            variable = self.current.get_variable(name)
+            if variable is not None:
+                variable.add_use(line)
 
     def get_used_variables(self) -> List[VariableInfo]:
         """获取当前作用域链中所有被使用的变量"""
@@ -283,9 +286,11 @@ class MacroScope:
 
         for var in captures:
             # 为可能被捕获的变量生成唯一名称
-            unique_name = self.generate_unique_name(var.name)
-            self.rewrite_variable(var.name, unique_name)
-            rewrite_map[var.name] = unique_name
+            # rewrite_variable 会原地修改 var.name，故先保存原始名称作为映射键
+            original_name = var.name
+            unique_name = self.generate_unique_name(original_name)
+            self.rewrite_variable(original_name, unique_name)
+            rewrite_map[original_name] = unique_name
 
         return rewrite_map
 

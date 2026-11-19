@@ -64,8 +64,11 @@ class AsyncContext:
 
         Returns:
             最先完成的协程的返回值
-            超时返回 None
+            超时或空列表返回 None
         """
+        if not coros:
+            return None
+
         tasks = [asyncio.ensure_future(c) for c in coros]
 
         try:

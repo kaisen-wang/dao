@@ -1,5 +1,7 @@
 import sys
 import os
+from io import StringIO
+from contextlib import redirect_stdout
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -58,3 +60,19 @@ class TestVirtualMachine:
 
     def test_string_concat(self):
         assert run_vm('定义 x = "hello" + " world"\nx') == "hello world"
+
+    def test_builtin_print(self):
+        buf = StringIO()
+        with redirect_stdout(buf):
+            run_vm('打印("你好，世界！")')
+        assert buf.getvalue().strip() == "你好，世界！"
+
+    def test_builtin_length(self):
+        assert run_vm('定义 x = 长度([1, 2, 3])\nx') == 3
+
+    def test_builtin_in_function(self):
+        src = "函数 greet()\n  打印(\"在函数内\")\ngreet()"
+        buf = StringIO()
+        with redirect_stdout(buf):
+            run_vm(src)
+        assert buf.getvalue().strip() == "在函数内"

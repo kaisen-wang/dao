@@ -40,7 +40,25 @@ class ConcurrencyEvaluator:
     """并发编程解释器混入类"""
 
     def __init__(self):
-        self.async_context = AsyncContext()
+        self._async_context = None
+
+    @property
+    def async_context(self) -> AsyncContext:
+        """延迟创建异步上下文。
+
+        不能在构造期直接创建：AsyncContext 依赖 asyncio 事件循环，而某些
+        测试会关闭当前线程的事件循环，之后新建 Interpreter 若在 __init__
+        阶段调用 asyncio.get_event_loop() 会抛 RuntimeError。推迟到首次
+        真正使用异步功能时创建，既保证可用性又避免构造副作用。
+        """
+        if getattr(self, "_async_context", None) is None:
+            self._async_context = AsyncContext()
+        return self._async_context
+
+    @async_context.setter
+    def async_context(self, value: AsyncContext):
+        """允许外部注入自定义异步上下文（如测试中设置好的事件循环）。"""
+        self._async_context = value
 
     # ========================
     # 异步函数
@@ -118,7 +136,7 @@ class ConcurrencyEvaluator:
             elif asyncio.iscoroutine(value):
                 coros.append(value)
             else:
-                coros.append(asyncio.to_thread(lambda: value))
+                coros.append(asyncio.to_thread(lambda v=value: v))
 
         # 使用封装后的 run_all，返回道语言友好的列表结构
         return await self.async_context.run_all(coros)
@@ -139,7 +157,7 @@ class ConcurrencyEvaluator:
             elif asyncio.iscoroutine(value):
                 coros.append(value)
             else:
-                coros.append(asyncio.to_thread(lambda: value))
+                coros.append(asyncio.to_thread(lambda v=value: v))
 
         # 使用封装后的 run_race，返回道语言友好的结果
         return await self.async_context.run_race(coros)

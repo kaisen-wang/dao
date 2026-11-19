@@ -148,7 +148,11 @@ def _stdlib_等待全部(任务列表, 超时=None):
             elif isinstance(t, _asyncio.Task):
                 tasks.append(t)
             else:
-                tasks.append(_asyncio.create_task(_asyncio.coroutine(lambda: t)()))
+                # asyncio.coroutine 已在 Python 3.11 移除，改用普通协程包装
+                async def _wrap(value=t):
+                    return value
+
+                tasks.append(_asyncio.create_task(_wrap()))
 
         if 超时 is not None:
             results = await _asyncio.wait_for(
@@ -816,7 +820,19 @@ def _stdlib_组合等待(*可等待对象):
     等待后返回结果列表。
     """
     async def _do():
-        results = await _asyncio.gather(*可等待对象, return_exceptions=True)
+        awaitables = []
+        for item in 可等待对象:
+            if _asyncio.iscoroutine(item) or isinstance(
+                item, (_asyncio.Future, _asyncio.Task)
+            ) or hasattr(item, "__await__"):
+                awaitables.append(item)
+            else:
+                # gather 不接受普通值，先包装成协程
+                async def _wrap(value=item):
+                    return value
+
+                awaitables.append(_wrap())
+        results = await _asyncio.gather(*awaitables, return_exceptions=True)
         return [
             r if not isinstance(r, Exception) else {"错误": str(r)}
             for r in results

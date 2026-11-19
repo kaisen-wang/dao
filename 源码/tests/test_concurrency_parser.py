@@ -365,3 +365,131 @@ class TestConcurrencyInterpreter:
         )
         output = capture_output(source)
         assert output.strip() == '30'
+
+
+# ============================================================
+# 并发解析器分支补测
+# ============================================================
+
+class TestConcurrencyParserBranches:
+    """覆盖并发解析器的修饰符、等待表达式与选择语句各语法变体"""
+
+    @staticmethod
+    def _find(node, node_type):
+        """在 AST 中递归查找指定类型的节点"""
+        if isinstance(node, node_type):
+            return node
+        for attr in ("expression", "channel", "value", "mutex", "condition",
+                     "timeout_value", "target"):
+            child = getattr(node, attr, None)
+            if child is not None and hasattr(child, "__class__"):
+                found = TestConcurrencyParserBranches._find(child, node_type)
+                if found is not None:
+                    return found
+        for attr in ("statements", "body", "expressions", "elements", "cases"):
+            children = getattr(node, attr, None)
+            if isinstance(children, list):
+                for child in children:
+                    found = TestConcurrencyParserBranches._find(child, node_type)
+                    if found is not None:
+                        return found
+        return None
+
+    def test_async_function_modifiers(self):
+        ast = parse('异步 静态 私有 函数 取数()\n    返回 1\n')
+        stmt = ast.statements[0]
+        assert stmt.__class__.__name__ == 'AsyncFunctionDecl'
+        assert stmt.is_static is True
+        assert stmt.is_private is True
+
+    def test_async_function_skips_blank_lines(self):
+        ast = parse('异步 函数 取数()\n\n\n    返回 1\n')
+        assert ast.statements[0].__class__.__name__ == 'AsyncFunctionDecl'
+
+    def test_await_expr(self):
+        from dao.ast_nodes import AwaitExpr
+        ast = parse('定义 结果 = 等待 取值()\n')
+        assert self._find(ast, AwaitExpr) is not None
+
+    def test_await_all_expr(self):
+        from dao.ast_nodes import AwaitAllExpr
+        ast = parse('定义 结果 = 全部(取值(), 另一个())\n')
+        node = self._find(ast, AwaitAllExpr)
+        assert node is not None
+        assert len(node.expressions) == 2
+
+    def test_await_race_expr(self):
+        from dao.ast_nodes import AwaitRaceExpr
+        ast = parse('定义 结果 = 竞速(取值(), 另一个(), 第三个())\n')
+        node = self._find(ast, AwaitRaceExpr)
+        assert node is not None
+        assert len(node.expressions) == 3
+
+    def test_send_stmt_with_comma(self):
+        ast = parse('发送 ch, 42\n')
+        assert ast.statements[0].__class__.__name__ == 'SendStmt'
+
+    def test_receive_expr(self):
+        from dao.ast_nodes import ReceiveExpr
+        ast = parse('定义 值 = 接收 ch\n')
+        assert self._find(ast, ReceiveExpr) is not None
+
+    def test_select_dang_condition_case(self):
+        ast = parse('选择\n    当 真\n        打印("ok")\n')
+        stmt = ast.statements[0]
+        assert stmt.cases[0].type == 'condition'
+        assert getattr(stmt.cases[0], 'condition', None) is not None
+
+    def test_select_dang_receive_case(self):
+        ast = parse('选择\n    当 值 = 接收 ch\n        打印(值)\n')
+        case = ast.statements[0].cases[0]
+        assert case.type == 'receive'
+        assert case.variable == '值'
+
+    def test_select_dang_timeout_case(self):
+        ast = parse('选择\n    当 超时(0.1)\n        打印("超时")\n')
+        case = ast.statements[0].cases[0]
+        assert case.type == 'timeout'
+        assert case.timeout_value is not None
+
+    def test_select_default_case(self):
+        ast = parse('选择\n    默认\n        打印("默认")\n')
+        case = ast.statements[0].cases[0]
+        assert case.type == 'timeout'
+        assert case.timeout_value is None
+
+    def test_select_braces_syntax(self):
+        ast = parse('选择 {\n    情况 接收 ch 作为 值:\n        打印(值)\n}\n')
+        case = ast.statements[0].cases[0]
+        assert case.type == 'receive'
+        assert case.variable == '值'
+
+    def test_select_case_timeout(self):
+        ast = parse('选择\n    情况 超时(0.1):\n        打印("超时")\n')
+        case = ast.statements[0].cases[0]
+        assert case.type == 'timeout'
+        assert len(case.body) >= 1
+
+    def test_select_case_single_statement_body(self):
+        ast = parse('选择\n    情况 接收 ch 作为 值: 打印(值)\n')
+        case = ast.statements[0].cases[0]
+        assert len(case.body) == 1
+
+    def test_select_invalid_branch_raises(self):
+        from dao.errors import 语法错误
+        with pytest.raises(语法错误):
+            parse('选择\n    打印("x")\n')
+
+    def test_select_invalid_case_type_raises(self):
+        from dao.errors import 语法错误
+        with pytest.raises(语法错误):
+            parse('选择\n    情况 真: 打印(1)\n')
+
+    def test_parse_param_list_directly(self):
+        from dao.ast_nodes import NumberLiteral
+        from dao.parser.modules.concurrency import ConcurrencyParser
+        parser = Parser(Lexer('a, b = 2)').tokenize())
+        params, defaults = ConcurrencyParser._parse_param_list(parser)
+        assert params == ['a', 'b']
+        assert isinstance(defaults['b'], NumberLiteral)
+        assert defaults['b'].value == 2

@@ -24,6 +24,23 @@ from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误, 
 from ..logic.core import LogicVariable as RuntimeLogicVariable
 
 
+class BoundEnumMethod(DaoCallable):
+    """绑定到枚举变体实例的方法，调用时由解释器把 本对象 绑定为该变体"""
+
+    def __init__(self, variant, method: DaoFunction):
+        self.variant = variant
+        self.method = method
+
+    def arity(self) -> int:
+        return self.method.arity()
+
+    def call(self, args: list, kwargs: dict) -> object:
+        raise NotImplementedError("枚举方法调用由解释器处理")
+
+    def __repr__(self) -> str:
+        return f"<方法 {self.variant.enum_name}.{self.method.name}>"
+
+
 class ExpressionEvaluator:
     """表达式求值方法集（混入类）"""
 
@@ -216,6 +233,95 @@ class ExpressionEvaluator:
     # 成员与索引访问
     # ========================
 
+    def _get_enum_method_table(self, enum_obj, env: Environment):
+        """构建枚举的方法表，返回 (实例方法, 静态方法)。
+
+        枚举声明在运行时由 executor 保存为 DaoEnum，其 values 列表携带
+        对 EnumDecl 的引用。这里据此把枚举体内的方法与所实现特征的方法
+        转换成 DaoFunction，并缓存在枚举对象上避免重复构建。
+        """
+        from ..builtins.oop_types import DaoTrait
+
+        cache_attr = "_dao_enum_method_table"
+        cached = getattr(enum_obj, cache_attr, None)
+        if cached is not None:
+            return cached
+
+        decl = getattr(getattr(enum_obj, "values", None), "decl", None)
+
+        methods: dict = {}
+        static_methods: dict = {}
+        if decl is not None:
+            # 找到声明该枚举的作用域，作为方法闭包环境（支持函数内声明的枚举）
+            decl_env = None
+            cur = env
+            while cur is not None:
+                if getattr(cur, "values", {}).get(enum_obj.name) is enum_obj:
+                    decl_env = cur
+                    break
+                cur = getattr(cur, "parent", None)
+            if decl_env is None:
+                decl_env = env
+                while getattr(decl_env, "parent", None) is not None:
+                    decl_env = decl_env.parent
+
+            for s in getattr(decl, "methods", []):
+                func = DaoFunction(
+                    name=s.name,
+                    params=s.params,
+                    default_values={
+                        k: self.eval_expression(v, decl_env)
+                        for k, v in s.default_values.items()
+                    },
+                    body=s.body,
+                    closure_env=decl_env,
+                    is_generator=self._has_yield(s.body),
+                )
+                if getattr(s, "is_static", False):
+                    static_methods[s.name] = func
+                else:
+                    methods[s.name] = func
+
+            # 复用现有的特征机制：解析特征名，并把特征方法作为默认实现
+            for trait_name in getattr(decl, "implemented_traits", []):
+                trait_obj = env.get(trait_name)
+                if not isinstance(trait_obj, DaoTrait):
+                    raise 类型错误(
+                        f"'{trait_name}' 不是一个特征",
+                        decl.line,
+                        decl.column,
+                        self.source,
+                    )
+                for name, func in trait_obj.methods.items():
+                    methods.setdefault(name, func)
+                for name, func in trait_obj.static_methods.items():
+                    static_methods.setdefault(name, func)
+
+        result = (methods, static_methods)
+        try:
+            setattr(enum_obj, cache_attr, result)
+        except Exception:
+            pass
+        return result
+
+    def _call_enum_method(self, variant, method: DaoFunction, args, kwargs, call_expr):
+        """调用绑定到枚举变体的方法（绑定 本对象）"""
+        func_env = method.closure_env.create_child()
+        func_env.define("本对象", variant)
+        self._bind_params(method, args, kwargs, func_env, call_expr)
+
+        line = call_expr.line if call_expr else 0
+        file = getattr(call_expr, "file", "") if call_expr else ""
+        func_env.push_frame(f"{variant.enum_name}.{method.name}", file, line)
+        try:
+            self._exec_block(method.body, func_env)
+        except 返回信号 as ret:
+            return ret.value
+        finally:
+            if func_env.current_frame:
+                func_env.pop_frame()
+        return None
+
     def eval_member_access(self, expr: MemberAccess, env: Environment) -> object:
         """求值成员访问"""
         from .statements import DaoEnum, DaoEnumVariant
@@ -354,6 +460,10 @@ class ExpressionEvaluator:
         from ..builtins.oop_types import DaoClass
 
         if isinstance(obj, DaoEnum):
+            # 枚举类型上定义的静态方法 / 实现特征的静态方法
+            _, static_methods = self._get_enum_method_table(obj, env)
+            if expr.member in static_methods:
+                return static_methods[expr.member]
             if expr.member in obj.values:
                 if obj.has_variant_params(expr.member):
                     from ..builtins.callables import BuiltinFunction
@@ -363,6 +473,44 @@ class ExpressionEvaluator:
                 return DaoEnumVariant(obj.name, expr.member)
             raise 名称错误(
                 f"枚举 '{obj.name}' 中不存在变体 '{expr.member}'",
+                expr.line,
+                expr.column,
+                self.source,
+            )
+
+        if isinstance(obj, DaoEnumVariant):
+            # 枚举实例（变体）的方法：枚举体内定义的方法 + 实现特征的方法
+            try:
+                enum_obj = env.get(obj.enum_name)
+            except 名称错误:
+                enum_obj = None
+            methods = {}
+            if enum_obj is not None:
+                methods, _ = self._get_enum_method_table(enum_obj, env)
+            if expr.member in methods:
+                return BoundEnumMethod(obj, methods[expr.member])
+
+            # 关联值支持按变体参数名访问，例如 形状.圆形(5).半径
+            if enum_obj is not None:
+                for v in getattr(enum_obj, "variants", []):
+                    if getattr(v, "name", None) == obj.variant_name:
+                        params = getattr(v, "params", [])
+                        if expr.member in params:
+                            idx = params.index(expr.member)
+                            if idx < len(obj.data):
+                                return obj.data[idx]
+                        break
+
+            # 内建字段
+            if expr.member == "数据":
+                return obj.data
+            if expr.member == "变体名":
+                return obj.variant_name
+            if expr.member == "枚举名":
+                return obj.enum_name
+
+            raise 名称错误(
+                f"枚举 '{obj.enum_name}.{obj.variant_name}' 没有属性或方法 '{expr.member}'",
                 expr.line,
                 expr.column,
                 self.source,
@@ -686,6 +834,9 @@ class ExpressionEvaluator:
         if isinstance(callee, BoundMethod):
             return self._call_method(callee.instance, callee.method, args, kwargs, expr)
 
+        if isinstance(callee, BoundEnumMethod):
+            return self._call_enum_method(callee.variant, callee.method, args, kwargs, expr)
+
         # 检查是否是 DaoError 子类（自定义异常类型）
         from ..builtins.oop_types import DaoError
 
@@ -797,13 +948,19 @@ class ExpressionEvaluator:
         else:
             evaluated = self.eval_expression(expanded, env)
 
-        # 处理数据结构类型的返回值
+        # 处理数据结构类型的返回值：
+        # - dict 且带 __type__ 是 DataToAST 回传的 AST 数据，需转换并求值；
+        # - list 仅在元素也是 AST 数据字典（宏注入产生的语句列表）时才拆包，
+        #   以便交给 DataToAST 转换；普通值列表（如宏返回的 [1,2,3]）必须
+        #   作为整体返回，不能被压成最后一个元素。
         while isinstance(evaluated, (list, dict)):
             if isinstance(evaluated, list):
-                if len(evaluated) == 1:
-                    evaluated = evaluated[0]
+                if evaluated and all(
+                    isinstance(x, dict) and "__type__" in x for x in evaluated
+                ):
+                    evaluated = evaluated[0] if len(evaluated) == 1 else evaluated[-1]
                 else:
-                    evaluated = evaluated[-1]
+                    break
             elif isinstance(evaluated, dict) and "__type__" in evaluated:
                 evaluated = DataToAST.convert(evaluated)
                 evaluated = self.eval_expression(evaluated, env)

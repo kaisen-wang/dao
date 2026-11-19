@@ -40,8 +40,14 @@ build/
 ### Python ###
 venv/
 .venv/
+.venv*/
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
 .pytest_cache/
+.coverage
+.coverage.*
+
+### WorkBuddy ###
+.workbuddy/

@@ -231,10 +231,14 @@ def _extract_object_value(value: Any) -> Any:
     # 策略2: 值 属性
     if hasattr(value, '值'):
         return value.值
-    # 策略3: 第一个非特殊属性
-    for attr_name in dir(value):
-        if not attr_name.startswith('_') and attr_name not in ('__dao_class__', '__variant__'):
-            return getattr(value, attr_name)
+    # 策略3: 第一个非特殊、非方法的实例属性
+    # 仅检查实例字典，避免把内置类型的公开属性（如 int.denominator）误当作内部值
+    obj_dict = getattr(value, '__dict__', None)
+    if isinstance(obj_dict, dict):
+        for attr_name, attr in obj_dict.items():
+            if not attr_name.startswith('_') and attr_name not in ('__dao_class__', '__variant__'):
+                if not callable(attr):
+                    return attr
     return value
 
 
@@ -680,8 +684,15 @@ class PatternMatchEngine:
             "数值": (int, float),
             "文本": str,
             "布尔": bool,
-            "函数": callable,
         }
+
+        # 函数类型用 callable() 判断：callable 是内置函数而非类型，不能传给 isinstance
+        if pattern.type_name == "函数":
+            if callable(value):
+                return MatchResult.success()
+            return MatchResult.failure(
+                f"类型检查不匹配: 期望 类型:{pattern.type_name}，实际 {type(value).__name__}"
+            )
 
         target_type = type_map.get(pattern.type_name)
         if target_type is None:

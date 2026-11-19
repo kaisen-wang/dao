@@ -48,14 +48,21 @@ class ExpressionParser:
 
     def parse_expression(self) -> Expression:
         """解析表达式（入口）"""
-        return self.parse_conditional()
+        expr = self.parse_conditional()
+        # 约束范围 ``?x 在范围 a..b`` 属于中缀语法：变量名在 ``在范围``
+        # 之前已解析为 expr。这里把左侧变量委托给逻辑编程模块的
+        # parse_logic_constraint，统一处理上下界（含负数）与中文报错，
+        # 避免与规则体中的约束解析产生两套不一致的逻辑。
+        if self.current.type == TokenType.在范围:
+            return self.parse_logic_constraint(expr)
+        return expr
 
     # ========================
     # 优先级 0: 条件表达式
     # ========================
 
     def parse_conditional(self) -> Expression:
-        """解析条件表达式：值 如果 条件 否则 值"""
+        """解析条件表达式：值 如果 条件 否则 值，或 条件 ? 真值 : 假值"""
         expr = self.parse_pipe()
         if self.current.type == TokenType.如果:
             true_value = expr
@@ -69,6 +76,20 @@ class ExpressionParser:
                 false_value=false_value,
                 line=true_value.line,
                 column=true_value.column,
+            )
+        # C 风格三元：? 被词法器识别为值恰为 '?' 的标识符（?x 这类逻辑
+        # 变量的值带后缀，不会误命中）。复用 ConditionalExpr 节点与求值逻辑。
+        if self.current.type == TokenType.标识符 and self.current.value == "?":
+            self.advance()  # 消费 ?
+            true_value = self.parse_conditional()
+            self.expect(TokenType.冒号, "三元条件表达式需要 ':'")
+            false_value = self.parse_conditional()  # 右结合
+            return ConditionalExpr(
+                true_value=true_value,
+                condition=expr,
+                false_value=false_value,
+                line=expr.line,
+                column=expr.column,
             )
         return expr
 
@@ -106,6 +127,10 @@ class ExpressionParser:
         """解析 并且 表达式"""
         left = self.parse_not()
         while self.match(TokenType.并且):
+            # 行尾 ``并且`` 后允许换行续写（如数独/调度示例中的多行约束），
+            # 跳过换行后继续解析右侧表达式，单行场景不受影响。
+            while self.current.type == TokenType.换行:
+                self.advance()
             right = self.parse_not()
             left = BinaryOp(
                 left=left,
@@ -296,14 +321,42 @@ class ExpressionParser:
                     column=expr.column,
                 )
             elif self.match(TokenType.点):
-                # 成员访问（接受标识符和部分关键字作为成员名）
-                member_name = self._expect_member_name()
-                expr = MemberAccess(
-                    object=expr,
-                    member=member_name,
-                    line=expr.line,
-                    column=expr.column,
-                )
+                # 数字下标成员访问：a.0 / a.12 / a.-1 → IndexAccess
+                # 复用 a[0] 的 IndexAccess 节点与求值逻辑；非整数下标直接
+                # 报错，避免求值端 int() 截断造成静默错误。
+                if self.current.type == TokenType.数值 or (
+                    self.current.type == TokenType.减
+                    and self.peek().type == TokenType.数值
+                ):
+                    sign = 1
+                    if self.current.type == TokenType.减:
+                        self.advance()  # 消费负号
+                        sign = -1
+                    idx_token = self.advance()  # 消费数字
+                    value = idx_token.value
+                    if isinstance(value, (int, float)) and float(value).is_integer():
+                        index_expr = NumberLiteral(
+                            value=sign * int(value),
+                            line=idx_token.line,
+                            column=idx_token.column,
+                        )
+                    else:
+                        raise self._error(f"成员下标必须是整数，但得到 '{value}'")
+                    expr = IndexAccess(
+                        object=expr,
+                        index=index_expr,
+                        line=expr.line,
+                        column=expr.column,
+                    )
+                else:
+                    # 字符串成员访问（接受标识符和部分关键字作为成员名）
+                    member_name = self._expect_member_name()
+                    expr = MemberAccess(
+                        object=expr,
+                        member=member_name,
+                        line=expr.line,
+                        column=expr.column,
+                    )
             elif self.match(TokenType.左方括号):
                 index = self.parse_expression()
                 self.expect(TokenType.右方括号, "索引访问需要 ']'")
@@ -654,39 +707,14 @@ class ExpressionParser:
         return LogicCut(line=token.line, column=token.column)
 
     def parse_logic_constraint_range(self) -> "LogicConstraint":
-        """解析约束范围：?x 在范围 1..10"""
-        from ..ast_nodes import LogicConstraint
+        """解析约束范围：在范围 1..10
 
-        token = self.advance()  # 消费 在范围
-
-        # 解析下界
-        low = self.parse_expression()
-
-        # 期望区间运算符 ..
-        if self.current.type != TokenType.区间:
-            raise self._error("约束范围需要区间运算符 '..'")
-        self.advance()  # 消费 ..
-
-        # 解析上界
-        high = self.parse_expression()
-
-        # 提取变量名和边界值
-        var_name = ""
-        low_val = 0
-        high_val = 0
-
-        if isinstance(low, NumberLiteral):
-            low_val = int(low.value)
-        if isinstance(high, NumberLiteral):
-            high_val = int(high.value)
-
-        return LogicConstraint(
-            variable=var_name,
-            operator="在范围",
-            bounds=(low_val, high_val),
-            line=token.line,
-            column=token.column,
-        )
+        这是 ``parse_primary`` 遇到 ``在范围`` 时的兼容入口。变量名位于
+        ``在范围`` 之前，此处通常无法直接取得，统一委托给逻辑编程模块的
+        ``parse_logic_constraint``，以复用其整数边界校验与中文报错语义，
+        避免再维护一套硬编码为空变量 / 0 边界的旧逻辑。
+        """
+        return self.parse_logic_constraint("")
 
     def parse_template_literal(self) -> TemplateLiteral:
         """解析模板字符串：`你好 {名字}，{年龄}岁`"""

@@ -234,7 +234,7 @@ def query(knowledge_base: KnowledgeBase, goal_str: str) -> list[Dict[str, Any]]:
     Returns:
         查询结果的字典列表
     """
-    from dao.ast_nodes import FunctionCall
+    from ..ast_nodes import FunctionCall
 
     # 这里我们需要解析查询字符串，但由于没有完整的解析器上下文
     # 我们实现一个简单的解析器来处理基本查询格式
@@ -258,37 +258,37 @@ def query(knowledge_base: KnowledgeBase, goal_str: str) -> list[Dict[str, Any]]:
                 token = token.strip()
                 # 检查是否是变量（以?开头）
                 if token.startswith("?"):
-                    from dao.logic.core import LogicVariable
+                    from .core import LogicVariable
 
                     args.append(LogicVariable(token))
                 # 检查是否是字符串字面量（带引号）
                 elif (token.startswith("'") and token.endswith("'")) or (
                     token.startswith('"') and token.endswith('"')
                 ):
-                    from dao.logic.core import LogicAtom
+                    from .core import LogicAtom
 
                     args.append(LogicAtom(token[1:-1]))
                 # 检查是否是数值
                 elif token.isdigit() or (token.startswith("-") and token[1:].isdigit()):
-                    from dao.logic.core import LogicAtom
+                    from .core import LogicAtom
 
                     args.append(LogicAtom(int(token)))
                 # 检查是否是布尔值
                 elif token.lower() == "真" or token.lower() == "true":
-                    from dao.logic.core import LogicAtom
+                    from .core import LogicAtom
 
                     args.append(LogicAtom(True))
                 elif token.lower() == "假" or token.lower() == "false":
-                    from dao.logic.core import LogicAtom
+                    from .core import LogicAtom
 
                     args.append(LogicAtom(False))
                 # 其他情况作为原子
                 else:
-                    from dao.logic.core import LogicAtom
+                    from .core import LogicAtom
 
                     args.append(LogicAtom(token))
 
-        from dao.logic.core import LogicStruct
+        from .core import LogicStruct
 
         return LogicStruct(predicate, tuple(args))
 

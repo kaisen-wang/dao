@@ -562,3 +562,323 @@ def test_exhaustiveness_variable_binding_no_guard():
     ]
     warnings = checker.check(branches)
     assert len(warnings) > 0
+
+
+# ============================================================
+# 模式匹配引擎深度单元测试
+# ============================================================
+
+from dao.ast_nodes import (
+    NumberLiteral, StringLiteral, BooleanLiteral, NullLiteral,
+    Identifier, ListPattern, DictPattern, TypeCheckPattern,
+    EnumVariantPattern, PatternBranch, QuoteBlock,
+)
+from dao.macros.pattern_engine import (
+    PatternType, MatchResult, PatternMatchEngine,
+    DaoEnumProtocol, DictEnumAdapter, DaoStandardEnumAdapter,
+    DuckTypeEnumAdapter, adapt_to_enum_protocol,
+    classify_pattern, describe_pattern, _extract_object_value,
+)
+
+
+class _MyEnum(DaoEnumProtocol):
+    @property
+    def dao_class_name(self):
+        return "结果"
+
+    @property
+    def dao_variant_name(self):
+        return "成功"
+
+    @property
+    def dao_inner_value(self):
+        return 42
+
+
+def test_pattern_type_and_classify():
+    assert classify_pattern(NumberLiteral(value=1)) == PatternType.LITERAL
+    assert classify_pattern(StringLiteral(value="a")) == PatternType.LITERAL
+    assert classify_pattern(BooleanLiteral(value=True)) == PatternType.LITERAL
+    assert classify_pattern(NullLiteral()) == PatternType.LITERAL
+    assert classify_pattern(Identifier(name="_")) == PatternType.WILDCARD
+    assert classify_pattern(Identifier(name="x")) == PatternType.VARIABLE_BINDING
+    assert classify_pattern(ListPattern()) == PatternType.LIST_DESTRUCTURE
+    assert classify_pattern(DictPattern()) == PatternType.DICT_DESTRUCTURE
+    assert classify_pattern(TypeCheckPattern(type_name="数值")) == PatternType.TYPE_CHECK
+    assert classify_pattern(EnumVariantPattern()) == PatternType.ENUM_VARIANT
+    assert classify_pattern(object()) == PatternType.UNKNOWN
+    assert PatternType.LITERAL.value == "字面量"
+
+
+def test_describe_pattern():
+    assert "字面量模式: 1" in describe_pattern(NumberLiteral(value=1))
+    assert '字面量模式: "a"' in describe_pattern(StringLiteral(value="a"))
+    assert "真" in describe_pattern(BooleanLiteral(value=True))
+    assert "假" in describe_pattern(BooleanLiteral(value=False))
+    assert "空" in describe_pattern(NullLiteral())
+    assert "通配符模式" in describe_pattern(Identifier(name="_"))
+    assert "变量绑定模式: x" in describe_pattern(Identifier(name="x"))
+    assert "列表解构模式" in describe_pattern(ListPattern(elements=[Identifier(name="x")]))
+    assert "展开操作符" in describe_pattern(
+        ListPattern(elements=[Identifier(name="x")], has_spread=True)
+    )
+    assert "枚举变体模式" in describe_pattern(
+        EnumVariantPattern(enum_name="结果", variant_name="成功", binding="v")
+    )
+    assert "类型检查模式" in describe_pattern(TypeCheckPattern(type_name="数值"))
+    assert "未知模式" in describe_pattern(object())
+
+
+def test_describe_pattern_nested():
+    desc = describe_pattern(DictPattern(pairs=[
+        (StringLiteral(value="k"), ListPattern(elements=[Identifier(name="x")])),
+        (NumberLiteral(value=1), Identifier(name="y")),
+        (BooleanLiteral(value=True), Identifier(name="z")),
+        (NullLiteral(), Identifier(name="w")),
+        (Identifier(name="key"), Identifier(name="q")),  # 非字面量键 → '?'
+    ]))
+    assert "字典解构模式" in desc and "列表解构模式" in desc
+    assert "?" in desc and "通配符" not in desc
+
+
+def test_enum_adapters():
+    data = {"__type__": "enum", "类": "结果", "变体": "成功", "值": 7}
+    assert DictEnumAdapter.can_adapt(data) is True
+    assert DictEnumAdapter.can_adapt({"a": 1}) is False
+    adapter = DictEnumAdapter(data)
+    assert adapter.dao_class_name == "结果"
+    assert adapter.dao_variant_name == "成功"
+    assert adapter.dao_inner_value == 7
+    assert adapter.matches_enum("结果", "成功") is True
+
+    class Std:
+        __dao_class__ = "颜色"
+        __variant__ = "红"
+
+        def __init__(self):
+            self._value = 9
+
+    std_adapter = DaoStandardEnumAdapter(Std())
+    assert std_adapter.dao_class_name == "颜色"
+    assert std_adapter.dao_variant_name == "红"
+    assert std_adapter.dao_inner_value == 9
+
+    class 苹果:
+        def __init__(self):
+            self.值 = 5
+
+    duck = DuckTypeEnumAdapter(苹果())
+    assert duck.dao_class_name == "苹果" and duck.dao_variant_name == "苹果"
+    assert duck.dao_inner_value == 5
+    assert DuckTypeEnumAdapter.can_adapt(苹果()) is True
+    assert DuckTypeEnumAdapter.can_adapt({"a": 1}) is False
+    assert DuckTypeEnumAdapter.can_adapt(_MyEnum()) is False
+
+
+def test_adapt_to_enum_protocol():
+    my = _MyEnum()
+    assert adapt_to_enum_protocol(my) is my
+
+    class Std:
+        __dao_class__ = "颜色"
+        __variant__ = "红"
+
+    assert isinstance(adapt_to_enum_protocol(Std()), DaoStandardEnumAdapter)
+    assert isinstance(
+        adapt_to_enum_protocol({"__type__": "enum", "类": "结果", "变体": "成功"}),
+        DictEnumAdapter,
+    )
+
+    class 苹果:
+        pass
+
+    assert isinstance(adapt_to_enum_protocol(苹果()), DuckTypeEnumAdapter)
+    assert adapt_to_enum_protocol({"a": 1}) is None
+
+
+def test_extract_object_value():
+    class A:
+        def __init__(self):
+            self._value = 1
+
+    class B:
+        def __init__(self):
+            self.值 = 2
+
+    class C:
+        __dao_class__ = "x"
+        __variant__ = "y"
+
+        def __init__(self):
+            self.foo = 3
+
+    assert _extract_object_value(A()) == 1
+    assert _extract_object_value(B()) == 2
+    assert _extract_object_value(C()) == 3
+    assert _extract_object_value(42) == 42
+    assert _MyEnum().matches_enum("结果", "成功") is True
+
+
+def test_match_result():
+    ok = MatchResult.success({"x": 1})
+    assert ok.matched is True and ok.bindings == {"x": 1}
+    fail = MatchResult.failure("原因")
+    assert fail.matched is False and fail.failure_reason == "原因"
+    merged = ok.merge(MatchResult.success({"y": 2}))
+    assert merged.matched is True and merged.bindings == {"x": 1, "y": 2}
+    assert fail.merge(ok).matched is False
+    assert ok.merge(fail).matched is False
+    assert fail.merge(ok).failure_reason == "原因"
+    assert ok.merge(fail).failure_reason == "原因"
+    assert MatchResult.success().bindings == {}
+    base = MatchResult(matched=True, bindings={"a": 1})
+    assert base.merge(MatchResult.success({"b": 2})).bindings == {"a": 1, "b": 2}
+
+
+def test_match_with_guard():
+    engine = PatternMatchEngine()
+    assert engine.match_with_guard(Identifier(name="x"), 5, lambda b: b["x"] > 0).matched is True
+    r = engine.match_with_guard(Identifier(name="x"), 5, lambda b: b["x"] > 10)
+    assert r.matched is False and r.failure_reason == "守卫条件不满足"
+    r = engine.match_with_guard(Identifier(name="x"), 5, lambda b: 1 / 0)
+    assert r.matched is False and "守卫条件求值失败" in r.failure_reason
+    # 模式本身不匹配时直接返回，不求值守卫
+    r = engine.match_with_guard(NumberLiteral(value=1), 2, lambda b: True)
+    assert r.matched is False
+    # 未提供守卫函数
+    assert engine.match_with_guard(Identifier(name="x"), 5).matched is True
+
+
+def test_match_branches():
+    engine = PatternMatchEngine()
+    branches = [
+        PatternBranch(pattern=NumberLiteral(value=1), body=QuoteBlock()),
+        PatternBranch(pattern=Identifier(name="x"), guard=Identifier(name="g"), body=QuoteBlock()),
+        PatternBranch(pattern=Identifier(name="_"), body=QuoteBlock()),
+    ]
+    b, _ = engine.match_branches(branches, 1)
+    assert b is branches[0]
+    b, _ = engine.match_branches(branches, 5, guard_evaluator=lambda g, binds, env: False)
+    assert b is branches[2]
+    b, _ = engine.match_branches(branches, 5, guard_evaluator=lambda g, binds, env: 1 / 0)
+    assert b is branches[2]
+    b, _ = engine.match_branches(branches, 5, guard_evaluator=lambda g, binds, env: True)
+    assert b is branches[1]
+    b, r = engine.match_branches(
+        [PatternBranch(pattern=NumberLiteral(value=1), body=QuoteBlock())], 9
+    )
+    assert b is None and r.matched is False
+
+
+def test_match_tuple_and_unsupported():
+    engine = PatternMatchEngine()
+    r = engine.match_tuple([Identifier(name="a"), Identifier(name="b")], [1, 2])
+    assert r.matched is True and r.bindings == {"a": 1, "b": 2}
+    r = engine.match_tuple([Identifier(name="a")], [1, 2])
+    assert r.matched is False and "参数数量不匹配" in r.failure_reason
+    r = engine.match_tuple([NumberLiteral(value=1), Identifier(name="b")], [2, 3])
+    assert r.matched is False
+    r = engine.match(object(), 1)
+    assert r.matched is False and "不支持的模式类型" in r.failure_reason
+
+
+def test_match_list_pattern_failures():
+    engine = PatternMatchEngine()
+    assert "不是列表" in engine.match(ListPattern(elements=[Identifier(name="x")]), "abc").failure_reason
+    r = engine.match(ListPattern(elements=[Identifier(name="x"), Identifier(name="y")]), [1])
+    assert r.matched is False and "长度不匹配" in r.failure_reason
+    r = engine.match(ListPattern(elements=[NumberLiteral(value=1)]), [2])
+    assert r.matched is False and "第 0 个元素不匹配" in r.failure_reason
+    r = engine.match(ListPattern(elements=[]), [1])
+    assert r.matched is False and "空列表模式不匹配" in r.failure_reason
+    r = engine.match(
+        ListPattern(elements=[Identifier(name="a"), Identifier(name="b"), Identifier(name="rest")],
+                    has_spread=True),
+        [1],
+    )
+    assert r.matched is False and "长度不足" in r.failure_reason
+    r = engine.match(
+        ListPattern(elements=[NumberLiteral(value=1), Identifier(name="rest")], has_spread=True),
+        [2, 3],
+    )
+    assert r.matched is False and "第 0 个元素不匹配" in r.failure_reason
+
+
+def test_match_dict_pattern_failures():
+    engine = PatternMatchEngine()
+    r = engine.match(DictPattern(pairs=[(StringLiteral(value="k"), Identifier(name="v"))]), [1])
+    assert r.matched is False and "不是字典" in r.failure_reason
+    assert engine.match(DictPattern(pairs=[]), {"a": 1}).matched is True
+    r = engine.match(DictPattern(pairs=[(Identifier(name="k"), Identifier(name="v"))]), {"k": 1})
+    assert r.matched is False and "字典键不是字面量" in r.failure_reason
+    r = engine.match(DictPattern(pairs=[(StringLiteral(value="k"), Identifier(name="v"))]), {"other": 1})
+    assert r.matched is False and "缺少键" in r.failure_reason
+    r = engine.match(DictPattern(pairs=[(StringLiteral(value="k"), NumberLiteral(value=1))]), {"k": 2})
+    assert r.matched is False and "的值不匹配" in r.failure_reason
+    r = engine.match(DictPattern(pairs=[(NullLiteral(), Identifier(name="v"))]), {None: 1})
+    assert r.matched is True and r.bindings == {"v": 1}
+
+
+def test_match_type_pattern_all():
+    engine = PatternMatchEngine()
+    assert engine.match(TypeCheckPattern(type_name="列表"), [1]).matched is True
+    assert engine.match(TypeCheckPattern(type_name="字典"), {}).matched is True
+    assert engine.match(TypeCheckPattern(type_name="数值"), 1).matched is True
+    assert engine.match(TypeCheckPattern(type_name="数值"), 1.5).matched is True
+    assert engine.match(TypeCheckPattern(type_name="文本"), "x").matched is True
+    assert engine.match(TypeCheckPattern(type_name="布尔"), True).matched is True
+    assert engine.match(TypeCheckPattern(type_name="函数"), lambda: 1).matched is True
+    r = engine.match(TypeCheckPattern(type_name="数值"), True)
+    assert r.matched is False and "布尔值不属于数值" in r.failure_reason
+    r = engine.match(TypeCheckPattern(type_name="未知"), 1)
+    assert r.matched is False and "未知类型名" in r.failure_reason
+    r = engine.match(TypeCheckPattern(type_name="列表"), {})
+    assert r.matched is False and "类型检查不匹配" in r.failure_reason
+
+
+def test_match_enum_variant():
+    engine = PatternMatchEngine()
+    pat = EnumVariantPattern(enum_name="结果", variant_name="成功", binding="v")
+    r = engine.match(pat, {"__type__": "enum", "类": "结果", "变体": "成功", "值": 42})
+    assert r.matched is True and r.bindings == {"v": 42}
+    r = engine.match(pat, _MyEnum())
+    assert r.matched is True and r.bindings == {"v": 42}
+
+    class 结果:
+        pass
+
+    r = engine.match(
+        EnumVariantPattern(enum_name="结果", variant_name="结果", binding="v"), 结果()
+    )
+    assert r.matched is True and "v" in r.bindings
+    r = engine.match(EnumVariantPattern(enum_name="结果", variant_name="失败"), _MyEnum())
+    assert r.matched is False and "枚举变体不匹配" in r.failure_reason
+    r = engine.match(pat, {"a": 1})
+    assert r.matched is False and "无法适配" in r.failure_reason
+    r = engine.match(EnumVariantPattern(enum_name="结果", variant_name="成功"), _MyEnum())
+    assert r.matched is True and r.bindings == {}
+
+    class EmptyEnum(DaoEnumProtocol):
+        @property
+        def dao_class_name(self):
+            return "结果"
+
+        @property
+        def dao_variant_name(self):
+            return "成功"
+
+    r = engine.match(
+        EnumVariantPattern(enum_name="结果", variant_name="成功", binding="v"),
+        EmptyEnum(),
+    )
+    assert r.matched is True and "v" in r.bindings
+
+
+def test_match_literal_failures():
+    engine = PatternMatchEngine()
+    assert "字符串不匹配" in engine.match(StringLiteral(value="a"), "b").failure_reason
+    assert "布尔值不匹配" in engine.match(BooleanLiteral(value=True), False).failure_reason
+    assert "空值不匹配" in engine.match(NullLiteral(), 1).failure_reason
+    assert "数值不匹配" in engine.match(NumberLiteral(value=1), 2).failure_reason
+    r = engine._match_literal(object(), 1)
+    assert r.matched is False and "未知字面量类型" in r.failure_reason

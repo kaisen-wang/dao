@@ -81,13 +81,21 @@ class Semaphore:
     def __init__(self, value=1):
         self._semaphore = _Semaphore(value)
         self._initial_value = value
+        # 自行维护计数值，避免依赖 threading.Semaphore 的私有属性 _value。
+        # _value 的读取用独立锁保护，保证近似值的线程安全读取。
+        self._value = value
+        self._value_lock = Lock()
 
     def acquire(self):
         """获取信号量（计数器减1，为0时阻塞）"""
         self._semaphore.acquire()
+        with self._value_lock:
+            self._value -= 1
 
     def release(self):
         """释放信号量（计数器加1）"""
+        with self._value_lock:
+            self._value += 1
         self._semaphore.release()
 
     def __enter__(self):
@@ -101,7 +109,8 @@ class Semaphore:
     @property
     def value(self):
         """当前信号量值（近似值）"""
-        return self._semaphore._value
+        with self._value_lock:
+            return self._value
 
 
 class WaitGroup:

@@ -385,14 +385,26 @@ class EnumVariant(ASTNode):
     params: list[str] = field(default_factory=list)
 
 
+class EnumValues(list):
+    """枚举值列表，附带所属枚举声明的引用。
+
+    使用 list 子类而非 AST 字段，避免 AST 序列化时产生循环引用。
+    """
+
+    decl: "EnumDecl | None" = None
+
+
 @dataclass
 class EnumDecl(Statement):
     """枚举声明：枚举 名字 { 枚举值1, 枚举值2, ... }"""
 
     name: str = ""
-    values: list[str] = field(default_factory=list)
+    values: list[str] = field(default_factory=EnumValues)
     variants: list[EnumVariant] = field(default_factory=list)
     is_exported: bool = False
+    # 枚举实现的特征名列表，以及枚举体内定义的方法
+    implemented_traits: list[str] = field(default_factory=list)
+    methods: list[Statement] = field(default_factory=list)
 
 
 @dataclass

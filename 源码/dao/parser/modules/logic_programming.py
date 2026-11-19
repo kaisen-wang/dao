@@ -12,6 +12,7 @@ from ...ast_nodes import (
     LogicRule,
     NumberLiteral,
     StringLiteral,
+    UnaryOp,
 )
 from ...errors import 语法错误
 from ...tokens import TokenType
@@ -33,10 +34,23 @@ class LogicProgrammingParser:
         # 匹配换行或缩进
         if self.current.type == TokenType.换行:
             self.advance()
-        self.expect(TokenType.缩进, "逻辑块需要缩进")
+        block_indent = self.expect(TokenType.缩进, "逻辑块需要缩进").value
 
         # 解析逻辑块内容
-        while not self.match(TokenType.回退):
+        while self.current.type != TokenType.文件结束:
+            # 回退值是被弹出的缩进层级：规则体结束（如 8→4）也会产生回退，
+            # 不能当作整个逻辑块结束。只有回到/低于逻辑块缩进层级的回退才退出。
+            if self.current.type == TokenType.回退:
+                level = self.current.value
+                self.advance()
+                if (
+                    not isinstance(level, int)
+                    or not isinstance(block_indent, int)
+                    or level <= block_indent
+                ):
+                    break
+                continue
+
             if self.current.type == TokenType.事实:
                 fact = self.parse_logic_fact()
                 facts.append(fact)
@@ -122,7 +136,7 @@ class LogicProgrammingParser:
                     if self.current.type == TokenType.并且:
                         self.advance()
                 elif self.current.type == TokenType.标识符:
-                    body.append(self.parse_pipe())
+                    body.append(self.parse_logic_rule_body_expr())
                     if self.current.type == TokenType.并且:
                         self.advance()
                 elif self.current.type == TokenType.换行:
@@ -159,28 +173,64 @@ class LogicProgrammingParser:
         token = self.advance()  # 消费 剪枝
         return LogicCut(line=token.line, column=token.column)
 
-    def parse_logic_constraint(self) -> LogicConstraint:
-        """解析约束表达式：?x 在范围 1..10"""
+    def parse_logic_rule_body_expr(self):
+        """解析规则体中的单个表达式，支持中缀约束 ``?x 在范围 a..b``。
+
+        ``在范围`` 属于中缀语法：调用本方法时变量名已被解析为 ``left``，
+        检测到 ``在范围`` 后把变量名传给 :meth:`parse_logic_constraint`。
+        """
+        left = self.parse_pipe()
+        if self.current.type == TokenType.在范围:
+            return self.parse_logic_constraint(left)
+        return left
+
+    def parse_logic_constraint(self, variable="") -> LogicConstraint:
+        """解析约束表达式：?x 在范围 1..10
+
+        ``variable`` 为 ``在范围`` 左侧已解析出的变量（``Identifier`` /
+        ``LogicVariable`` 节点，或变量名字符串）。调用方必须先解析出变量
+        再传入，因为变量名位于 ``在范围`` 关键字之前。
+        """
         token = self.advance()  # 消费 在范围
 
-        # 解析下界
-        low = self.parse_expression()
-
-        # 期望区间运算符 ..
+        # 解析下界与上界，并校验为整数
+        low = self._parse_constraint_bound("下界")
         if self.current.type != TokenType.区间:
             raise 语法错误("约束范围需要区间运算符 '..'")
         self.advance()  # 消费 ..
+        high = self._parse_constraint_bound("上界")
 
-        # 解析上界
-        high = self.parse_expression()
-
-        # 获取变量名（从之前的上下文推断）
-        # 这个方法由 parse_primary 中的 在范围 分支调用
-        # 变量名在调用前已经确定
         return LogicConstraint(
-            variable="",
+            variable=self._constraint_variable_name(variable),
             operator="在范围",
-            bounds=(0, 0),
+            bounds=(low, high),
             line=token.line,
             column=token.column,
         )
+
+    def _parse_constraint_bound(self, label: str) -> int:
+        """解析并校验约束边界，返回整数值。
+
+        仅解析一元级别，避免把后续的 ``并且`` 等中缀运算符吞入边界表达式。
+        """
+        expr = self.parse_unary()
+
+        sign = 1
+        if isinstance(expr, UnaryOp) and expr.operator in ("-", "减"):
+            sign = -1
+            expr = expr.operand
+
+        if isinstance(expr, NumberLiteral) and not isinstance(expr.value, bool):
+            value = expr.value
+            if isinstance(value, (int, float)) and float(value).is_integer():
+                return sign * int(value)
+
+        raise 语法错误(f"约束{label}必须是整数，得到 {type(expr).__name__}")
+
+    @staticmethod
+    def _constraint_variable_name(variable) -> str:
+        """从已解析的变量表达式中提取变量名"""
+        if isinstance(variable, str):
+            return variable
+        name = getattr(variable, "name", None)
+        return name if isinstance(name, str) else ""
