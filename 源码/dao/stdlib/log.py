@@ -20,12 +20,15 @@ _FORMAT_MAP = {
 
 
 def _dao_format_to_logging(fmt: str) -> str:
+    """把道语言日志格式占位符转换为 logging 格式。"""
     for dao_fmt, py_fmt in _FORMAT_MAP.items():
         fmt = fmt.replace(dao_fmt, py_fmt)
     return fmt
 
 
 class DaoLogger:
+    """道语言日志器，提供分级日志与格式设置。"""
+
     def __init__(self, name: str):
         self._logger = logging.getLogger(name)
         self._logger.setLevel(logging.DEBUG)
@@ -66,6 +69,8 @@ class DaoLogger:
 
 
 class DaoFileHandler:
+    """道语言日志文件处理器，把日志写入文件。"""
+
     def __init__(self, path: str):
         try:
             self._handler = logging.FileHandler(path, encoding="utf-8")
@@ -81,6 +86,8 @@ class DaoFileHandler:
 
 
 class DaoConsoleHandler:
+    """道语言控制台日志处理器。"""
+
     def __init__(self):
         self._handler = logging.StreamHandler()
         self._handler.setLevel(logging.DEBUG)
@@ -90,18 +97,22 @@ class DaoConsoleHandler:
 
 
 def _stdlib_创建日志器(名称):
+    """创建一个指定名称的日志器对象。"""
     return DaoLogger(名称)
 
 
 def _stdlib_创建文件处理器(路径):
+    """创建一个写入指定路径文件的日志处理器。"""
     return DaoFileHandler(路径)
 
 
 def _stdlib_创建控制台处理器():
+    """创建一个输出到控制台的日志处理器。"""
     return DaoConsoleHandler()
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建日志模块的导出环境。"""
     env = Environment()
     env.define("创建日志器", BuiltinFunction("创建日志器", _stdlib_创建日志器, 1))
     env.define("创建文件处理器", BuiltinFunction("创建文件处理器", _stdlib_创建文件处理器, 1))

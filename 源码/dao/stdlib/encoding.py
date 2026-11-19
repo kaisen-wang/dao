@@ -10,6 +10,10 @@ from ..errors import 运行时错误, 类型错误
 
 
 def _json_encode(数据, 缩进=0):
+    """把道语言数据编码为 JSON 文本。
+
+    参数：缩进为正整数时按该宽度美化输出，默认紧凑输出。
+    """
     def _default(o):
         if hasattr(o, 'variant_name') and hasattr(o, 'enum_name'):
             return str(o)
@@ -25,6 +29,7 @@ def _json_encode(数据, 缩进=0):
 
 
 def _json_decode(文本):
+    """把 JSON 文本解析为道语言数据。"""
     if not isinstance(文本, str):
         raise 类型错误("JSON解码需要文本类型参数")
     try:
@@ -34,6 +39,7 @@ def _json_decode(文本):
 
 
 def _csv_parse(文本):
+    """把 CSV 文本解析为字典列表，首行作为字段名。"""
     if not isinstance(文本, str):
         raise 类型错误("CSV解析需要文本类型参数")
     try:
@@ -44,6 +50,7 @@ def _csv_parse(文本):
 
 
 def _csv_generate(数据):
+    """把非空字典列表生成为 CSV 文本。"""
     if not isinstance(数据, list) or len(数据) == 0:
         raise 运行时错误("CSV生成需要非空列表")
     output = io.StringIO()
@@ -55,12 +62,14 @@ def _csv_generate(数据):
 
 
 def _base64_encode(文本):
+    """把文本编码为 Base64 文本。"""
     if not isinstance(文本, str):
         raise 类型错误("Base64编码需要文本类型参数")
     return base64.b64encode(文本.encode("utf-8")).decode("ascii")
 
 
 def _base64_decode(文本):
+    """把 Base64 文本解码为原文。"""
     if not isinstance(文本, str):
         raise 类型错误("Base64解码需要文本类型参数")
     try:
@@ -70,18 +79,21 @@ def _base64_decode(文本):
 
 
 def _url_encode(文本):
+    """对文本进行 URL 百分号编码。"""
     if not isinstance(文本, str):
         raise 类型错误("URL编码需要文本类型参数")
     return urllib.parse.quote(文本)
 
 
 def _url_decode(文本):
+    """对 URL 百分号编码的文本进行解码。"""
     if not isinstance(文本, str):
         raise 类型错误("URL解码需要文本类型参数")
     return urllib.parse.unquote(文本)
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建编码模块的导出环境。"""
     env = Environment()
 
     json_namespace = {

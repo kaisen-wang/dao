@@ -7,6 +7,8 @@ from ..errors import 运行时错误
 
 
 class DaoLineIterator:
+    """按行惰性读取文件的迭代器。"""
+
     def __init__(self, file_path: str):
         self._file_path = file_path
         self._file = None
@@ -31,6 +33,7 @@ class DaoLineIterator:
 
 
 def _stdlib_读取(路径):
+    """读取指定路径文件的全部文本内容。"""
     if not isinstance(路径, str):
         raise 运行时错误("读取需要文本类型路径参数")
     try:
@@ -43,6 +46,7 @@ def _stdlib_读取(路径):
 
 
 def _stdlib_写入(路径, 内容):
+    """把内容写入指定路径文件，覆盖原有内容。"""
     if not isinstance(路径, str):
         raise 运行时错误("写入需要文本类型路径参数")
     try:
@@ -53,6 +57,7 @@ def _stdlib_写入(路径, 内容):
 
 
 def _stdlib_追加(路径, 内容):
+    """把内容追加到指定路径文件的末尾。"""
     if not isinstance(路径, str):
         raise 运行时错误("追加需要文本类型路径参数")
     try:
@@ -63,10 +68,12 @@ def _stdlib_追加(路径, 内容):
 
 
 def _stdlib_存在(路径):
+    """判断指定路径的文件或目录是否存在。"""
     return os.path.exists(路径)
 
 
 def _stdlib_列出目录(路径):
+    """列出指定目录下的所有条目名称。"""
     if not isinstance(路径, str):
         raise 运行时错误("列出目录需要文本类型路径参数")
     if not os.path.exists(路径):
@@ -77,12 +84,14 @@ def _stdlib_列出目录(路径):
 
 
 def _stdlib_逐行读取(路径):
+    """返回一个逐行读取文件的惰性迭代器。"""
     if not isinstance(路径, str):
         raise 运行时错误("逐行读取需要文本类型路径参数")
     return DaoLineIterator(路径)
 
 
 def _stdlib_复制(源, 目标):
+    """把源文件复制到目标路径并保留元数据。"""
     try:
         shutil.copy2(源, 目标)
     except FileNotFoundError:
@@ -92,6 +101,7 @@ def _stdlib_复制(源, 目标):
 
 
 def _stdlib_移动(源, 目标):
+    """把源文件或目录移动到目标路径。"""
     try:
         shutil.move(源, 目标)
     except FileNotFoundError:
@@ -101,6 +111,7 @@ def _stdlib_移动(源, 目标):
 
 
 def _stdlib_删除(路径):
+    """删除指定路径的文件。"""
     if not os.path.exists(路径):
         raise 运行时错误(f"文件不存在: {路径}")
     try:
@@ -110,6 +121,7 @@ def _stdlib_删除(路径):
 
 
 def _stdlib_创建目录(路径):
+    """递归创建目录，目录已存在时不报错。"""
     try:
         os.makedirs(路径, exist_ok=True)
     except PermissionError:
@@ -117,6 +129,7 @@ def _stdlib_创建目录(路径):
 
 
 def _stdlib_文件信息(路径):
+    """返回文件大小、修改时间与类型等信息的字典。"""
     if not os.path.exists(路径):
         raise 运行时错误(f"文件不存在: {路径}")
     stat = os.stat(路径)
@@ -129,6 +142,7 @@ def _stdlib_文件信息(路径):
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建文件模块的导出环境。"""
     env = Environment()
     env.define("读取", BuiltinFunction("读取", _stdlib_读取, 1))
     env.define("写入", BuiltinFunction("写入", _stdlib_写入, 2))

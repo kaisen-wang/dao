@@ -8,6 +8,7 @@ _regex_cache: dict[str, re.Pattern] = {}
 
 
 def _get_compiled_pattern(pattern: str) -> re.Pattern:
+    """编译并缓存正则表达式，语法无效时抛出运行时错误。"""
     if pattern not in _regex_cache:
         try:
             _regex_cache[pattern] = re.compile(pattern)
@@ -17,6 +18,7 @@ def _get_compiled_pattern(pattern: str) -> re.Pattern:
 
 
 def _stdlib_分割(文本, 分隔符):
+    """按分隔符把文本切分为列表。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     if not isinstance(分隔符, str):
@@ -27,6 +29,7 @@ def _stdlib_分割(文本, 分隔符):
 
 
 def _stdlib_连接(列表, 连接符):
+    """用连接符把列表元素拼接为文本。"""
     if not isinstance(列表, list):
         raise 类型错误(f"期望列表类型参数，但收到{type(列表).__name__}")
     if not isinstance(连接符, str):
@@ -35,6 +38,10 @@ def _stdlib_连接(列表, 连接符):
 
 
 def _stdlib_替换(文本, 旧串, 新串, 次数=-1):
+    """把文本中的旧串替换为新串。
+
+    参数：次数为替换上限，负数表示替换全部匹配。
+    """
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     if 次数 < 0:
@@ -43,24 +50,31 @@ def _stdlib_替换(文本, 旧串, 新串, 次数=-1):
 
 
 def _stdlib_包含(文本, 子串):
+    """判断文本是否包含子串。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     return 子串 in 文本
 
 
 def _stdlib_去空格(文本):
+    """去除文本首尾的空白字符。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     return 文本.strip()
 
 
 def _stdlib_查找(文本, 子串):
+    """返回子串首次出现的位置，未找到时返回 -1。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     return 文本.find(子串)
 
 
 def _stdlib_截取(文本, 开始, 结束=None):
+    """截取文本从开始到结束的子串。
+
+    参数：结束省略时截取到文本末尾。
+    """
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     if 结束 is None:
@@ -69,18 +83,21 @@ def _stdlib_截取(文本, 开始, 结束=None):
 
 
 def _stdlib_大写(文本):
+    """把文本转换为大写。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     return 文本.upper()
 
 
 def _stdlib_小写(文本):
+    """把文本转换为小写。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     return 文本.lower()
 
 
 def _stdlib_正则匹配(文本, 模式):
+    """返回正则表达式在文本中的所有匹配结果列表。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     compiled = _get_compiled_pattern(模式)
@@ -88,6 +105,7 @@ def _stdlib_正则匹配(文本, 模式):
 
 
 def _stdlib_分割全部(文本, 模式):
+    """按正则表达式模式切分文本。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     compiled = _get_compiled_pattern(模式)
@@ -95,6 +113,7 @@ def _stdlib_分割全部(文本, 模式):
 
 
 def _stdlib_替换全部(文本, 模式, 替换):
+    """按正则表达式模式替换文本中的全部匹配。"""
     if not isinstance(文本, str):
         raise 类型错误(f"期望文本类型参数，但收到{type(文本).__name__}")
     compiled = _get_compiled_pattern(模式)
@@ -102,6 +121,7 @@ def _stdlib_替换全部(文本, 模式, 替换):
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建文本模块的导出环境。"""
     env = Environment()
     env.define("分割", BuiltinFunction("分割", _stdlib_分割, 2))
     env.define("连接", BuiltinFunction("连接", _stdlib_连接, 2))

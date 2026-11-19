@@ -8,18 +8,25 @@ from ..errors import 运行时错误
 
 
 def _stdlib_正弦(x):
+    """计算 x 的正弦值，x 为弧度。"""
     return math.sin(x)
 
 
 def _stdlib_余弦(x):
+    """计算 x 的余弦值，x 为弧度。"""
     return math.cos(x)
 
 
 def _stdlib_正切(x):
+    """计算 x 的正切值，x 为弧度。"""
     return math.tan(x)
 
 
 def _stdlib_反正弦(x):
+    """计算 x 的反正弦值，结果单位为弧度。
+
+    参数：x 需位于 -1 到 1 之间，超出定义域时抛出运行时错误。
+    """
     try:
         return math.asin(x)
     except ValueError:
@@ -27,6 +34,10 @@ def _stdlib_反正弦(x):
 
 
 def _stdlib_反余弦(x):
+    """计算 x 的反余弦值，结果单位为弧度。
+
+    参数：x 需位于 -1 到 1 之间，超出定义域时抛出运行时错误。
+    """
     try:
         return math.acos(x)
     except ValueError:
@@ -34,26 +45,34 @@ def _stdlib_反余弦(x):
 
 
 def _stdlib_反正切(x):
+    """计算 x 的反正切值，结果单位为弧度。"""
     return math.atan(x)
 
 
 def _stdlib_随机整数(最小, 最大):
+    """生成指定区间内的随机整数（含两端）。
+
+    参数：最小为下界，最大为上界，下界大于上界时抛出运行时错误。
+    """
     if 最小 > 最大:
         raise 运行时错误("随机整数的最小值不得大于最大值")
     return random.randint(最小, 最大)
 
 
 def _stdlib_随机小数():
+    """生成 0.0 到 1.0 之间的随机小数。"""
     return random.random()
 
 
 def _stdlib_随机选择(列表):
+    """从非空列表中随机返回一个元素。"""
     if not isinstance(列表, list) or len(列表) == 0:
         raise 运行时错误("随机选择需要非空列表")
     return random.choice(列表)
 
 
 def _stdlib_打乱(列表):
+    """随机打乱列表顺序并返回新列表，不修改原列表。"""
     if not isinstance(列表, list):
         raise 运行时错误("打乱需要列表类型参数")
     result = 列表.copy()
@@ -62,40 +81,48 @@ def _stdlib_打乱(列表):
 
 
 def _stdlib_平均值(列表):
+    """计算非空列表元素的算术平均值。"""
     if not isinstance(列表, list) or len(列表) == 0:
         raise 运行时错误("无法对空列表计算平均值")
     return sum(列表) / len(列表)
 
 
 def _stdlib_中位数(列表):
+    """计算非空列表元素的中位数。"""
     if not isinstance(列表, list) or len(列表) == 0:
         raise 运行时错误("无法对空列表计算中位数")
     return statistics.median(列表)
 
 
 def _stdlib_标准差(列表):
+    """计算列表元素的样本标准差，至少需要两个数据点。"""
     if not isinstance(列表, list) or len(列表) < 2:
         raise 运行时错误("标准差至少需要2个数据点")
     return statistics.stdev(列表)
 
 
 def _stdlib_向上取整(x):
+    """返回不小于 x 的最小整数。"""
     return math.ceil(x)
 
 
 def _stdlib_向下取整(x):
+    """返回不大于 x 的最大整数。"""
     return math.floor(x)
 
 
 def _stdlib_四舍五入(x):
+    """把 x 四舍五入为整数。"""
     return round(x)
 
 
 def _stdlib_幂(底, 指):
+    """计算底的指次幂，返回浮点数结果。"""
     return math.pow(底, 指)
 
 
 def _stdlib_自然对数(x):
+    """计算 x 的自然对数（以 e 为底）。"""
     try:
         return math.log(x)
     except ValueError:
@@ -103,6 +130,7 @@ def _stdlib_自然对数(x):
 
 
 def _stdlib_对数(x, 底):
+    """计算以底为底、x 的对数。"""
     try:
         return math.log(x, 底)
     except ValueError:
@@ -110,6 +138,7 @@ def _stdlib_对数(x, 底):
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建数学模块的导出环境。"""
     env = Environment()
     env.define("正弦", BuiltinFunction("正弦", _stdlib_正弦, 1))
     env.define("余弦", BuiltinFunction("余弦", _stdlib_余弦, 1))

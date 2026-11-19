@@ -846,6 +846,7 @@ def _stdlib_组合等待(*可等待对象):
 # ========================
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建异步IO模块的导出环境。"""
     env = Environment()
 
     # 事件循环管理

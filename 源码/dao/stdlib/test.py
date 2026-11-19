@@ -6,6 +6,8 @@ from ..errors import 断言失败, 运行时错误
 
 
 class DaoTestSuite:
+    """道语言测试套件，记录用例通过/失败并生成汇总报告。"""
+
     def __init__(self, name: str):
         self.name = name
         self.tests: list[dict] = []
@@ -47,36 +49,43 @@ class DaoTestSuite:
 
 
 def _stdlib_断言等于(期望, 实际):
+    """断言两个值相等，否则抛出断言失败。"""
     if 期望 != 实际:
         raise 断言失败(f"断言失败: 期望 {期望}, 实际 {实际}")
 
 
 def _stdlib_断言不等于(期望, 实际):
+    """断言两个值不相等，否则抛出断言失败。"""
     if 期望 == 实际:
         raise 断言失败(f"断言失败: 期望不等于 {期望}, 但两者相等")
 
 
 def _stdlib_断言为真(值):
+    """断言值为真，否则抛出断言失败。"""
     if not 值:
         raise 断言失败(f"断言失败: 期望为真, 实际为 {值}")
 
 
 def _stdlib_断言为假(值):
+    """断言值为假，否则抛出断言失败。"""
     if 值:
         raise 断言失败(f"断言失败: 期望为假, 实际为 {值}")
 
 
 def _stdlib_断言为空(值):
+    """断言值为空，否则抛出断言失败。"""
     if 值:
         raise 断言失败(f"断言失败: 期望为空, 实际为 {值}")
 
 
 def _stdlib_断言包含(集合, 元素):
+    """断言集合包含指定元素，否则抛出断言失败。"""
     if 元素 not in 集合:
         raise 断言失败(f"断言失败: 期望集合包含 {元素}")
 
 
 def _stdlib_断言抛出(函数, 异常类型=None):
+    """断言调用函数会抛出异常，否则抛出断言失败。"""
     try:
         if isinstance(函数, BuiltinFunction):
             函数.call([], {})
@@ -92,16 +101,19 @@ def _stdlib_断言抛出(函数, 异常类型=None):
 
 
 def _stdlib_测试套件(名称):
+    """创建一个指定名称的测试套件对象。"""
     return DaoTestSuite(名称)
 
 
 def _stdlib_测试报告(套件):
+    """生成测试套件的汇总报告文本。"""
     if not isinstance(套件, DaoTestSuite):
         raise 运行时错误("测试报告需要测试套件类型参数")
     return 套件.summary()
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建测试模块的导出环境。"""
     env = Environment()
     env.define("断言等于", BuiltinFunction("断言等于", _stdlib_断言等于, 2))
     env.define("断言不等于", BuiltinFunction("断言不等于", _stdlib_断言不等于, 2))

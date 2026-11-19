@@ -8,6 +8,10 @@ from ..errors import 运行时错误
 
 
 def _stdlib_取环境变量(名称, 默认值=None):
+    """读取指定名称的环境变量，可提供默认值。
+
+    参数：未提供默认值且变量不存在时抛出运行时错误。
+    """
     if 默认值 is not None:
         return os.environ.get(名称, 默认值)
     value = os.environ.get(名称)
@@ -17,14 +21,17 @@ def _stdlib_取环境变量(名称, 默认值=None):
 
 
 def _stdlib_设环境变量(名称, 值):
+    """设置指定名称的环境变量值。"""
     os.environ[名称] = 值
 
 
 def _stdlib_命令行参数():
+    """返回当前进程的命令行参数列表。"""
     return sys.argv.copy()
 
 
 def _stdlib_执行命令(命令):
+    """执行系统命令并返回标准输出文本。"""
     try:
         result = subprocess.run(
             命令,
@@ -43,20 +50,24 @@ def _stdlib_执行命令(命令):
 
 
 def _stdlib_当前目录():
+    """返回当前工作目录路径。"""
     return os.getcwd()
 
 
 def _stdlib_切换目录(路径):
+    """把当前工作目录切换到指定路径。"""
     if not os.path.isdir(路径):
         raise 运行时错误(f"目录不存在: {路径}")
     os.chdir(路径)
 
 
 def _stdlib_退出(退出码=0):
+    """以指定退出码结束当前进程。"""
     sys.exit(退出码)
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建系统模块的导出环境。"""
     env = Environment()
     env.define("取环境变量", BuiltinFunction("取环境变量", _stdlib_取环境变量, -1))
     env.define("设环境变量", BuiltinFunction("设环境变量", _stdlib_设环境变量, 2))

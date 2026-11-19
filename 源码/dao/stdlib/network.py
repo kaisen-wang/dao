@@ -18,6 +18,8 @@ def _解析JSON文本(文本, 来源):
 
 
 class DaoHttpResponse:
+    """HTTP 响应对象，包含状态码、响应头与响应体。"""
+
     def __init__(self, status_code: int, headers: dict, body: str):
         self.状态码 = status_code
         self.响应头 = headers
@@ -43,6 +45,8 @@ class DaoHttpRequest(dict):
 
 
 class DaoHttpServer:
+    """HTTP 服务器对象，可注册路由并启动监听。"""
+
     def __init__(self):
         self._routes: list[tuple] = []
 
@@ -119,6 +123,10 @@ class DaoHttpServer:
 
 
 def _stdlib_请求(URL, 选项=None):
+    """发起 HTTP 请求并返回响应对象。
+
+    参数：选项可指定方法、请求头、数据与超时，默认使用 GET 方法。
+    """
     if 选项 is None:
         选项 = {}
     method = 选项.get("方法", "GET")
@@ -151,22 +159,26 @@ def _stdlib_请求(URL, 选项=None):
 
 
 def _stdlib_创建服务器():
+    """创建一个 HTTP 服务器对象。"""
     return DaoHttpServer()
 
 
 def _stdlib_URL编码(文本):
+    """对文本进行 URL 编码。"""
     if not isinstance(文本, str):
         raise 运行时错误("URL编码需要文本类型参数")
     return urllib.parse.quote(文本)
 
 
 def _stdlib_URL解码(文本):
+    """对 URL 编码的文本进行解码。"""
     if not isinstance(文本, str):
         raise 运行时错误("URL解码需要文本类型参数")
     return urllib.parse.unquote(文本)
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建网络模块的导出环境。"""
     env = Environment()
     env.define("请求", BuiltinFunction("请求", _stdlib_请求, -1))
     env.define("创建服务器", BuiltinFunction("创建服务器", _stdlib_创建服务器, 0))

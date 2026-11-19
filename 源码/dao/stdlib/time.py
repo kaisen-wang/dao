@@ -16,12 +16,15 @@ _FORMAT_MAP = {
 
 
 def _dao_format_to_python(fmt: str) -> str:
+    """把道语言时间格式占位符转换为 Python strftime 格式。"""
     for dao_fmt, py_fmt in _FORMAT_MAP.items():
         fmt = fmt.replace(dao_fmt, py_fmt)
     return fmt
 
 
 class DaoDateTime:
+    """道语言日期时间对象，封装 datetime.datetime。"""
+
     def __init__(self, dt: datetime.datetime = None):
         self._dt = dt or datetime.datetime.now()
 
@@ -64,6 +67,8 @@ class DaoDateTime:
 
 
 class DaoTimeDelta:
+    """道语言时间差对象，封装 datetime.timedelta。"""
+
     def __init__(self, td: datetime.timedelta = None):
         self._td = td or datetime.timedelta()
 
@@ -80,6 +85,8 @@ class DaoTimeDelta:
 
 
 class DaoTimer:
+    """道语言计时器，用于测量毫秒级耗时。"""
+
     def __init__(self):
         self._start = None
         self._end = None
@@ -96,10 +103,12 @@ class DaoTimer:
 
 
 def _stdlib_现在():
+    """返回表示当前时间的日期时间对象。"""
     return DaoDateTime()
 
 
 def _stdlib_解析(文本, 格式):
+    """按给定格式把文本解析为日期时间对象。"""
     if not isinstance(文本, str):
         raise 运行时错误("解析时间需要文本类型参数")
     py_fmt = _dao_format_to_python(格式)
@@ -111,6 +120,7 @@ def _stdlib_解析(文本, 格式):
 
 
 def _stdlib_格式化(时间, 格式):
+    """按给定格式把日期时间对象格式化为文本。"""
     if not isinstance(时间, DaoDateTime):
         raise 运行时错误("格式化需要时间类型参数")
     py_fmt = _dao_format_to_python(格式)
@@ -118,14 +128,17 @@ def _stdlib_格式化(时间, 格式):
 
 
 def _stdlib_计时器():
+    """创建一个计时器对象。"""
     return DaoTimer()
 
 
 def _stdlib_睡眠(秒数):
+    """暂停执行指定的秒数。"""
     _time.sleep(秒数)
 
 
 def create_module_env(interpreter=None) -> Environment:
+    """创建时间模块的导出环境。"""
     env = Environment()
     env.define("现在", BuiltinFunction("现在", _stdlib_现在, 0))
     env.define("解析", BuiltinFunction("解析", _stdlib_解析, 2))
