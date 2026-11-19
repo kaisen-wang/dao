@@ -12,9 +12,13 @@ from .oop_types import BoundMethod, DaoClass, DaoInstance
 
 
 def _builtin_打印(*args, **kwargs):
-    """打印函数：输出内容到控制台"""
+    """打印函数：输出内容到控制台
+
+    命名参数：分隔符、结尾、刷新（为真时立即刷新输出缓冲区，用于流式输出）。
+    """
     sep = kwargs.get("分隔符", " ")
     end = kwargs.get("结尾", "\n")
+    flush = kwargs.get("刷新", False)
     output_parts = []
     for arg in args:
         if arg is None:
@@ -27,7 +31,7 @@ def _builtin_打印(*args, **kwargs):
             output_parts.append(repr(arg))
         else:
             output_parts.append(str(arg))
-    print(sep.join(output_parts), end=end)
+    print(sep.join(output_parts), end=end, flush=bool(flush))
     return None
 
 

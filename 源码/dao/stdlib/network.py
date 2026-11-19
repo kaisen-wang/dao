@@ -1,10 +1,11 @@
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 
-from ..builtins.callables import BuiltinFunction
+from ..builtins.callables import BuiltinFunction, DaoCallable, InterpreterBuiltin
 from ..environment import Environment
-from ..errors import 运行时错误
+from ..errors import 类型错误, 运行时错误, 道错误
 
 
 def _解析JSON文本(文本, 来源):
@@ -158,6 +159,73 @@ def _stdlib_请求(URL, 选项=None):
         raise 运行时错误(f"请求异常: {e}")
 
 
+def _执行流式请求(URL, 选项, 处理函数, interpreter):
+    """逐行读取 HTTP 响应，把每一行交给道语言回调处理。
+
+    与「请求」不同，这里不会一次性 read() 完整个响应体；每读到一行就立即
+    回调「处理函数」，因此可以边收边打印（ollama /api/chat 的 NDJSON 流、
+    SSE 等）。回调收到一行原始文本，返回「假」可提前终止读取。
+
+    参数：选项为「方法/请求头/数据/超时」字典；返回实际回调的行数。
+    """
+    if interpreter is None:
+        raise 运行时错误("流式请求无法获取解释器上下文")
+    if not isinstance(URL, str):
+        raise 类型错误("流式请求的 URL 必须是文本类型")
+    if not isinstance(处理函数, DaoCallable):
+        raise 类型错误("流式请求的处理函数必须是函数")
+    if 选项 is None:
+        选项 = {}
+    if not isinstance(选项, dict):
+        raise 类型错误("流式请求的选项必须是字典")
+
+    method = 选项.get("方法", "GET")
+    headers = 选项.get("请求头", {})
+    data = 选项.get("数据", None)
+    timeout = 选项.get("超时", 30)
+
+    req = urllib.request.Request(URL, method=method)
+    for key, value in headers.items():
+        req.add_header(key, value)
+    if data is not None:
+        req.data = data.encode("utf-8") if isinstance(data, str) else str(data).encode("utf-8")
+
+    行数 = 0
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            while True:
+                raw = response.readline()
+                if not raw:
+                    break
+                行 = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+                行 = 行.strip()
+                if not 行:
+                    continue
+                行数 += 1
+                # 回调返回「假」表示提前结束；道语言的异常原样向上传播
+                if interpreter.call_function(处理函数, [行]) is False:
+                    break
+    except 道错误:
+        raise
+    except urllib.error.HTTPError as e:
+        体 = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        raise 运行时错误(f"流式请求失败: HTTP {e.code} {体}") from None
+    except urllib.error.URLError as e:
+        raise 运行时错误(f"流式请求失败: {e.reason}") from None
+    except Exception as e:  # noqa: BLE001 - 兜底转成中文运行时错误
+        raise 运行时错误(f"流式请求异常: {e}") from None
+    return 行数
+
+
+def _流式请求实现(interpreter, URL, 选项, 处理函数):
+    """逐行读取 HTTP 响应并回调处理函数，返回读取的行数。
+
+    参数：选项与「请求」相同（方法/请求头/数据/超时）；处理函数收到一行
+    原始文本，返回「假」可提前终止。适用于 ollama 流式 NDJSON、SSE 等。
+    """
+    return _执行流式请求(URL, 选项, 处理函数, interpreter)
+
+
 def _stdlib_创建服务器():
     """创建一个 HTTP 服务器对象。"""
     return DaoHttpServer()
@@ -184,5 +252,12 @@ def create_module_env(interpreter=None) -> Environment:
     env.define("创建服务器", BuiltinFunction("创建服务器", _stdlib_创建服务器, 0))
     env.define("URL编码", BuiltinFunction("URL编码", _stdlib_URL编码, 1))
     env.define("URL解码", BuiltinFunction("URL解码", _stdlib_URL解码, 1))
+
+    # 用 InterpreterBuiltin 取得当前解释器才能回调道语言函数；
+    # func 定义在模块级，保证工厂重复调用时元数据稳定（docgen 依赖此约束）。
+    流式请求 = InterpreterBuiltin("流式请求", _流式请求实现, 3)
+    if interpreter is not None:
+        流式请求.set_interpreter(interpreter)
+    env.define("流式请求", 流式请求)
     env.exports = list(env.values.keys())
     return env

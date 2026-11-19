@@ -48,9 +48,17 @@ class TestHttpServer:
 class TestNetworkModuleEnv:
     def test_create_module_env(self):
         env = create_module_env()
-        for name in ("请求", "创建服务器", "URL编码", "URL解码"):
+        for name in ("请求", "流式请求", "创建服务器", "URL编码", "URL解码"):
             assert name in env.values
-        assert set(env.exports) == {"请求", "创建服务器", "URL编码", "URL解码"}
+        assert set(env.exports) == {
+            "请求", "流式请求", "创建服务器", "URL编码", "URL解码"
+        }
+
+    def test_流式请求是解释器内置函数(self):
+        from dao.builtins.callables import InterpreterBuiltin
+
+        env = create_module_env()
+        assert isinstance(env.values["流式请求"], InterpreterBuiltin)
 
 
 class _FakeResponse:
