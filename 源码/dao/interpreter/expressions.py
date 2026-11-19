@@ -553,6 +553,17 @@ class ExpressionEvaluator:
         if isinstance(obj, AtomicBool):
             return self._get_atomic_bool_method(obj, expr.member, expr)
 
+        # 通用属性兜底：标准库返回的自定义 Python 对象（如 HTTP 响应/请求）
+        # 通过中文属性暴露能力（状态码、JSON 等）。仅允许非下划线成员，
+        # 并排除已有专门处理的内置容器类型，避免破坏其错误处理与安全边界。
+        if not expr.member.startswith("_") and hasattr(obj, expr.member):
+            from ..builtins.callables import BuiltinFunction
+
+            value = getattr(obj, expr.member)
+            if callable(value):
+                return BuiltinFunction(expr.member, value)
+            return value
+
         raise 名称错误(
             f"对象没有属性 '{expr.member}'", expr.line, expr.column, self.source
         )

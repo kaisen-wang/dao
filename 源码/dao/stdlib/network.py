@@ -1,3 +1,4 @@
+import json
 import urllib.parse
 import urllib.request
 
@@ -6,14 +7,39 @@ from ..environment import Environment
 from ..errors import 运行时错误
 
 
+def _解析JSON文本(文本, 来源):
+    """把文本解析为道语言数据结构（list/dict），失败时抛出中文错误。"""
+    if not isinstance(文本, str):
+        raise 运行时错误(f"{来源}不是文本类型，无法解析为JSON")
+    try:
+        return json.loads(文本)
+    except (ValueError, TypeError) as e:
+        raise 运行时错误(f"{来源}不是有效的JSON格式，无法解析: {e}")
+
+
 class DaoHttpResponse:
     def __init__(self, status_code: int, headers: dict, body: str):
         self.状态码 = status_code
         self.响应头 = headers
         self.响应体 = body
 
+    def JSON(self):
+        """把响应体解析为道语言数据结构（list/dict）。"""
+        return _解析JSON文本(self.响应体, "响应体")
+
     def __repr__(self):
         return f"<HTTP响应 状态码={self.状态码}>"
+
+
+class DaoHttpRequest(dict):
+    """HTTP 请求对象：兼容 dict 接口，并提供 JSON() 解析请求体。"""
+
+    def __init__(self, 方法, 路径, 请求头, 请求体):
+        super().__init__(方法=方法, 路径=路径, 请求头=请求头, 请求体=请求体)
+
+    def JSON(self):
+        """把请求体解析为道语言数据结构（list/dict）。"""
+        return _解析JSON文本(self["请求体"], "请求体")
 
 
 class DaoHttpServer:
@@ -46,12 +72,7 @@ class DaoHttpServer:
                     if route_method == method and route_path == self.path:
                         content_length = int(self.headers.get("Content-Length", 0))
                         body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
-                        request_obj = {
-                            "方法": method,
-                            "路径": self.path,
-                            "请求头": dict(self.headers),
-                            "请求体": body,
-                        }
+                        request_obj = DaoHttpRequest(method, self.path, dict(self.headers), body)
                         try:
                             if isinstance(handler, BuiltinFunction):
                                 result = handler.call([request_obj], {})

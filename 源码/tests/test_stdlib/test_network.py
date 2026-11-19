@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 
 from dao.stdlib.network import (
     _stdlib_URL编码, _stdlib_URL解码, _stdlib_创建服务器, _stdlib_请求,
-    DaoHttpServer, DaoHttpResponse, create_module_env,
+    DaoHttpServer, DaoHttpRequest, DaoHttpResponse, create_module_env,
 )
 from dao.errors import 运行时错误
 from dao.builtins.callables import BuiltinFunction
@@ -69,6 +69,61 @@ class _FakeResponse:
 
     def __exit__(self, *args):
         return False
+
+
+class TestJsonMethods:
+    """文档 10.2.3 中 响应.JSON() 与 请求.JSON() 的能力。"""
+
+    def test_response_json_object(self):
+        resp = DaoHttpResponse(200, {}, '{"消息": "你好", "数量": 3}')
+        assert resp.JSON() == {"消息": "你好", "数量": 3}
+
+    def test_response_json_array(self):
+        resp = DaoHttpResponse(200, {}, '[1, "二", {"键": "值"}]')
+        assert resp.JSON() == [1, "二", {"键": "值"}]
+
+    def test_response_json_invalid(self):
+        resp = DaoHttpResponse(200, {}, "这不是JSON")
+        with pytest.raises(运行时错误, match="响应体不是有效的JSON格式"):
+            resp.JSON()
+
+    def test_response_json_non_string(self):
+        resp = DaoHttpResponse(200, {}, None)
+        with pytest.raises(运行时错误, match="响应体不是文本类型"):
+            resp.JSON()
+
+    def test_request_dict_compatibility(self):
+        req = DaoHttpRequest("POST", "/用户", {"Content-Type": "application/json"}, '{"姓名": "张三"}')
+        assert isinstance(req, dict)
+        assert req["方法"] == "POST"
+        assert req["路径"] == "/用户"
+        assert req["请求体"] == '{"姓名": "张三"}'
+        assert set(req) == {"方法", "路径", "请求头", "请求体"}
+
+    def test_request_json(self):
+        req = DaoHttpRequest("POST", "/用户", {}, '{"姓名": "张三", "年龄": 25}')
+        assert req.JSON() == {"姓名": "张三", "年龄": 25}
+
+    def test_request_json_array(self):
+        req = DaoHttpRequest("POST", "/用户", {}, '[1, 2, 3]')
+        assert req.JSON() == [1, 2, 3]
+
+    def test_request_json_invalid(self):
+        req = DaoHttpRequest("POST", "/用户", {}, "坏数据")
+        with pytest.raises(运行时错误, match="请求体不是有效的JSON格式"):
+            req.JSON()
+
+    def test_server_handler_receives_json_capable_request(self):
+        captured = _capture_handler([
+            ("POST", "/用户", lambda req: {"状态码": 201, "内容": req.JSON()["姓名"]})
+        ])
+        handler = _make_handler(
+            captured["handler"], "/用户", {"Content-Length": "20"},
+            '{"姓名": "张三"}'.encode("utf-8"),
+        )
+        handler.do_POST()
+        assert "张三" in handler.wfile.getvalue().decode("utf-8")
+        handler.send_response.assert_called_with(201)
 
 
 class TestHttpRequest:

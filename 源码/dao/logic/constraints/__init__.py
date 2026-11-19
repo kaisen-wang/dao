@@ -17,6 +17,7 @@ __all__ = [
     "NumericRangeConstraint",
     "EqualityConstraint",
     "InequalityConstraint",
+    "LessThanConstraint",
     "AllDifferentConstraint",
     "TypeConstraint",
     "ConstraintSolver",
