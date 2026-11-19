@@ -1,0 +1,52 @@
+/// 道语言 × 本机 Ollama：单次问答（最小示例）
+///
+/// 前置：本机已启动 ollama 服务，并已拉取 gemma4:e4b
+///     ollama serve
+///     ollama pull gemma4:e4b
+/// 运行（仓库根目录下）：
+///     源码/.venv/bin/python 源码/main.py 示例/AI对话/单次问答.道
+/// 可选环境变量：
+///     OLLAMA_HOST   服务地址，默认 http://localhost:11434
+///     OLLAMA_MODEL  模型名，默认 gemma4:e4b
+
+从 网络 导入 请求
+从 编码 导入 JSON
+从 系统 导入 取环境变量
+
+定义 主机 = 取环境变量("OLLAMA_HOST", "http://localhost:11434")
+定义 模型 = 取环境变量("OLLAMA_MODEL", "gemma4:e4b")
+定义 问题 = "用一句话说说你对「道」的理解。"
+
+// ollama /api/chat 的请求体是英文字段；必须显式关闭流式，
+// 否则返回的是多行 NDJSON，无法用一次 JSON 解码拿到完整回答。
+定义 请求体 = {
+    "model": 模型,
+    "messages": [{"role": "user", "content": 问题}],
+    "stream": 假
+}
+
+// 「网络」模块的选项用中文键；「数据」必须是 JSON 文本而不是字典，
+// 所以这里先用 JSON.编码 把请求体序列化。
+定义 选项 = {
+    "方法": "POST",
+    "请求头": {"Content-Type": "application/json"},
+    "数据": JSON.编码(请求体),
+    "超时": 120
+}
+
+尝试
+    定义 响应 = 请求(主机 + "/api/chat", 选项)
+    如果 响应.状态码 == 200
+        定义 结果 = 响应.JSON()
+        打印(`模型：{结果["model"]}`)
+        打印(`问题：{问题}`)
+        打印("─" * 40)
+        打印(结果["message"]["content"])
+        打印("─" * 40)
+        打印(`生成 token 数：{结果["eval_count"]}，耗时：{整数(结果["total_duration"] / 1000000000)} 秒`)
+    否则
+        打印(`请求失败，HTTP 状态码：{响应.状态码}`)
+        打印(响应.响应体)
+捕获 错误
+    打印(`无法连接 ollama：{文本(错误)}`)
+    打印("请确认已运行 ollama serve，且模型已拉取：ollama pull gemma4:e4b")
