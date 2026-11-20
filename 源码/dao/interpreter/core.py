@@ -11,7 +11,6 @@ from ..builtins import (
     BoundMethod,
     BuiltinFunction,
     CurriedFunction,
-    DaoCallable,
     DaoClass,
     DaoFunction,
     DaoGenerator,
@@ -253,7 +252,7 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
 
             if isinstance(e, DaoError):
                 func_env.pop_frame()
-                raise e
+                raise e  # noqa: TRY201  # 显式重抛 DaoError，保留原始异常对象
             new_error = 运行时错误(
                 str(e), 0, 0, getattr(self, "source", ""), func_env.get_stack()
             )
@@ -287,7 +286,7 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
             # 如果函数被标记为生成器但没有产出任何值，返回空生成器
             if hasattr(func, "is_generator") and func.is_generator:
                 return DaoGenerator(func, args, kwargs, self)
-        except 产出信号 as e:
+        except 产出信号:
             func_env.pop_frame()
             return DaoGenerator(func, args, kwargs, self)
         except 返回信号 as ret:
@@ -314,8 +313,9 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         except DaoError as e:
             # 对于 DaoError 类型的异常，直接重新抛出
             func_env.pop_frame()
-            raise e
-        except Exception as e:
+            raise e  # noqa: TRY201  # 保留原始 DaoError 对象与类型
+        except Exception as e:  # noqa: BLE001
+            # 健壮性兜底：将未知异常统一包装为运行时错误
             # 对于其他异常，创建运行时错误包装
             new_error = 运行时错误(
                 str(e), 0, 0, getattr(self, "source", ""), func_env.get_stack()
@@ -378,7 +378,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
                         return True
                     k = k.parent
             return False
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # 健壮性兜底：上下文探测失败时按“非该方法上下文”处理
             return False
 
     @staticmethod
@@ -398,7 +399,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
                         return True
                     check = check.parent
             return False
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # 健壮性兜底：上下文探测失败时按“非受保护上下文”处理
             return False
 
     @staticmethod

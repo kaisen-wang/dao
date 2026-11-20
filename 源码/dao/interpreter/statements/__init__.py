@@ -1,9 +1,9 @@
-from .executor import StatementExecutor, DaoEnum, DaoEnumVariant
+from .executor import DaoEnum, DaoEnumVariant, StatementExecutor
 from .logic import LogicExecutor
 
 __all__ = [
-    "StatementExecutor",
     "DaoEnum",
     "DaoEnumVariant",
     "LogicExecutor",
+    "StatementExecutor",
 ]

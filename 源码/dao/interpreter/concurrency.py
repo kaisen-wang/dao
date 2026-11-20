@@ -28,7 +28,6 @@ from ..concurrency import (
     AsyncContext,
     BufferedChannel,
     Channel,
-    CoroutinePool,
     CoroutineScheduler,
     Mutex,
 )
@@ -113,7 +112,7 @@ class ConcurrencyEvaluator:
         if hasattr(value, "is_async") and value.is_async:
             coro = self.eval_async_function_call(value, [], {})
             return await coro
-        elif hasattr(value, "__call__") and asyncio.iscoroutinefunction(value):
+        elif hasattr(value, "__call__") and asyncio.iscoroutinefunction(value):  # noqa: B004
             return await value()
         elif asyncio.iscoroutine(value):
             return await value
@@ -173,7 +172,7 @@ class ConcurrencyEvaluator:
         避免线程开销，支持大量轻量级协程。
         """
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(asyncio.run, self._exec_parallel_stmt(node, env))
@@ -217,7 +216,7 @@ class ConcurrencyEvaluator:
         channel = self.eval_expression(node.channel, env)
         value = self.eval_expression(node.value, env)
 
-        if isinstance(channel, Channel) or isinstance(channel, BufferedChannel):
+        if isinstance(channel, (Channel, BufferedChannel)):
             channel.send(value)
         else:
             raise 类型错误("发送操作的目标必须是通道对象")
@@ -226,7 +225,7 @@ class ConcurrencyEvaluator:
         """求值接收表达式"""
         channel = self.eval_expression(node.channel, env)
 
-        if isinstance(channel, Channel) or isinstance(channel, BufferedChannel):
+        if isinstance(channel, (Channel, BufferedChannel)):
             return channel.receive()
         else:
             raise 类型错误("接收操作的目标必须是通道对象")
@@ -253,31 +252,29 @@ class ConcurrencyEvaluator:
 
         # 1. 先检查条件分支
         for case in node.cases:
-            if case.type == "condition":
-                if hasattr(case, "condition"):
-                    condition_value = self.eval_expression(case.condition, env)
-                    if condition_value:
-                        case_env = env.create_child()
-                        if case.variable:
-                            case_env.define(case.variable, condition_value)
-                        self._exec_block(case.body, case_env)
-                        return
+            if case.type == "condition" and hasattr(case, "condition"):
+                condition_value = self.eval_expression(case.condition, env)
+                if condition_value:
+                    case_env = env.create_child()
+                    if case.variable:
+                        case_env.define(case.variable, condition_value)
+                    self._exec_block(case.body, case_env)
+                    return
 
         # 2. 尝试非阻塞接收
         for case in node.cases:
             if case.type == "receive":
                 try:
                     channel = self.eval_expression(case.channel, env)
-                    if isinstance(channel, Channel) or isinstance(
-                        channel, BufferedChannel
-                    ):
+                    if isinstance(channel, (Channel, BufferedChannel)):
                         value = channel.queue.get_nowait()
                         case_env = env.create_child()
                         if case.variable:
                             case_env.define(case.variable, value)
                         self._exec_block(case.body, case_env)
                         return
-                except Exception:
+                # 健壮性兜底：非阻塞接收失败则跳过该 case，尝试下一个
+                except Exception:  # noqa: BLE001, S112
                     continue
 
         # 3. 有超时时，在超时时间内轮询接收
@@ -292,9 +289,7 @@ class ConcurrencyEvaluator:
                     if case.type == "receive":
                         try:
                             channel = self.eval_expression(case.channel, env)
-                            if isinstance(channel, Channel) or isinstance(
-                                channel, BufferedChannel
-                            ):
+                            if isinstance(channel, (Channel, BufferedChannel)):
                                 remaining = timeout - elapsed
                                 value = channel.queue.get(
                                     block=True, timeout=min(remaining, 0.05)
@@ -304,7 +299,8 @@ class ConcurrencyEvaluator:
                                     case_env.define(case.variable, value)
                                 self._exec_block(case.body, case_env)
                                 return
-                        except Exception:
+                        # 健壮性兜底：接收超时则跳过该 case，继续轮询
+                        except Exception:  # noqa: BLE001, S112
                             continue
 
             # 4. 超时后执行超时分支
@@ -316,16 +312,15 @@ class ConcurrencyEvaluator:
                 if case.type == "receive":
                     try:
                         channel = self.eval_expression(case.channel, env)
-                        if isinstance(channel, Channel) or isinstance(
-                            channel, BufferedChannel
-                        ):
+                        if isinstance(channel, (Channel, BufferedChannel)):
                             value = channel.receive()
                             case_env = env.create_child()
                             if case.variable:
                                 case_env.define(case.variable, value)
                             self._exec_block(case.body, case_env)
                             return
-                    except Exception:
+                    # 健壮性兜底：阻塞接收失败则跳过该 case
+                    except Exception:  # noqa: BLE001, S112
                         continue
 
     async def exec_select_stmt_async(self, node: SelectStmt, env: Environment):
@@ -344,22 +339,21 @@ class ConcurrencyEvaluator:
 
         # 1. 先检查条件分支
         for case in node.cases:
-            if case.type == "condition":
-                if hasattr(case, "condition"):
-                    condition_value = self.eval_expression(case.condition, env)
-                    if condition_value:
-                        case_env = env.create_child()
-                        if case.variable:
-                            case_env.set(case.variable, condition_value)
-                        await self._exec_async_block(case.body, case_env)
-                        return
+            if case.type == "condition" and hasattr(case, "condition"):
+                condition_value = self.eval_expression(case.condition, env)
+                if condition_value:
+                    case_env = env.create_child()
+                    if case.variable:
+                        case_env.set(case.variable, condition_value)
+                    await self._exec_async_block(case.body, case_env)
+                    return
 
         # 2. 创建接收任务
         receive_tasks = {}
         for case in node.cases:
             if case.type == "receive":
                 channel = self.eval_expression(case.channel, env)
-                if isinstance(channel, Channel) or isinstance(channel, BufferedChannel):
+                if isinstance(channel, (Channel, BufferedChannel)):
                     task = asyncio.create_task(self._await_receive(channel, case, env))
                     receive_tasks[task] = case
 
@@ -425,7 +419,8 @@ class ConcurrencyEvaluator:
                 case_env.set(case.variable, value)
             await self._exec_async_block(case.body, case_env)
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # 健壮性兜底：异步接收失败时返回 False 交由竞速逻辑处理
             return False
 
     async def _await_timeout(self, timeout, case, env):

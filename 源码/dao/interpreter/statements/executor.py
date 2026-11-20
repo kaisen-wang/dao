@@ -8,13 +8,11 @@
 
 from ...ast_nodes import *
 from ...builtins import (
-    BoundMethod,
     BuiltinFunction,
     DaoClass,
     DaoFunction,
     DaoInstance,
     InterpreterBuiltin,
-    SuperProxy,
     get_builtins,
     get_interpreter_builtins,
 )
@@ -93,6 +91,7 @@ class DaoEnumVariant:
 
 from .logic import LogicExecutor
 
+
 class StatementExecutor(LogicExecutor):
     """语句执行方法集（混入类）"""
 
@@ -110,10 +109,7 @@ class StatementExecutor(LogicExecutor):
         for stmt in statements:
             if isinstance(stmt, YieldStmt):
                 return True
-            elif isinstance(stmt, ForInStmt) or isinstance(stmt, ForRangeStmt):
-                if self._has_yield(stmt.body):
-                    return True
-            elif isinstance(stmt, WhileStmt):
+            elif isinstance(stmt, (ForInStmt, ForRangeStmt, WhileStmt)):
                 if self._has_yield(stmt.body):
                     return True
             elif isinstance(stmt, IfStmt):
@@ -754,24 +750,30 @@ class StatementExecutor(LogicExecutor):
 
             # 通配符匹配任何值（应该在最后作为默认分支）
             if case.is_wildcard:
-                if case.guard:
-                    if not self._is_truthy(self.eval_expression(case.guard, case_env)):
-                        continue
+                if case.guard and not self._is_truthy(self.eval_expression(case.guard, case_env)):
+                    continue
                 return self._exec_block(case.body, case_env)
 
             # 检查模式是否匹配
             match_result = self._match_pattern(case.pattern, subject, case_env)
             if match_result:
-                if case.guard:
-                    if not self._is_truthy(self.eval_expression(case.guard, case_env)):
-                        continue
+                if case.guard and not self._is_truthy(self.eval_expression(case.guard, case_env)):
+                    continue
                 return self._exec_block(case.body, case_env)
 
         return None
 
     def _match_pattern(self, pattern, subject, env: Environment) -> bool:
         """匹配模式与主体"""
-        from ...ast_nodes import DictPattern, EnumVariantPattern, FunctionCall, Identifier, ListPattern, MemberAccess, TypeCheckPattern
+        from ...ast_nodes import (
+            DictPattern,
+            EnumVariantPattern,
+            FunctionCall,
+            Identifier,
+            ListPattern,
+            MemberAccess,
+            TypeCheckPattern,
+        )
 
         # 枚举变体模式
         if isinstance(pattern, EnumVariantPattern):
@@ -820,7 +822,7 @@ class StatementExecutor(LogicExecutor):
                 "数值": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
                 "文本": lambda v: isinstance(v, str),
                 "布尔": lambda v: isinstance(v, bool),
-                "函数": lambda v: callable(v) or hasattr(v, '__call__'),
+                "函数": lambda v: callable(v) or hasattr(v, '__call__'),  # noqa: B004  # 兼容鸭子类型对象的 __call__
             }
             checker = type_checks.get(type_name)
             if checker:
@@ -876,10 +878,7 @@ class StatementExecutor(LogicExecutor):
                         if pattern_val != subject[i]:
                             return False
 
-                if len(subject) != len(pattern.elements):
-                    return False
-
-                return True
+                return len(subject) == len(pattern.elements)
 
         # 字典模式
         elif isinstance(pattern, DictPattern):
@@ -1170,7 +1169,6 @@ class StatementExecutor(LogicExecutor):
                     self.source,
                 )
             items = list(value)
-            non_rest = [t for t in pattern.list_targets if not (t.is_list or t.is_dict) or True]
             n = len(pattern.list_targets)
             if pattern.list_rest is None and len(items) != n:
                 raise 运行时错误(

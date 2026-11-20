@@ -1,8 +1,15 @@
 """逻辑编程执行混入"""
 
 from ...ast_nodes import (
-    BooleanLiteral, DictLiteral, FunctionCall, Identifier,
-    ListLiteral, LogicBlock, LogicFact, NumberLiteral, StringLiteral,
+    BooleanLiteral,
+    DictLiteral,
+    FunctionCall,
+    Identifier,
+    ListLiteral,
+    LogicBlock,
+    LogicFact,
+    NumberLiteral,
+    StringLiteral,
 )
 from ...environment import Environment
 
@@ -17,15 +24,9 @@ class LogicExecutor:
 
         args = []
         for arg in arguments:
-            if isinstance(arg, Identifier) and arg.name.startswith("?"):
+            if isinstance(arg, Identifier) and arg.name.startswith("?") or isinstance(arg, ASTLogicVariable):
                 args.append(LogicVariable(arg.name))
-            elif isinstance(arg, ASTLogicVariable):
-                args.append(LogicVariable(arg.name))
-            elif isinstance(arg, StringLiteral):
-                args.append(LogicAtom(arg.value))
-            elif isinstance(arg, NumberLiteral):
-                args.append(LogicAtom(arg.value))
-            elif isinstance(arg, BooleanLiteral):
+            elif isinstance(arg, (StringLiteral, NumberLiteral, BooleanLiteral)):
                 args.append(LogicAtom(arg.value))
             elif isinstance(arg, ListLiteral):
                 elements = [self.eval_expression(e, env) for e in arg.elements]

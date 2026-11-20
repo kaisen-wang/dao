@@ -329,207 +329,28 @@ class ExpressionEvaluator:
         obj = self.eval_expression(expr.object, env)
 
         if isinstance(obj, DaoInstance):
-            # 检查私有访问（方法级 + 字段级）
-            is_private = (
-                expr.member in obj.klass.private_names
-                or expr.member in obj.private_fields
-            )
-            if is_private:
-                if not self._in_method_context(env, obj.klass):
-                    raise 运行时错误(
-                        f"无法访问类型 '{obj.klass.name}' 的私有成员 '{expr.member}'",
-                        expr.line,
-                        expr.column,
-                        self.source,
-                    )
-            # 检查受保护访问（方法级 + 字段级）
-            is_protected = (
-                expr.member in obj.klass.protected_names
-                or expr.member in obj.protected_fields
-            )
-            if is_protected and not is_private:
-                if not self._in_protected_context(env, obj.klass):
-                    raise 运行时错误(
-                        f"无法访问类型 '{obj.klass.name}' 的受保护成员 '{expr.member}'",
-                        expr.line,
-                        expr.column,
-                        self.source,
-                    )
-            # 先检查是否有 property getter
-            getter_name = f"获取{expr.member}"
-            getter = obj.klass.find_method(getter_name)
-            if getter and getter.is_getter:
-                return self._call_method(obj, getter, [], {}, expr)
-
-            result, found = obj.get_field(expr.member)
-            if found:
-                return result
-            raise 名称错误(
-                f"类型 '{obj.klass.name}' 的实例没有属性 '{expr.member}'",
-                expr.line,
-                expr.column,
-                self.source,
-            )
+            return self._eval_instance_member(obj, expr, env)
 
         # 处理所有错误类型实例的成员访问
         from ..builtins.oop_types import DaoError
         from ..errors import 道错误
 
         if isinstance(obj, (DaoError, 道错误)):
-            # 检查对象是否直接有该属性
-            if hasattr(obj, expr.member):
-                return getattr(obj, expr.member)
-
-            # 对于 道错误 子类（如运行时错误），直接返回属性
-            if isinstance(obj, 道错误):
-                # 道错误 有 message, line, column, source, stack 属性
-                if expr.member in ["message", "行", "列", "source", "stack"]:
-                    if expr.member == "行":
-                        return obj.line
-                    elif expr.member == "列":
-                        return obj.column
-                    elif expr.member == "信息":
-                        return str(obj)  # 返回格式化的错误信息
-                    return getattr(obj, expr.member)
-
-            # 对于 DaoError 类型，也支持访问 '信息' 属性
-            if isinstance(obj, DaoError):
-                if expr.member == "信息":
-                    return str(obj)  # 对于 DaoError 实例，信息就是其字符串表示
-                if expr.member == "消息":
-                    return obj.message  # 直接访问 message 属性
-
-            # 检查错误类型是否有该属性的 getter 方法
-            from ..builtins.oop_types import DaoClass, ErrorInstanceWrapper
-
-            if hasattr(obj, "类型") and isinstance(obj.类型, DaoClass):
-                getter_name = f"获取{expr.member}"
-                getter = obj.类型.find_method(getter_name)
-                if getter and getter.is_getter:
-                    temp_instance = ErrorInstanceWrapper(obj, obj.类型)
-                    return self._call_method(temp_instance, getter, [], {}, expr)
-
-            raise 名称错误(
-                f"类型 '{obj.类型.name if hasattr(obj, '类型') and obj.类型 else type(obj).__name__}' 的实例没有属性 '{expr.member}'",
-                expr.line,
-                expr.column,
-                self.source,
-            )
+            return self._eval_error_member(obj, expr)
 
         if isinstance(obj, SuperProxy):
-            # 检查 parent_class 是否是 DaoClass 实例（即是否有 find_method 方法）
-            if hasattr(obj.parent_class, "find_method"):
-                method = obj.parent_class.find_method(expr.member)
-                if method:
-                    return BoundMethod(obj.instance, method)
-
-            # 对于继承自 DaoError 的类型，处理特殊情况
-            from ..builtins.oop_types import DaoError
-
-            if obj.parent_class == DaoError:
-                # DaoError 是 Python 类，不是 DaoClass 实例
-                if expr.member == "初始化":
-                    # 返回一个可以设置消息的内置方法
-                    from ..builtins.callables import BuiltinFunction
-
-                    def initialize_method(消息):
-                        obj.instance.消息 = 消息
-
-                    return BuiltinFunction("初始化", initialize_method)
-
-                if (
-                    expr.member == "消息"
-                    or expr.member == "line"
-                    or expr.member == "column"
-                ):
-                    # 直接返回属性值
-                    if hasattr(obj.instance, expr.member):
-                        return getattr(obj.instance, expr.member)
-
-                raise 名称错误(
-                    f"父类型 'DaoError' 没有方法 '{expr.member}'",
-                    expr.line,
-                    expr.column,
-                    self.source,
-                )
-
-            raise 名称错误(
-                f"父类型中没有方法 '{expr.member}'", expr.line, expr.column, self.source
-            )
+            return self._eval_super_member(obj, expr)
 
         from ..builtins.oop_types import DaoClass
 
         if isinstance(obj, DaoEnum):
-            # 枚举类型上定义的静态方法 / 实现特征的静态方法
-            _, static_methods = self._get_enum_method_table(obj, env)
-            if expr.member in static_methods:
-                return static_methods[expr.member]
-            if expr.member in obj.values:
-                if obj.has_variant_params(expr.member):
-                    from ..builtins.callables import BuiltinFunction
-                    def make_variant(*args):
-                        return DaoEnumVariant(obj.name, expr.member, tuple(args))
-                    return BuiltinFunction(expr.member, make_variant)
-                return DaoEnumVariant(obj.name, expr.member)
-            raise 名称错误(
-                f"枚举 '{obj.name}' 中不存在变体 '{expr.member}'",
-                expr.line,
-                expr.column,
-                self.source,
-            )
+            return self._eval_enum_member(obj, expr, env)
 
         if isinstance(obj, DaoEnumVariant):
-            # 枚举实例（变体）的方法：枚举体内定义的方法 + 实现特征的方法
-            try:
-                enum_obj = env.get(obj.enum_name)
-            except 名称错误:
-                enum_obj = None
-            methods = {}
-            if enum_obj is not None:
-                methods, _ = self._get_enum_method_table(enum_obj, env)
-            if expr.member in methods:
-                return BoundEnumMethod(obj, methods[expr.member])
-
-            # 关联值支持按变体参数名访问，例如 形状.圆形(5).半径
-            if enum_obj is not None:
-                for v in getattr(enum_obj, "variants", []):
-                    if getattr(v, "name", None) == obj.variant_name:
-                        params = getattr(v, "params", [])
-                        if expr.member in params:
-                            idx = params.index(expr.member)
-                            if idx < len(obj.data):
-                                return obj.data[idx]
-                        break
-
-            # 内建字段
-            if expr.member == "数据":
-                return obj.data
-            if expr.member == "变体名":
-                return obj.variant_name
-            if expr.member == "枚举名":
-                return obj.enum_name
-
-            raise 名称错误(
-                f"枚举 '{obj.enum_name}.{obj.variant_name}' 没有属性或方法 '{expr.member}'",
-                expr.line,
-                expr.column,
-                self.source,
-            )
+            return self._eval_enum_variant_member(obj, expr, env)
 
         if isinstance(obj, DaoClass):
-            # 先查找静态方法
-            static_method = obj.find_static_method(expr.member)
-            if static_method:
-                return static_method
-            method = obj.find_method(expr.member)
-            if method:
-                return method
-            raise 名称错误(
-                f"类型 '{obj.name}' 没有方法或静态方法 '{expr.member}'",
-                expr.line,
-                expr.column,
-                self.source,
-            )
+            return self._eval_class_member(obj, expr)
 
         if isinstance(obj, dict) and expr.member in obj:
             return obj[expr.member]
@@ -543,7 +364,7 @@ class ExpressionEvaluator:
         if isinstance(obj, list):
             return self._get_list_method(obj, expr.member, expr)
 
-        from ..concurrency import Channel, BufferedChannel, Mutex, AtomicInt, AtomicBool
+        from ..concurrency import AtomicBool, AtomicInt, BufferedChannel, Channel, Mutex
         if isinstance(obj, (Channel, BufferedChannel)):
             return self._get_channel_method(obj, expr.member, expr)
         if isinstance(obj, Mutex):
@@ -567,6 +388,225 @@ class ExpressionEvaluator:
         raise 名称错误(
             f"对象没有属性 '{expr.member}'", expr.line, expr.column, self.source
         )
+
+    def _eval_instance_member(self, obj: DaoInstance, expr, env: Environment) -> object:
+        """求值 DaoInstance 的成员访问（私有/受保护检查、getter、字段）"""
+        # 检查私有访问（方法级 + 字段级）
+        is_private = (
+            expr.member in obj.klass.private_names
+            or expr.member in obj.private_fields
+        )
+        if is_private:
+            if not self._in_method_context(env, obj.klass):
+                raise 运行时错误(
+                    f"无法访问类型 '{obj.klass.name}' 的私有成员 '{expr.member}'",
+                    expr.line,
+                    expr.column,
+                    self.source,
+                )
+        # 检查受保护访问（方法级 + 字段级）
+        is_protected = (
+            expr.member in obj.klass.protected_names
+            or expr.member in obj.protected_fields
+        )
+        if is_protected and not is_private:
+            if not self._in_protected_context(env, obj.klass):
+                raise 运行时错误(
+                    f"无法访问类型 '{obj.klass.name}' 的受保护成员 '{expr.member}'",
+                    expr.line,
+                    expr.column,
+                    self.source,
+                )
+        # 先检查是否有 property getter
+        getter_name = f"获取{expr.member}"
+        getter = obj.klass.find_method(getter_name)
+        if getter and getter.is_getter:
+            return self._call_method(obj, getter, [], {}, expr)
+
+        result, found = obj.get_field(expr.member)
+        if found:
+            return result
+        raise 名称错误(
+            f"类型 '{obj.klass.name}' 的实例没有属性 '{expr.member}'",
+            expr.line,
+            expr.column,
+            self.source,
+        )
+
+    def _eval_error_member(self, obj, expr) -> object:
+        """求值错误类型实例（DaoError / 道错误）的成员访问"""
+        from ..builtins.oop_types import DaoError
+        from ..errors import 道错误
+
+        # 检查对象是否直接有该属性
+        if hasattr(obj, expr.member):
+            return getattr(obj, expr.member)
+
+        # 对于 道错误 子类（如运行时错误），直接返回属性
+        if isinstance(obj, 道错误):
+            # 道错误 有 message, line, column, source, stack 属性
+            if expr.member in ["message", "行", "列", "source", "stack"]:
+                if expr.member == "行":
+                    return obj.line
+                elif expr.member == "列":
+                    return obj.column
+                elif expr.member == "信息":
+                    return str(obj)  # 返回格式化的错误信息
+                return getattr(obj, expr.member)
+
+        # 对于 DaoError 类型，也支持访问 '信息' 属性
+        if isinstance(obj, DaoError):
+            if expr.member == "信息":
+                return str(obj)  # 对于 DaoError 实例，信息就是其字符串表示
+            if expr.member == "消息":
+                return obj.message  # 直接访问 message 属性
+
+        # 检查错误类型是否有该属性的 getter 方法
+        from ..builtins.oop_types import DaoClass, ErrorInstanceWrapper
+
+        if hasattr(obj, "类型") and isinstance(obj.类型, DaoClass):
+            getter_name = f"获取{expr.member}"
+            getter = obj.类型.find_method(getter_name)
+            if getter and getter.is_getter:
+                temp_instance = ErrorInstanceWrapper(obj, obj.类型)
+                return self._call_method(temp_instance, getter, [], {}, expr)
+
+        raise 名称错误(
+            f"类型 '{obj.类型.name if hasattr(obj, '类型') and obj.类型 else type(obj).__name__}' 的实例没有属性 '{expr.member}'",
+            expr.line,
+            expr.column,
+            self.source,
+        )
+
+    def _eval_super_member(self, obj: SuperProxy, expr) -> object:
+        """求值父对象代理（SuperProxy）的成员访问"""
+        # 检查 parent_class 是否是 DaoClass 实例（即是否有 find_method 方法）
+        if hasattr(obj.parent_class, "find_method"):
+            method = obj.parent_class.find_method(expr.member)
+            if method:
+                return BoundMethod(obj.instance, method)
+
+        # 对于继承自 DaoError 的类型，处理特殊情况
+        from ..builtins.oop_types import DaoError
+
+        if obj.parent_class == DaoError:
+            # DaoError 是 Python 类，不是 DaoClass 实例
+            if expr.member == "初始化":
+                # 返回一个可以设置消息的内置方法
+                from ..builtins.callables import BuiltinFunction
+
+                def initialize_method(消息):
+                    obj.instance.消息 = 消息
+
+                return BuiltinFunction("初始化", initialize_method)
+
+            if (
+                expr.member == "消息"
+                or expr.member == "line"
+                or expr.member == "column"
+            ):
+                # 直接返回属性值
+                if hasattr(obj.instance, expr.member):
+                    return getattr(obj.instance, expr.member)
+
+            raise 名称错误(
+                f"父类型 'DaoError' 没有方法 '{expr.member}'",
+                expr.line,
+                expr.column,
+                self.source,
+            )
+
+        raise 名称错误(
+            f"父类型中没有方法 '{expr.member}'", expr.line, expr.column, self.source
+        )
+
+    def _eval_enum_member(self, obj, expr, env: Environment) -> object:
+        """求值枚举类型（DaoEnum）的静态成员与变体访问"""
+        from .statements import DaoEnumVariant
+
+        # 枚举类型上定义的静态方法 / 实现特征的静态方法
+        _, static_methods = self._get_enum_method_table(obj, env)
+        if expr.member in static_methods:
+            return static_methods[expr.member]
+        if expr.member in obj.values:
+            if obj.has_variant_params(expr.member):
+                from ..builtins.callables import BuiltinFunction
+
+                def make_variant(*args):
+                    return DaoEnumVariant(obj.name, expr.member, tuple(args))
+
+                return BuiltinFunction(expr.member, make_variant)
+            return DaoEnumVariant(obj.name, expr.member)
+        raise 名称错误(
+            f"枚举 '{obj.name}' 中不存在变体 '{expr.member}'",
+            expr.line,
+            expr.column,
+            self.source,
+        )
+
+    def _eval_enum_variant_member(self, obj, expr, env: Environment) -> object:
+        """求值枚举变体实例（DaoEnumVariant）的方法、关联值与内建字段"""
+        # 枚举实例（变体）的方法：枚举体内定义的方法 + 实现特征的方法
+        try:
+            enum_obj = env.get(obj.enum_name)
+        except 名称错误:
+            enum_obj = None
+        methods = {}
+        if enum_obj is not None:
+            methods, _ = self._get_enum_method_table(enum_obj, env)
+        if expr.member in methods:
+            return BoundEnumMethod(obj, methods[expr.member])
+
+        # 关联值支持按变体参数名访问，例如 形状.圆形(5).半径
+        if enum_obj is not None:
+            for v in getattr(enum_obj, "variants", []):
+                if getattr(v, "name", None) == obj.variant_name:
+                    params = getattr(v, "params", [])
+                    if expr.member in params:
+                        idx = params.index(expr.member)
+                        if idx < len(obj.data):
+                            return obj.data[idx]
+                    break
+
+        # 内建字段
+        if expr.member == "数据":
+            return obj.data
+        if expr.member == "变体名":
+            return obj.variant_name
+        if expr.member == "枚举名":
+            return obj.enum_name
+
+        raise 名称错误(
+            f"枚举 '{obj.enum_name}.{obj.variant_name}' 没有属性或方法 '{expr.member}'",
+            expr.line,
+            expr.column,
+            self.source,
+        )
+
+    def _eval_class_member(self, obj: DaoClass, expr) -> object:
+        """求值类型对象（DaoClass）的静态方法与方法访问"""
+        # 先查找静态方法
+        static_method = obj.find_static_method(expr.member)
+        if static_method:
+            return static_method
+        method = obj.find_method(expr.member)
+        if method:
+            return method
+        raise 名称错误(
+            f"类型 '{obj.name}' 没有方法或静态方法 '{expr.member}'",
+            expr.line,
+            expr.column,
+            self.source,
+        )
+
+    # 关于内置成员方法表的缓存（审查项 #15）：
+    # 下面 _get_str_method / _get_list_method / _get_channel_method /
+    # _get_mutex_method / _get_atomic_int_method / _get_atomic_bool_method
+    # 中每个 BuiltinFunction.func 都是捕获了当前接收者（s / lst / obj）的闭包，
+    # 实例因此与具体对象绑定。若把 methods 字典提升为模块级或类级常量，所有
+    # 访问都会复用首个对象的方法表，导致对错误的对象执行操作（例如字符串
+    # "分割" 会切错字符串、列表 "追加" 会加到错误列表）。故这些字典必须
+    # 每次调用按接收者重新构建，不能安全地提升为常量。
 
     def _get_str_method(self, s: str, name: str, expr) -> object:
         """获取字符串的内置方法"""
@@ -885,7 +925,6 @@ class ExpressionEvaluator:
         """求值宏调用：!宏名(参数)"""
         import logging
 
-        from ..ast_nodes import QuoteBlock
         from ..macros import MacroExpander
         from ..macros.ast_repr import DataToAST
 
@@ -984,11 +1023,9 @@ class ExpressionEvaluator:
 
     def _eval_pattern_macro_call(self, expr: MacroCall, macro_info, env: Environment) -> object:
         """求值模式匹配宏调用"""
-        import copy
         import logging
 
         from ..macros.pattern_engine import PatternMatchEngine
-        from ..macros.expander import MacroExpander
 
         logger = logging.getLogger('dao.macros')
 
@@ -1220,7 +1257,7 @@ class ExpressionEvaluator:
                 return self.eval_macro_call(macro_call, env)
 
         callee = self.eval_expression(expr.right, env)
-        if isinstance(callee, DaoCallable) or isinstance(callee, DaoClass):
+        if isinstance(callee, (DaoCallable, DaoClass)):
             return self.call_function(callee, [left_val])
 
         raise 类型错误(
@@ -1261,7 +1298,6 @@ class ExpressionEvaluator:
 
     async def _run_all(self, tasks):
         """运行所有任务并返回结果（内部辅助方法）"""
-        import asyncio
         from asyncio import gather
 
         coros = []
