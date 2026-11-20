@@ -15,5 +15,7 @@
 - builtins  : 内置函数（打印、长度等）
 """
 
-__version__ = "0.1.0"
-__author__ = "道语言项目组"
+# 版本号与作者统一由 dao.version 定义，此处重导出以兼容既有导入方式。
+from .version import __author__, __version__
+
+__all__ = ["__author__", "__version__"]

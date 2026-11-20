@@ -23,6 +23,7 @@ from dao.errors import 道错误
 from dao.interpreter import Interpreter
 from dao.lexer import Lexer
 from dao.parser import Parser
+from dao.version import banner_text, version_text
 
 
 def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>",
@@ -331,7 +332,7 @@ def _execute_repl_source(source: str, interpreter: Interpreter):
 def run_repl():
     """启动交互式命令行（REPL）"""
     print("═" * 50)
-    print("  道（Dao）编程语言 v0.1.0")
+    print(banner_text())
     print("  交互式命令行 - 输入代码按回车执行")
     print("  输入 ':帮助' 查看所有命令")
     print("  输入 '退出' 或按 Ctrl+C 退出")
@@ -401,6 +402,8 @@ def run_repl():
 def main():
     """主函数"""
     arg_parser = argparse.ArgumentParser(description="道（Dao）编程语言")
+    arg_parser.add_argument("-V", "--version", action="version", version=version_text(),
+                            help="显示版本号信息并退出")
     arg_parser.add_argument("file", nargs="?", help="要执行的 .道 文件")
     arg_parser.add_argument("--mode", choices=["interpreter", "vm"], default="interpreter",
                             help="执行模式：interpreter（默认）或 vm")
