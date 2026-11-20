@@ -5,11 +5,12 @@ LSP 语言特性实现
 提供与具体传输、服务器状态无关的纯函数，供 :mod:`dao.lsp.server` 调用：
 
 - :func:`compute_diagnostics` : 词法 / 语法诊断
-- :func:`completion_list`      : 关键字、内置函数、标准库模块、文档标识符补全
-- :func:`hover_info`           : 关键字与内置函数的中文说明
-- :func:`document_symbols`     : 基于 AST 的文档符号（含嵌套子符号）
+- :func:`completion_list`      : 关键字、内置函数、标准库模块、文档标识符补全（可按前缀过滤）
+- :func:`completion_resolve`   : 补全项的惰性详情回填
+- :func:`hover_info`           : 关键字、内置函数、标准库模块及用户声明的中文说明
+- :func:`document_symbols`     : 基于 AST 的文档符号（含嵌套与控制流内的子符号）
 - :func:`definition_locations` : 当前文档内的定义跳转
-- :func:`word_at`              : 取光标处的词（悬停 / 跳转复用的工具函数）
+- :func:`word_at` / :func:`word_prefix_at` : 取光标处的词 / 词前缀
 
 设计要点：
 
@@ -165,6 +166,24 @@ def word_at(source: str, line: int, character: int) -> str | None:
     return None
 
 
+def word_prefix_at(source: str, line: int, character: int) -> str:
+    """返回光标前当前词已输入的前缀；落在空白或越界时返回空串。
+
+    与 :func:`word_at` 不同，本函数只取词首到光标的子串。例如源码中是
+    「打印」而光标停在第一个字之后时拿到「打」（而非整词「打印」），
+    便于补全按用户实际输入的前缀过滤。
+    """
+    lines = (source or "").splitlines()
+    if line < 0 or line >= len(lines):
+        return ""
+    text = lines[line]
+    character = max(0, min(character, len(text)))
+    for match in _WORD_RE.finditer(text):
+        if match.start() < character <= match.end():
+            return text[match.start():character]
+    return ""
+
+
 def _builtin_names() -> list[str]:
     """返回全部内置函数名（基础内置 + 高阶内置），异常时安全降级。"""
     try:
@@ -199,6 +218,39 @@ def _parse_program(source: str) -> Program | None:
     # 有意宽泛捕获：错误源码时降级返回已有信息，绝不让 LSP 服务器崩溃
     except Exception:  # noqa: BLE001
         return None
+
+
+def _iter_child_statements(node):
+    """产出节点内可能包含的所有子语句列表。
+
+    覆盖函数 / 类的 ``body``、类 ``methods``、``如果`` / ``当`` / ``遍历`` 的
+    分支体、``尝试`` 的捕获与收尾块，以及 ``匹配`` / ``选择`` 的 case 体。
+    符号收集统一复用本函数，避免控制流内的声明从大纲中遗漏。
+    """
+    for attr in ("body", "methods", "else_body", "try_body", "finally_body"):
+        sub = getattr(node, attr, None)
+        if isinstance(sub, list):
+            yield sub
+    elif_clauses = getattr(node, "elif_clauses", None)
+    if isinstance(elif_clauses, list):
+        for clause in elif_clauses:
+            if isinstance(clause, (tuple, list)) and len(clause) >= 2:
+                sub = clause[1]
+                if isinstance(sub, list):
+                    yield sub
+    catches = getattr(node, "catches", None)
+    if isinstance(catches, list):
+        for catch in catches:
+            if isinstance(catch, dict):
+                sub = catch.get("catch_body") or catch.get("body")
+                if isinstance(sub, list):
+                    yield sub
+    cases = getattr(node, "cases", None)
+    if isinstance(cases, list):
+        for case in cases:
+            sub = getattr(case, "body", None)
+            if isinstance(sub, list):
+                yield sub
 
 
 # ========================
@@ -297,12 +349,13 @@ def _static_completion_items() -> dict[str, dict]:
     return items
 
 
-def completion_list(source: str) -> dict:
+def completion_list(source: str, prefix: str = "") -> dict:
     """返回补全候选（CompletionList）。
 
     不依赖源码能否解析：即便词法或语法有错，仍返回静态候选，并用正则从
-    源码中提取已出现的标识符，保证「错误源码也返回已有信息」。补全不做
-    前缀 / 上下文过滤，由客户端按 ``label`` 自行筛选。
+    源码中提取已出现的标识符，保证「错误源码也返回已有信息」。``prefix``
+    非空时按 ``label`` 前缀过滤（客户端仍可按 ``label`` 二次筛选）；不传时
+    保持全量返回，返回类型仍是标准的 ``CompletionList``。
     """
     items = _static_completion_items()
     for word in _WORD_RE.findall(source or ""):
@@ -314,7 +367,34 @@ def completion_list(source: str) -> dict:
                 "detail": "文档中的标识符",
             },
         )
-    return {"isIncomplete": False, "items": list(items.values())}
+    values = list(items.values())
+    if prefix:
+        values = [
+            item for item in values if str(item.get("label", "")).startswith(prefix)
+        ]
+    return {"isIncomplete": False, "items": values}
+
+
+def completion_resolve(item: dict) -> dict:
+    """为 ``completionItem/resolve`` 补全项的 ``detail`` / ``documentation``。
+
+    客户端传来的项通常只有 ``label``；这里按静态候选表回填缺失的
+    ``kind`` / ``detail`` / ``documentation``，已存在的字段一律保留。
+    非字典输入或找不到对应静态候选时安全返回原项。
+    """
+    if not isinstance(item, dict):
+        return {}
+    result = dict(item)
+    label = result.get("label")
+    if not isinstance(label, str):
+        return result
+    static = _static_completion_items().get(label)
+    if static is None:
+        return result
+    for key in ("kind", "detail", "documentation"):
+        if not result.get(key) and static.get(key) is not None:
+            result[key] = static[key]
+    return result
 
 
 # ========================
@@ -326,8 +406,112 @@ def _markdown_hover(value: str) -> dict:
     return {"contents": {"kind": "markdown", "value": value}}
 
 
+# 用户自定义声明类型 -> 悬停标签
+_USER_KIND_LABELS = {
+    FunctionDecl: "函数",
+    AsyncFunctionDecl: "异步函数",
+    ClassDecl: "类型",
+    AbstractDecl: "抽象类型",
+    TraitDecl: "特征",
+    EnumDecl: "枚举",
+    MacroDefinition: "宏",
+    TypeAliasDecl: "类型别名",
+}
+
+
+def _type_name(annotation) -> str:
+    """把类型注解节点转成简短类型名，取不到时返回空串。"""
+    if annotation is None:
+        return ""
+    name = getattr(annotation, "name", None)
+    if name:
+        return str(name)
+    types = getattr(annotation, "types", None)
+    if isinstance(types, list) and types:
+        return " | ".join(
+            part for part in (_type_name(item) for item in types) if part
+        )
+    inner = getattr(annotation, "inner", None)
+    if inner is not None:
+        return _type_name(inner)
+    target = getattr(annotation, "target_type", None)
+    if target is not None:
+        return _type_name(target)
+    return ""
+
+
+def _signature_for(node) -> str:
+    """由用户声明节点生成一行可读签名。"""
+    if isinstance(node, (FunctionDecl, AsyncFunctionDecl)):
+        defaults = getattr(node, "default_values", None) or {}
+        parts = [
+            f"{param}=..." if param in defaults else str(param)
+            for param in (getattr(node, "params", None) or [])
+        ]
+        rest = getattr(node, "rest_param", None)
+        if rest:
+            parts.append(f"...{rest}")
+        signature = f"{getattr(node, 'name', '')}({', '.join(parts)})"
+        return_type = _type_name(getattr(node, "return_type", None))
+        if return_type:
+            signature += f" -> {return_type}"
+        label = "异步函数" if isinstance(node, AsyncFunctionDecl) else "函数"
+        return f"{label} {signature}"
+    if isinstance(node, (ClassDecl, AbstractDecl)):
+        text = f"类型 {getattr(node, 'name', '')}"
+        parent = getattr(node, "parent_name", None)
+        if parent:
+            text += f"，继承自 {parent}"
+        traits = getattr(node, "implemented_traits", None) or []
+        if traits:
+            text += f"，实现 {', '.join(str(t) for t in traits)}"
+        return text
+    if isinstance(node, TraitDecl):
+        return f"特征 {getattr(node, 'name', '')}"
+    if isinstance(node, EnumDecl):
+        values = getattr(node, "values", None) or []
+        variants = getattr(node, "variants", None) or []
+        names = [str(value) for value in values]
+        names += [getattr(variant, "name", "") for variant in variants]
+        tail = f"（{', '.join(n for n in names if n)}）" if names else ""
+        return f"枚举 {getattr(node, 'name', '')}{tail}"
+    if isinstance(node, MacroDefinition):
+        params = getattr(node, "parameters", None) or []
+        return f"宏 {getattr(node, 'name', '')}({', '.join(str(p) for p in params)})"
+    if isinstance(node, TypeAliasDecl):
+        alias = f"类型别名 {getattr(node, 'name', '')}"
+        target = _type_name(getattr(node, "target_type", None))
+        return f"{alias} = {target}" if target else alias
+    return str(getattr(node, "name", ""))
+
+
+def _collect_user_symbols(statements, out: dict) -> None:
+    """递归收集有名字的用户声明，供悬停按名字查签名。"""
+    for node in statements:
+        if type(node) in _USER_KIND_LABELS:
+            name = getattr(node, "name", None)
+            if name and name not in out:
+                out[name] = node
+        for sub in _iter_child_statements(node):
+            _collect_user_symbols(sub, out)
+
+
+def _user_symbols(source: str) -> dict:
+    """解析源码并收集用户声明；解析失败或内部异常时返回空字典。"""
+    program = _parse_program(source)
+    if program is None:
+        return {}
+    symbols: dict = {}
+    try:
+        _collect_user_symbols(getattr(program, "statements", []), symbols)
+    # 有意宽泛捕获：错误源码时降级返回已有信息，绝不让 LSP 服务器崩溃
+    except Exception:  # noqa: BLE001, S110
+        pass
+    return symbols
+
+
 def hover_info(source: str, line: int, character: int) -> dict | None:
-    """对关键字、内置函数、标准库模块给出中文说明；否则返回 ``None``。"""
+    """对关键字、内置函数、标准库模块及用户自定义声明给出中文说明。"""
     word = word_at(source, line, character)
     if not word:
         return None
@@ -341,6 +525,10 @@ def hover_info(source: str, line: int, character: int) -> dict | None:
         return _markdown_hover(
             f"**{word}**（标准库模块）\n\n可用「从 {word} 导入 ...」引入。"
         )
+    node = _user_symbols(source).get(word)
+    if node is not None:
+        label = _USER_KIND_LABELS.get(type(node), "声明")
+        return _markdown_hover(f"**{word}**（{label}）\n\n`{_signature_for(node)}`")
     return None
 
 
@@ -374,29 +562,34 @@ def _range_for(node, source: str, name: str) -> tuple[dict, dict]:
 
 
 def _collect_definitions(statements, source: str, out: list[dict]) -> None:
-    """递归收集声明节点，生成层次化的 DocumentSymbol 列表。"""
+    """递归收集声明节点，生成层次化的 DocumentSymbol 列表。
+
+    控制流语句（``如果`` / ``当`` / ``遍历`` / ``尝试`` / ``匹配`` 等）本身
+    不是声明节点，但其分支体内的声明会被提升到当前层级，从而出现在大纲中。
+    """
     for node in statements:
         kind = _DECL_KINDS.get(type(node))
         name = getattr(node, "name", None)
-        if not name or kind is None:
-            continue
-        if isinstance(node, VariableDecl) and node.is_constant:
-            kind = _常量
-        whole, selection = _range_for(node, source, name)
-        symbol = {
-            "name": name,
-            "kind": kind,
-            "range": whole,
-            "selectionRange": selection,
-        }
+        symbol = None
         children: list[dict] = []
-        for attr in ("body", "methods"):
-            sub = getattr(node, attr, None)
-            if isinstance(sub, list):
-                _collect_definitions(sub, source, children)
-        if children:
+        if name and kind is not None:
+            if isinstance(node, VariableDecl) and node.is_constant:
+                kind = _常量
+            whole, selection = _range_for(node, source, name)
+            symbol = {
+                "name": name,
+                "kind": kind,
+                "range": whole,
+                "selectionRange": selection,
+            }
+            out.append(symbol)
+            target = children
+        else:
+            target = out
+        for sub in _iter_child_statements(node):
+            _collect_definitions(sub, source, target)
+        if symbol is not None and children:
             symbol["children"] = children
-        out.append(symbol)
 
 
 def document_symbols(source: str) -> list[dict]:

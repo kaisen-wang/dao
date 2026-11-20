@@ -29,7 +29,7 @@ SERVER_INFO = {"name": "道语言服务器", "version": "0.1.0"}
 
 CAPABILITIES = {
     "textDocumentSync": 1,  # 1 = 全量同步（TextDocumentSyncKind.Full）
-    "completionProvider": {"resolveProvider": False},
+    "completionProvider": {"resolveProvider": True},
     "hoverProvider": True,
     "definitionProvider": True,
     "documentSymbolProvider": True,
@@ -66,6 +66,7 @@ class LanguageServer:
             "textDocument/didChange": self._on_did_change,
             "textDocument/didClose": self._on_did_close,
             "textDocument/completion": self._on_completion,
+            "completionItem/resolve": self._on_completion_resolve,
             "textDocument/hover": self._on_hover,
             "textDocument/definition": self._on_definition,
             "textDocument/documentSymbol": self._on_document_symbol,
@@ -163,8 +164,15 @@ class LanguageServer:
     # ========================
 
     def _on_completion(self, params) -> tuple:
-        source = self.documents.get(self._uri(params), "")
-        return features.completion_list(source), []
+        uri = self._uri(params)
+        source = self.documents.get(uri, "")
+        line, character = self._position(params)
+        # 按光标处已输入的前缀过滤候选；前缀为空时保持全量返回。
+        prefix = features.word_prefix_at(source, line, character)
+        return features.completion_list(source, prefix), []
+
+    def _on_completion_resolve(self, params) -> tuple:
+        return features.completion_resolve(params), []
 
     def _on_hover(self, params) -> tuple:
         source = self.documents.get(self._uri(params), "")
