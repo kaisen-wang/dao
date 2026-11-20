@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
 """Unification Algorithm Implementation"""
 
 from typing import Any
-from .core import LogicVariable, LogicAtom, LogicStruct, Substitution, normalize_term
-from .exceptions import UnificationError, CircularRuleError
+
+from .core import LogicAtom, LogicStruct, LogicVariable, Substitution
+from .exceptions import CircularRuleError, UnificationError
 
 
 def occurs_check(var: LogicVariable, term: Any) -> bool:
@@ -12,7 +12,7 @@ def occurs_check(var: LogicVariable, term: Any) -> bool:
         return var == term
     elif isinstance(term, LogicStruct):
         return any(occurs_check(var, arg) for arg in term.args)
-    elif isinstance(term, list) or isinstance(term, tuple):
+    elif isinstance(term, (list, tuple)):
         return any(occurs_check(var, item) for item in term)
     elif isinstance(term, dict):
         return any(occurs_check(var, value) for value in term.values())

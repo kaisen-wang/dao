@@ -12,27 +12,27 @@
 """
 
 __all__ = [
+    "AllDifferentConstraint",
     "Constraint",
+    "ConstraintSolver",
     "ConstraintType",
-    "NumericRangeConstraint",
+    "ConstraintViolationError",
     "EqualityConstraint",
     "InequalityConstraint",
     "LessThanConstraint",
-    "AllDifferentConstraint",
+    "NumericRangeConstraint",
     "TypeConstraint",
-    "ConstraintSolver",
-    "ConstraintViolationError",
-    "is_constrained",
+    "all_different",
     "apply_constraints",
     "get_constraints",
     "in_range",
-    "all_different",
+    "is_constrained",
 ]
 
 
 def in_range(variable, low: int, high: int):
     """创建范围约束"""
-    from .core import NumericRangeConstraint, LogicVariable
+    from .core import LogicVariable, NumericRangeConstraint
 
     if isinstance(variable, str):
         variable = LogicVariable(variable)

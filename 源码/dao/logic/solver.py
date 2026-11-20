@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
-from typing import Any, Dict, Generator, List, Optional
+from collections.abc import Generator
+from typing import Any
 
-from .backtracking import Backtracker, TrailStack
 from .core import (
     KnowledgeBase,
     LogicAtom,
@@ -10,8 +9,8 @@ from .core import (
     Substitution,
     normalize_term,
 )
-from .exceptions import CircularRuleError, QueryError, UnificationError
-from .unification import apply_substitution, unify
+from .exceptions import QueryError
+from .unification import apply_substitution
 
 
 class QueryResult:
@@ -28,7 +27,7 @@ class QueryResult:
             return var_name
         return value
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = {}
         if self.variables:
             for var_name in self.variables:
@@ -60,7 +59,7 @@ class QueryResult:
 
 class Solver:
     def __init__(
-        self, knowledge_base: KnowledgeBase, constraints: Optional[List] = None
+        self, knowledge_base: KnowledgeBase, constraints: list | None = None
     ):
         self.kb = knowledge_base
         from .backtracking import Backtracker
@@ -92,7 +91,7 @@ class Solver:
 
     def solve_one(
         self, goal: Any, variables: list[str] = None
-    ) -> Optional[QueryResult]:
+    ) -> QueryResult | None:
         results = self.solve(goal, variables, max_solutions=1)
         return results[0] if results else None
 
@@ -226,7 +225,7 @@ def solve(
     return solver.solve(goal, variables)
 
 
-def query(knowledge_base: KnowledgeBase, goal_str: str) -> list[Dict[str, Any]]:
+def query(knowledge_base: KnowledgeBase, goal_str: str) -> list[dict[str, Any]]:
     """
     解析并执行逻辑查询
 
@@ -237,7 +236,6 @@ def query(knowledge_base: KnowledgeBase, goal_str: str) -> list[Dict[str, Any]]:
     Returns:
         查询结果的字典列表
     """
-    from ..ast_nodes import FunctionCall
 
     # 这里我们需要解析查询字符串，但由于没有完整的解析器上下文
     # 我们实现一个简单的解析器来处理基本查询格式
@@ -301,5 +299,5 @@ def query(knowledge_base: KnowledgeBase, goal_str: str) -> list[Dict[str, Any]]:
         solver = Solver(knowledge_base)
         results = solver.solve(goal)
         return [result.to_dict() for result in results]
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 刻意兜底：统一包装为 QueryError 向上抛出
         raise QueryError(f"查询解析或执行失败: {e}")

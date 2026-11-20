@@ -1,16 +1,15 @@
-# -*- coding: utf-8 -*-
 """Backtracking Mechanism Implementation"""
 
-from typing import Any, Callable, Generator, List, Optional
+from collections.abc import Generator
+from typing import Any
 
 from .core import (
     KnowledgeBase,
     LogicStruct,
     LogicVariable,
     Substitution,
-    normalize_term,
 )
-from .unification import apply_substitution, occurs_check, unify
+from .unification import apply_substitution, unify
 
 
 class TrailStack:
@@ -59,14 +58,13 @@ class TrailStack:
 
 class CutSignal(Exception):
     """剪枝信号：用于在回溯搜索中传播剪枝操作"""
-    pass
 
 
 class Backtracker:
     """Depth-first search backtracker"""
 
     def __init__(
-        self, knowledge_base: KnowledgeBase, constraints: Optional[List] = None
+        self, knowledge_base: KnowledgeBase, constraints: list | None = None
     ):
         self.kb = knowledge_base
         self.trail = TrailStack()
@@ -76,7 +74,7 @@ class Backtracker:
         self._cut_active = False
 
     def search(
-        self, goal: Any, substitution: Optional[Substitution] = None
+        self, goal: Any, substitution: Substitution | None = None
     ) -> Generator[Substitution, None, None]:
         if substitution is None:
             substitution = Substitution()
@@ -126,7 +124,7 @@ class Backtracker:
                 # 检查新替换是否满足约束
                 if self.constraint_solver.check_constraints(new_subst):
                     yield new_subst
-            except Exception:
+            except Exception:  # noqa: BLE001 - 回溯兜底：任何异常都回退 trail，保持搜索健壮性
                 self.trail.backtrack(mark)
 
         for head, body in self.kb.get_rules(predicate):
@@ -139,7 +137,7 @@ class Backtracker:
                 # 检查统一化后的替换是否满足约束
                 if self.constraint_solver.check_constraints(new_subst):
                     yield from self._solve_body(body, new_subst)
-            except Exception:
+            except Exception:  # noqa: BLE001 - 回溯兜底：任何异常都回退 trail，保持搜索健壮性
                 self.trail.backtrack(mark)
 
     def _solve_body(
@@ -183,21 +181,21 @@ class Backtracker:
         self._cut_active = False
 
     def find_one(
-        self, goal: Any, substitution: Optional[Substitution] = None
-    ) -> Optional[Substitution]:
+        self, goal: Any, substitution: Substitution | None = None
+    ) -> Substitution | None:
         for solution in self.search(goal, substitution):
             return solution
         return None
 
     def find_all(
-        self, goal: Any, substitution: Optional[Substitution] = None
+        self, goal: Any, substitution: Substitution | None = None
     ) -> list[Substitution]:
         return list(self.search(goal, substitution))
 
     def count_solutions(
         self,
         goal: Any,
-        substitution: Optional[Substitution] = None,
+        substitution: Substitution | None = None,
         max_count: int = 1000,
     ) -> int:
         count = 0
@@ -213,5 +211,5 @@ def cut() -> CutSignal:
     return CutSignal()
 
 
-def once(goal: Any, backtracker: Backtracker) -> Optional[Substitution]:
+def once(goal: Any, backtracker: Backtracker) -> Substitution | None:
     return backtracker.find_one(goal)

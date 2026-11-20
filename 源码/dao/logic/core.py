@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
+from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Any, Hashable
-from .exceptions import UnificationError, CircularRuleError
+from typing import Any
+
 
 @dataclass
 class LogicVariable:
@@ -64,9 +64,7 @@ class LogicStruct:
             if isinstance(arg, LogicStruct):
                 # Keep LogicStruct as is for recursive occurs_check
                 normalized_args.append(arg)
-            elif isinstance(arg, LogicAtom):
-                normalized_args.append(arg)
-            elif isinstance(arg, LogicVariable):
+            elif isinstance(arg, (LogicAtom, LogicVariable)):
                 normalized_args.append(arg)
             elif isinstance(arg, str) and arg.startswith('?'):
                 normalized_args.append(LogicVariable(arg))

@@ -20,6 +20,9 @@ from ..ast_nodes import (
     LambdaExpr,
     ListLiteral,
     ListPattern,
+    LogicConstraint,
+    LogicCut,
+    LogicNegation,
     LogicQuery,
     LogicVariable,
     MemberAccess,
@@ -689,8 +692,6 @@ class ExpressionParser:
 
     def parse_logic_negation(self) -> "LogicNegation":
         """解析逻辑否定：非 已封禁(?用户)"""
-        from ..ast_nodes import LogicNegation
-
         token = self.advance()  # 消费 非
         negated_expr = self.parse_expression()
         return LogicNegation(
@@ -701,8 +702,6 @@ class ExpressionParser:
 
     def parse_logic_cut(self) -> "LogicCut":
         """解析剪枝操作符：剪枝"""
-        from ..ast_nodes import LogicCut
-
         token = self.advance()  # 消费 剪枝
         return LogicCut(line=token.line, column=token.column)
 

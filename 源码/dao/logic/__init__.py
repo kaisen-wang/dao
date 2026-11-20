@@ -1,16 +1,15 @@
-# -*- coding: utf-8 -*-
 """Logic Programming Engine Module"""
 
-from .core import KnowledgeBase
-from .unification import unify, apply_substitution, occurs_check
 from .backtracking import TrailStack
+from .core import KnowledgeBase
 from .solver import solve
+from .unification import apply_substitution, occurs_check, unify
 
 __all__ = [
     "KnowledgeBase",
-    "unify",
+    "TrailStack",
     "apply_substitution",
     "occurs_check",
-    "TrailStack",
     "solve",
+    "unify",
 ]
