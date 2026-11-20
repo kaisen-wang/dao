@@ -1,0 +1,185 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "道语言",
+  "scopeName": "source.dao",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#literals" },
+    { "include": "#builtin-function" },
+    { "include": "#macro-call" },
+    { "include": "#logic-var" },
+    { "include": "#pipe" },
+    { "include": "#keywords" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "include": "#doc-comment" },
+        { "include": "#line-comment-zhu" },
+        { "include": "#line-comment-slash" },
+        { "include": "#block-comment" }
+      ]
+    },
+    "doc-comment": {
+      "name": "comment.line.documentation.dao",
+      "match": "///.*$"
+    },
+    "line-comment-zhu": {
+      "name": "comment.line.dao",
+      "match": "注[：:].*$"
+    },
+    "line-comment-slash": {
+      "name": "comment.line.double-slash.dao",
+      "match": "//.*$"
+    },
+    "block-comment": {
+      "name": "comment.block.dao",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    "strings": {
+      "patterns": [
+        { "include": "#template-string" },
+        { "include": "#double-string" },
+        { "include": "#single-string" }
+      ]
+    },
+    "template-string": {
+      "name": "string.template.dao",
+      "begin": "`",
+      "end": "`",
+      "patterns": [
+        {
+          "name": "meta.interpolation.dao",
+          "begin": "\\{",
+          "end": "\\}",
+          "patterns": [
+            { "include": "#numbers" },
+            { "include": "#literals" },
+            {
+              "name": "variable.other.dao",
+              "match": "[\\p{L}_][\\p{L}\\p{N}_]*"
+            }
+          ]
+        },
+        { "include": "#string-escape" }
+      ]
+    },
+    "double-string": {
+      "name": "string.quoted.double.dao",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "include": "#string-escape" }
+      ]
+    },
+    "single-string": {
+      "name": "string.quoted.single.dao",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        { "include": "#string-escape" }
+      ]
+    },
+    "string-escape": {
+      "name": "constant.character.escape.dao",
+      "match": "\\\\."
+    },
+    "numbers": {
+      "name": "constant.numeric.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:\\d[\\d_]*(?:\\.[\\d_]+)?(?:[eE][+-]?\\d+)?|\\.[0-9][\\d_]*)(?![\\p{L}\\p{N}_])"
+    },
+    "literals": {
+      "name": "constant.language.dao",
+      "match": "(?<!\\p{L})(?:真|假|空)(?!\\p{L})"
+    },
+    "macro-call": {
+      "match": "(!)(?![=])([\\p{L}_][\\p{L}\\p{N}_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.macro.dao" },
+        "2": { "name": "support.function.macro.dao" }
+      }
+    },
+    "logic-var": {
+      "match": "(\\?)([\\p{L}_][\\p{L}\\p{N}_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.logic-variable.dao" },
+        "2": { "name": "variable.other.logic.dao" }
+      }
+    },
+    "pipe": {
+      "name": "keyword.operator.pipe.dao",
+      "match": "\\|>"
+    },
+    "builtin-function": {
+      "name": "support.function.dao",
+      "match": "(?<![\\p{L}\\p{N}_])运行异步(?![\\p{L}\\p{N}_])"
+    },
+    "keywords": {
+      "patterns": [
+        { "include": "#kw-control" },
+        { "include": "#kw-declaration" },
+        { "include": "#kw-exception" },
+        { "include": "#kw-oop" },
+        { "include": "#kw-concurrency" },
+        { "include": "#kw-logic" },
+        { "include": "#kw-macro" },
+        { "include": "#kw-logical-op" },
+        { "include": "#kw-module" },
+        { "include": "#kw-type" }
+      ]
+    },
+    "kw-control": {
+      "name": "keyword.control.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:否则如果|遍历|对于|跳出|继续|匹配|情况|产出|步长|如果|否则|返回|当|在|从|到|默认)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-declaration": {
+      "name": "storage.type.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:定义|常量|函数|设)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-exception": {
+      "name": "keyword.control.exception.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:尝试|捕获|最终|抛出|断言)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop": {
+      "name": "keyword.other.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:受保护|继承自|初始化|本对象|父对象|运算符|私有|静态|特征|实现|获取|设置|抽象|枚举|类型)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-concurrency": {
+      "name": "keyword.other.concurrency.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:原子整数|原子布尔|互斥锁|异步|等待|全部|竞速|并行|通道|发送|接收|选择|超时|同步)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-logic": {
+      "name": "keyword.other.logic.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:在范围|逻辑|事实|规则|查询|剪枝|非)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-macro": {
+      "name": "keyword.other.macro.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:定义宏|引述|引用|注入)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-logical-op": {
+      "name": "keyword.operator.logical.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:并且|或者|不是|不在|且)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-module": {
+      "name": "keyword.other.module.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:导入|导出|作为)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-type": {
+      "name": "storage.type.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:类型别名)(?![\\p{L}\\p{N}_])"
+    },
+    "operators": {
+      "name": "keyword.operator.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:=>|->|\\*\\*|//|==|!=|>=|<=|\\.\\.\\.|[+\\-*/%=<>.])(?![\\p{L}\\p{N}_])"
+    },
+    "punctuation": {
+      "name": "punctuation.dao",
+      "match": "[，,：:；;。、（）()\\[\\]{}「」“”‘’]"
+    }
+  }
+}

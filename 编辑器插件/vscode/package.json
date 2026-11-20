@@ -1,0 +1,61 @@
+{
+  "name": "dao-language",
+  "displayName": "道语言",
+  "description": "为「道」中文多范式编程语言提供语法高亮、括号匹配、注释切换，以及基于 LSP 的诊断、补全、悬停与跳转支持。",
+  "version": "0.1.0",
+  "publisher": "dao-lang",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "道",
+    "道语言",
+    "dao",
+    "chinese",
+    "lsp"
+  ],
+  "activationEvents": [
+    "onLanguage:dao"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "dao",
+        "aliases": ["道语言", "道", "Dao", "dao"],
+        "extensions": [".道"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dao",
+        "scopeName": "source.dao",
+        "path": "./syntaxes/dao.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "道语言",
+      "properties": {
+        "dao.pythonPath": {
+          "type": "string",
+          "default": "../../源码/.venv/bin/python",
+          "description": "道语言 LSP 服务使用的 Python 解释器路径。相对路径基于本插件目录解析；留空则自动使用仓库内置的 源码/.venv/bin/python。"
+        },
+        "dao.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "是否在「输出」面板记录与 LSP 服务器的通信，用于故障排查。"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  }
+}
