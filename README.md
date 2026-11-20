@@ -168,15 +168,23 @@ sudo bash 源码/安装原生版.sh --system  # 装到 /usr/local/bin/dao
 │   ├── 15-开发工具链.md
 │   ├── 16-开发者体验.md
 │   └── 17-原生打包与安装.md
+├── .github/workflows/      ← GitHub Actions：全平台构建安装包 + Release
+│   └── build-installers.yml
+├── .workflow/              ← Gitee Go：Linux .deb 构建 + Release
+│   └── build-installers.yml
 ├── dist/                   ← 打包输出（.gitignore 忽略，不入库）
-│   ├── dao-language-0.1.0.vsix  ← VS Code 插件
-│   └── nuitka/dao          ← Nuitka 原生可执行文件（~47MB，需现场构建）
+│   ├── dao-language-1.0.0.vsix  ← VS Code 插件
+│   ├── nuitka/dao          ← Nuitka 原生可执行文件（~47MB，需现场构建）
+│   └── installers/         ← 系统级安装包（.deb/.pkg/setup.exe）
 └── 源码/                   ← 解释器源代码（Python 3.10+）
     ├── main.py             ← 主入口（REPL + 文件执行）
+    ├── 构建安装包.py       ← 跨平台构建 + 系统级打包（CI 调用）
+    ├── 打包原生版.sh       ← 本地一键构建 onefile
+    ├── 安装原生版.sh       ← 本地安装/卸载到 PATH
     ├── requirements.txt    ← Python 依赖
     ├── dao/                ← 核心解释器包
     │   ├── __init__.py        ← 包初始化（重导出版本号）
-    │   ├── version.py         ← 版本号单一来源（0.1.0）
+    │   ├── version.py         ← 版本号单一来源（1.0.0）
     │   ├── tokens.py          ← 词元类型定义（32个关键字）
     │   ├── ast_nodes.py       ← AST 节点定义（30+节点类型）
     │   ├── environment.py     ← 词法作用域管理

@@ -18,6 +18,7 @@
 
 import sys
 
+from ..version import __version__
 from . import features
 from .protocol import read_message, write_message
 
@@ -25,7 +26,7 @@ from .protocol import read_message, write_message
 _METHOD_NOT_FOUND = -32601
 _INTERNAL_ERROR = -32603
 
-SERVER_INFO = {"name": "道语言服务器", "version": "0.1.0"}
+SERVER_INFO = {"name": "道语言服务器", "version": __version__}
 
 CAPABILITIES = {
     # TextDocumentSyncOptions：支持打开/关闭通知，变更采用增量同步（2 = Incremental）。
