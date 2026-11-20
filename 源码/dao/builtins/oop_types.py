@@ -54,10 +54,14 @@ class DaoTrait:
         name: str,
         methods: dict[str, DaoFunction],
         static_methods: dict[str, DaoFunction] | None = None,
+        abstract_methods: set[str] | None = None,
     ):
         self.name = name
+        # 带默认实现的方法，可被实现该特征的类型直接继承
         self.methods = methods
         self.static_methods = static_methods or {}
+        # 仅声明签名、无默认体的方法，实现该特征的类型必须覆盖
+        self.abstract_methods = abstract_methods or set()
 
 
 class DaoClass(DaoCallable):

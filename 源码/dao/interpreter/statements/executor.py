@@ -553,11 +553,20 @@ class StatementExecutor(LogicExecutor):
             env.exports.append(stmt.name)
 
     def exec_trait_decl(self, stmt: TraitDecl, env: Environment) -> None:
-        """执行特征声明"""
+        """执行特征声明
+
+        带方法体的 ``函数`` 是默认实现，存入 ``methods`` 供类型直接继承；
+        ``抽象`` 方法只有签名、没有默认体，记入 ``abstract_methods``，
+        由实现该特征的具体类型负责覆盖。
+        """
         methods = {}
         static_methods = {}
+        abstract_methods = set()
         for s in stmt.body:
             if isinstance(s, FunctionDecl):
+                if s.is_abstract:
+                    abstract_methods.add(s.name)
+                    continue
                 func = DaoFunction(
                     name=s.name,
                     params=s.params,
@@ -574,7 +583,12 @@ class StatementExecutor(LogicExecutor):
                 else:
                     methods[s.name] = func
 
-        trait = DaoTrait(name=stmt.name, methods=methods, static_methods=static_methods)
+        trait = DaoTrait(
+            name=stmt.name,
+            methods=methods,
+            static_methods=static_methods,
+            abstract_methods=abstract_methods,
+        )
         env.define(stmt.name, trait)
         if stmt.is_exported:
             env.exports.append(stmt.name)
@@ -694,12 +708,14 @@ class StatementExecutor(LogicExecutor):
                     self.source,
                 )
 
-            for method_name in trait_obj.methods:
+            # 只有抽象方法（无默认体）才强制类型覆盖；带默认实现的方法
+            # 会由 DaoClass.find_method 在类型未定义时自动回退到特征实现。
+            for method_name in trait_obj.abstract_methods:
                 if method_name not in methods and (
                     not parent or not parent.find_method(method_name)
                 ):
                     raise 类型错误(
-                        f"类型 '{stmt.name}' 必须实现特征 '{trait_name}' 中的方法 '{method_name}'",
+                        f"类型 '{stmt.name}' 必须实现特征 '{trait_name}' 中的抽象方法 '{method_name}'",
                         stmt.line,
                         stmt.column,
                         self.source,

@@ -130,10 +130,9 @@ c.draw()
         assert "Drawing a circle" in result
 
     def test_trait_implementation_missing_method(self):
-        """测试类未实现特征方法时的错误"""
+        """测试类未实现特征抽象方法时的错误"""
         source = """特征 可绘制
-    函数 draw()
-        打印("Default drawing")
+    抽象 draw()
 
 类型 圆形
     实现 可绘制
