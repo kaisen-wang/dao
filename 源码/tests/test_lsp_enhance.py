@@ -8,6 +8,7 @@ stdio 帧流下的健壮性。
 import io
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -41,7 +42,7 @@ def _result(outgoing, msg_id):
     raise AssertionError(f"未找到 id={msg_id} 的响应")
 
 
-def _did_open(server, uri, source):
+def _did_open(server, uri, source, version=1):
     return server.handle_message(
         _notify(
             "textDocument/didOpen",
@@ -49,9 +50,22 @@ def _did_open(server, uri, source):
                 "textDocument": {
                     "uri": uri,
                     "languageId": "dao",
-                    "version": 1,
+                    "version": version,
                     "text": source,
                 }
+            },
+        )
+    )
+
+
+def _did_change(server, uri, changes, version):
+    """发送一次 didChange；changes 可含 range（增量）或纯 text（全量）。"""
+    return server.handle_message(
+        _notify(
+            "textDocument/didChange",
+            {
+                "textDocument": {"uri": uri, "version": version},
+                "contentChanges": changes,
             },
         )
     )
@@ -310,3 +324,253 @@ def test_增强特性经stdio帧流():
     )
     assert any(msg.get("id") == 4 and "问候" in str(msg.get("result")) for msg in sent)
     assert any(msg.get("id") == 5 for msg in sent)
+
+
+# ========================
+# 增量文档同步
+# ========================
+
+
+def test_增量同步_中文与多变更按顺序():
+    """两条带 range 的增量变更按 LSP 0-based 坐标依次应用，中文按 code point 计列。"""
+    server = _server()
+    uri = "file:///inc.道"
+    _did_open(server, uri, "定义 甲 = 1\n", version=3)
+
+    # 第 1 条：把第 0 行第 7 列的「1」替换为「2」（BMP 中文与 UTF-16 列一致）。
+    # 第 2 条：在第 0 行第 0 列插入一行新的中文声明。
+    _did_change(
+        server,
+        uri,
+        [
+            {
+                "range": {
+                    "start": {"line": 0, "character": 7},
+                    "end": {"line": 0, "character": 8},
+                },
+                "text": "2",
+            },
+            {
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": 0},
+                },
+                "text": "定义 乙 = 9\n",
+            },
+        ],
+        version=4,
+    )
+    assert server.documents[uri] == "定义 乙 = 9\n定义 甲 = 2\n"
+    assert server._versions[uri] == 4
+
+
+def test_增量同步_全量帧仍兼容():
+    """客户端偶发发送无 range 的 Full 帧时整篇替换，仍发布诊断。"""
+    server = _server()
+    uri = "file:///full.道"
+    _did_open(server, uri, "定义 甲 = 1\n")
+    out = _did_change(server, uri, [{"text": "定义 = 1\n"}], version=2)
+    assert server.documents[uri] == "定义 = 1\n"
+    assert any(message.get("method") == "textDocument/publishDiagnostics" for message in out)
+
+
+def test_增量同步_乱序与重复版本被忽略():
+    """旧版本 / 重复版本的变更不覆盖较新文本。"""
+    server = _server()
+    uri = "file:///order.道"
+    _did_open(server, uri, "定义 甲 = 1\n", version=5)
+
+    # 旧版本（4 < 5）应被完全忽略，不产生诊断通知。
+    stale = _did_change(server, uri, [{"text": "定义 甲 = 旧\n"}], version=4)
+    assert stale == []
+    assert server.documents[uri] == "定义 甲 = 1\n"
+
+    # 新版本应用增量编辑。
+    _did_change(
+        server,
+        uri,
+        [
+            {
+                "range": {
+                    "start": {"line": 0, "character": 7},
+                    "end": {"line": 0, "character": 8},
+                },
+                "text": "2",
+            }
+        ],
+        version=6,
+    )
+    assert server.documents[uri] == "定义 甲 = 2\n"
+
+    # 同一版本重复发送也忽略。
+    duplicate = _did_change(server, uri, [{"text": "定义 甲 = 重复\n"}], version=6)
+    assert duplicate == []
+    assert server.documents[uri] == "定义 甲 = 2\n"
+
+    # 关闭后版本记录一并清理。
+    server.handle_message(_notify("textDocument/didClose", {"textDocument": {"uri": uri}}))
+    assert uri not in server._versions
+
+
+# ========================
+# 跨文件跳转
+# ========================
+
+
+def test_跨文件定义与引用(tmp_path):
+    """initialize 带 rootUri（含中文与空格），definition/references 跨文件返回正确 URI 与范围。"""
+    # 用含中文与空格的目录名，顺带验证 URI 百分号解码。
+    root = tmp_path / "道 项目"
+    root.mkdir()
+    tool = root / "工具.道"
+    main = root / "main.道"
+    tool.write_text("导出 辅助\n函数 辅助(值)\n  返回 值\n", encoding="utf-8")
+    main_source = "从 工具 导入 辅助\n定义 结果 = 辅助(1)\n辅助(2)\n"
+    main.write_text(main_source, encoding="utf-8")
+
+    server = _server()
+    caps = _result(
+        server.handle_message(
+            _request(
+                "initialize",
+                {"rootUri": root.as_uri(), "capabilities": {}},
+                1,
+            )
+        ),
+        1,
+    )["capabilities"]
+    assert caps["referencesProvider"] is True
+    assert server.workspace_roots == [str(root)]
+
+    main_uri = main.as_uri()
+    tool_uri = tool.as_uri()
+    _did_open(server, main_uri, main_source)
+
+    # 在 import 语句的「辅助」上跳转到工具文件里的函数定义。
+    out = server.handle_message(
+        _request(
+            "textDocument/definition",
+            {
+                "textDocument": {"uri": main_uri},
+                "position": {"line": 0, "character": 8},
+            },
+            2,
+        )
+    )
+    locations = _result(out, 2)
+    assert any(location["uri"] == tool_uri for location in locations)
+    assert any(location["range"]["start"]["line"] == 1 for location in locations)
+
+    # references 返回工作区内所有引用（含两个文件的声明处）。
+    out = server.handle_message(
+        _request(
+            "textDocument/references",
+            {
+                "textDocument": {"uri": main_uri},
+                "position": {"line": 1, "character": 8},
+                "context": {"includeDeclaration": True},
+            },
+            3,
+        )
+    )
+    refs = _result(out, 3)
+    found = {(ref["uri"], ref["range"]["start"]["line"]) for ref in refs}
+    assert {
+        (main_uri, 0),
+        (main_uri, 1),
+        (main_uri, 2),
+        (tool_uri, 0),
+        (tool_uri, 1),
+    } <= found
+
+
+def test_初始化_workspaceFolders优先于rootUri(tmp_path):
+    """workspaceFolders 中的多个根均被记录并解码，优先级高于 rootUri。"""
+    server = _server()
+    first = tmp_path / "甲"
+    second = tmp_path / "乙 目录"
+    first.mkdir()
+    second.mkdir()
+    server.handle_message(
+        _request(
+            "initialize",
+            {
+                "rootUri": (tmp_path / "兜底").as_uri(),
+                "workspaceFolders": [
+                    {"uri": first.as_uri(), "name": "甲"},
+                    {"uri": second.as_uri(), "name": "乙"},
+                ],
+                "capabilities": {},
+            },
+            1,
+        )
+    )
+    assert server.workspace_roots == [str(first), str(second)]
+
+
+def test_工作区索引失效后重建(tmp_path):
+    """显式失效清空缓存，下次构建反映磁盘上的新源码。"""
+    target = tmp_path / "模块.道"
+    target.write_text("函数 辅助()\n  返回 1\n", encoding="utf-8")
+    first = features.build_workspace_index([str(tmp_path)])
+    assert features._WORKSPACE_INDEX is first
+    assert any(
+        symbol["name"] == "辅助"
+        for symbol in first["symbols"][str(target)]
+    )
+
+    target.write_text("函数 助手()\n  返回 1\n", encoding="utf-8")
+    features.invalidate_workspace_index()
+    assert features._WORKSPACE_INDEX is None
+    second = features.build_workspace_index([str(tmp_path)])
+    assert second is not first
+    assert any(
+        symbol["name"] == "助手"
+        for symbol in second["symbols"][str(target)]
+    )
+
+
+# ========================
+# 补全上下文过滤
+# ========================
+
+
+def test_补全上下文过滤_触发字符与作用域():
+    """triggerCharacters 已声明；context 透传，局部/参数候选优先且去重。"""
+    server = _server()
+    caps = _result(server.handle_message(_request("initialize", {}, 1)), 1)["capabilities"]
+    assert set(caps["completionProvider"]["triggerCharacters"]) >= {".", "("}
+
+    source = "函数 辅助(参数甲)\n  定义 局部 = 参数甲\n  返回 辅助(局部)\n"
+    # 特性层：作用域相关候选排在静态关键字之前，且同名项已去重。
+    items = features.completion_list(
+        source, context={"triggerKind": 2, "triggerCharacter": "("}
+    )["items"]
+    labels = [item["label"] for item in items]
+    assert len(labels) == len(set(labels))
+    assert labels.index("参数甲") < labels.index("函数")
+    assert labels.index("局部") < labels.index("函数")
+    # 字符触发场景不返回低优先级的文档标识符噪声。
+    assert all(item.get("detail") != "文档中的标识符" for item in items)
+
+    # 服务器层：带 context 与前缀的请求按前缀过滤，仍返回标准 CompletionList。
+    uri = "file:///ctx.道"
+    _did_open(server, uri, source)
+    out = server.handle_message(
+        _request(
+            "textDocument/completion",
+            {
+                "textDocument": {"uri": uri},
+                "position": {"line": 2, "character": 7},
+                "context": {"triggerKind": 2, "triggerCharacter": "("},
+            },
+            60,
+        )
+    )
+    result = _result(out, 60)
+    assert result["isIncomplete"] is False
+    result_labels = [item["label"] for item in result["items"]]
+    assert result_labels
+    assert all(label.startswith("辅") for label in result_labels)
+    assert "辅助" in result_labels
+

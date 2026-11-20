@@ -89,11 +89,14 @@ def test_初始化握手():
     result = out[0]["result"]
     assert result["serverInfo"]["name"] == "道语言服务器"
     caps = result["capabilities"]
-    assert caps["textDocumentSync"] == 1
+    # 增量同步：openClose + change=2（TextDocumentSyncKind.Incremental）
+    assert caps["textDocumentSync"] == {"openClose": True, "change": 2}
     assert caps["hoverProvider"] is True
     assert caps["definitionProvider"] is True
+    assert caps["referencesProvider"] is True
     assert caps["documentSymbolProvider"] is True
     assert "completionProvider" in caps
+    assert set(caps["completionProvider"]["triggerCharacters"]) >= {".", "("}
 
 
 def test_生命周期_shutdown_exit():

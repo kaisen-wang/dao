@@ -28,10 +28,17 @@ _INTERNAL_ERROR = -32603
 SERVER_INFO = {"name": "道语言服务器", "version": "0.1.0"}
 
 CAPABILITIES = {
-    "textDocumentSync": 1,  # 1 = 全量同步（TextDocumentSyncKind.Full）
-    "completionProvider": {"resolveProvider": True},
+    # TextDocumentSyncOptions：支持打开/关闭通知，变更采用增量同步（2 = Incremental）。
+    # 即便声明增量，仍兼容客户端偶发发来的全量帧（contentChanges 无 range）。
+    "textDocumentSync": {"openClose": True, "change": 2},
+    "completionProvider": {
+        "resolveProvider": True,
+        # 触发补全的字符；触发时服务器会结合当前作用域过滤候选。
+        "triggerCharacters": [".", "("],
+    },
     "hoverProvider": True,
     "definitionProvider": True,
+    "referencesProvider": True,
     "documentSymbolProvider": True,
 }
 
@@ -54,6 +61,10 @@ class LanguageServer:
             output_stream if output_stream is not None else sys.stdout.buffer
         )
         self.documents: dict[str, str] = {}
+        # 每个已打开文档的最新版本号，用于丢弃乱序 / 重复的 didChange。
+        self._versions: dict[str, int] = {}
+        # initialize 时从 workspaceFolders / rootUri / rootPath 解析出的工作区根路径。
+        self.workspace_roots: list[str] = []
         self._shutdown_received = False
         self._running = False
         self._exit_code = 0
@@ -69,6 +80,7 @@ class LanguageServer:
             "completionItem/resolve": self._on_completion_resolve,
             "textDocument/hover": self._on_hover,
             "textDocument/definition": self._on_definition,
+            "textDocument/references": self._on_references,
             "textDocument/documentSymbol": self._on_document_symbol,
         }
 
@@ -112,6 +124,27 @@ class LanguageServer:
     # ========================
 
     def _on_initialize(self, params) -> tuple:
+        """记录工作区根目录（workspaceFolders 优先，rootUri/rootPath 兜底）。
+
+        URI 形如 ``file:///tmp/%E9%81%93/``，需先按 URI 解码还原中文路径，
+        再做规范化。跨文件索引搭建时会用到这些根路径。
+        """
+        roots: list[str] = []
+        for folder in params.get("workspaceFolders") or []:
+            if not isinstance(folder, dict):
+                continue
+            path = features.uri_to_path(folder.get("uri", ""))
+            if path and path not in roots:
+                roots.append(path)
+        # LSP 中 workspaceFolders 与 rootUri 语义重叠：多根优先，单根场景再回退。
+        if not roots:
+            for key in ("rootUri", "rootPath"):
+                path = features.uri_to_path(params.get(key, ""))
+                if path and path not in roots:
+                    roots.append(path)
+        self.workspace_roots = roots
+        # 根路径可能变化，旧的工作区索引立即作废。
+        features.invalidate_workspace_index()
         return {"capabilities": CAPABILITIES, "serverInfo": SERVER_INFO}, []
 
     def _on_initialized(self, params) -> tuple:
@@ -128,29 +161,94 @@ class LanguageServer:
         return None, []
 
     # ========================
-    # 文档同步（全量）
+    # 文档同步（增量为主，兼容全量）
     # ========================
+
+    @staticmethod
+    def _offset_at(source: str, line: int, character: int) -> int:
+        """把 LSP 0-based ``(line, character)`` 转成 Python 字符串下标。
+
+        LSP 的 ``character`` 按 UTF-16 code unit 计数，而 Python 按 Unicode
+        code point 索引。对常见中文（BMP）两者一致，因此这里直接按 code point
+        处理。增补平面字符（如部分 emoji / 代理对）在 UTF-16 中占两个 code unit、
+        在 Python 中只占一个，偏移可能失配；这是当前实现的已知限制（文档亦注明）。
+        """
+        if line < 0:
+            return 0
+        lines = source.splitlines(keepends=True)
+        if line >= len(lines):
+            return len(source)
+        text = lines[line]
+        # character 指的是行内字符位置，不含行尾符；越界时钳制到行尾。
+        content_len = len(text.rstrip("\r\n"))
+        char = max(0, min(character, content_len))
+        return sum(len(item) for item in lines[:line]) + char
+
+    @classmethod
+    def _apply_incremental_edits(cls, source: str, changes: list) -> str:
+        """按顺序把 ``contentChanges`` 应用到源码，返回新文本。
+
+        - 带 ``range`` 的变更是增量编辑：范围按 LSP 0-based 行列给出，替换成
+          ``text``（``text`` 为空即删除；start==end 即插入）；
+        - 无 ``range`` 的变更是兼容帧（Full），整篇替换为 ``text``；
+        - 多个变更严格按数组顺序应用，每次基于前一次的结果计算偏移。
+
+        字符位置按 UTF-16 code unit 解释，但仅保证 BMP（含常见中文）正确；
+        非 BMP 的代理对见 :meth:`_offset_at` 的说明。
+        """
+        if not isinstance(changes, list):
+            return source
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            text = change.get("text", "") or ""
+            change_range = change.get("range")
+            if not isinstance(change_range, dict):
+                # 兼容全量帧：整篇替换。
+                source = text
+                continue
+            start_pos = change_range.get("start") or {}
+            end_pos = change_range.get("end") or {}
+            start = cls._offset_at(source, start_pos.get("line", 0), start_pos.get("character", 0))
+            end = cls._offset_at(source, end_pos.get("line", 0), end_pos.get("character", 0))
+            if end < start:
+                start, end = end, start
+            source = source[:start] + text + source[end:]
+        return source
 
     def _on_did_open(self, params) -> tuple:
         uri = self._uri(params)
-        source = (params.get("textDocument") or {}).get("text", "") or ""
+        document = params.get("textDocument") or {}
+        source = document.get("text", "") or ""
         self.documents[uri] = source
+        self._versions[uri] = document.get("version", 0)
+        features.invalidate_workspace_index()
         return None, [self._diagnostics_notification(uri, source)]
 
     def _on_did_change(self, params) -> tuple:
         uri = self._uri(params)
+        document = params.get("textDocument") or {}
+        version = document.get("version")
+        current = self._versions.get(uri, 0)
+        # 乱序 / 重复帧：旧版本一律忽略（LSP 要求版本单调递增）。
+        if version is not None and version <= current:
+            return None, []
         changes = params.get("contentChanges") or []
-        if changes:
-            # 全量同步：每条变更都是完整文本，取最新一条。
-            source = changes[-1].get("text", "") or ""
-            self.documents[uri] = source
+        source = self._apply_incremental_edits(self.documents.get(uri, ""), changes)
+        self.documents[uri] = source
+        if version is not None:
+            self._versions[uri] = version
         else:
-            source = self.documents.get(uri, "")
+            # 客户端未带版本时宽松处理，按一次新编辑推进本地版本。
+            self._versions[uri] = current + 1
+        features.invalidate_workspace_index()
         return None, [self._diagnostics_notification(uri, source)]
 
     def _on_did_close(self, params) -> tuple:
         uri = self._uri(params)
         self.documents.pop(uri, None)
+        self._versions.pop(uri, None)
+        features.invalidate_workspace_index()
         # 关闭文档时清空该 URI 的诊断。
         empty = {
             "jsonrpc": "2.0",
@@ -167,9 +265,13 @@ class LanguageServer:
         uri = self._uri(params)
         source = self.documents.get(uri, "")
         line, character = self._position(params)
-        # 按光标处已输入的前缀过滤候选；前缀为空时保持全量返回。
+        # 按光标处已输入的前缀过滤候选；context（triggerKind / triggerCharacter）
+        # 透传给特性层，用于触发场景下进一步收窄作用域候选。
+        context = params.get("context") or {}
         prefix = features.word_prefix_at(source, line, character)
-        return features.completion_list(source, prefix), []
+        return features.completion_list(
+            source, prefix, context=context, position=(line, character)
+        ), []
 
     def _on_completion_resolve(self, params) -> tuple:
         return features.completion_resolve(params), []
@@ -183,7 +285,23 @@ class LanguageServer:
         uri = self._uri(params)
         source = self.documents.get(uri, "")
         line, character = self._position(params)
-        return features.definition_locations(source, line, character, uri), []
+        return (
+            features.definition_locations(
+                source, line, character, uri, self.workspace_roots, self.documents
+            ),
+            [],
+        )
+
+    def _on_references(self, params) -> tuple:
+        uri = self._uri(params)
+        source = self.documents.get(uri, "")
+        line, character = self._position(params)
+        return (
+            features.reference_locations(
+                source, line, character, uri, self.workspace_roots, self.documents
+            ),
+            [],
+        )
 
     def _on_document_symbol(self, params) -> tuple:
         source = self.documents.get(self._uri(params), "")
