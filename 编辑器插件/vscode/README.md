@@ -13,7 +13,7 @@
 
 ### 方式一：安装 .vsix（推荐）
 
-仓库 `dist/` 下提供已打包的 `dao-language-1.0.1.vsix`（含全部生产依赖，约 305 KB）。在 VS Code 中通过「扩展」面板 →「…」→「从 VSIX 安装…」选择该文件即可。
+仓库 `dist/` 下提供已打包的 `dao-language-1.0.2.vsix`（含全部生产依赖，约 305 KB）。在 VS Code 中通过「扩展」面板 →「…」→「从 VSIX 安装…」选择该文件即可。
 
 > **LSP 路径说明**：扩展本身不包含 Python 解释器与道语言源码。安装后，插件会优先从**当前工作区**寻找含 `源码/dao/lsp/` 的道语言项目（即你应在 VS Code 中打开道语言仓库根目录），并使用其中的 `源码/.venv/bin/python`。若打开的是其他项目，请手动把 `dao.pythonPath` 设为道语言环境的解释器绝对路径。
 
@@ -33,7 +33,7 @@ npm install
 ```bash
 cd 编辑器插件/vscode
 npm install --omit=dev
-npx @vscode/vsce package --out ../../dist/dao-language-1.0.1.vsix
+npx @vscode/vsce package --out ../../dist/dao-language-1.0.2.vsix
 ```
 
 打包产物只含生产依赖、语法文件与 LICENSE；`vsce` 本身不会进入产物。

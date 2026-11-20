@@ -173,7 +173,7 @@ sudo bash 源码/安装原生版.sh --system  # 装到 /usr/local/bin/dao
 ├── .workflow/              ← Gitee Go：Linux .deb 构建 + Release
 │   └── build-installers.yml
 ├── dist/                   ← 打包输出（.gitignore 忽略，不入库）
-│   ├── dao-language-1.0.1.vsix  ← VS Code 插件
+│   ├── dao-language-1.0.2.vsix  ← VS Code 插件
 │   ├── nuitka/dao          ← Nuitka 原生可执行文件（~47MB，需现场构建）
 │   └── installers/         ← 系统级安装包（.deb/.pkg/setup.exe）
 └── 源码/                   ← 解释器源代码（Python 3.10+）
@@ -184,7 +184,7 @@ sudo bash 源码/安装原生版.sh --system  # 装到 /usr/local/bin/dao
     ├── requirements.txt    ← Python 依赖
     ├── dao/                ← 核心解释器包
     │   ├── __init__.py        ← 包初始化（重导出版本号）
-    │   ├── version.py         ← 版本号单一来源（1.0.1）
+    │   ├── version.py         ← 版本号单一来源（1.0.2）
     │   ├── tokens.py          ← 词元类型定义（32个关键字）
     │   ├── ast_nodes.py       ← AST 节点定义（30+节点类型）
     │   ├── environment.py     ← 词法作用域管理
