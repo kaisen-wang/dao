@@ -7,8 +7,37 @@ Lexer 类：组合 LexerReaders 混入，
 """
 
 from ..errors import 词法错误
-from ..tokens import KEYWORDS, Token, TokenType
+from ..tokens import Token, TokenType
 from .readers import LexerReaders
+
+# 可结束表达式的 token 类型：其值右侧允许紧跟二元运算符（如 //）
+_EXPR_END_TYPES = frozenset({
+    TokenType.数值,
+    TokenType.标识符,
+    TokenType.右括号,
+    TokenType.右方括号,
+    TokenType.右花括号,
+    TokenType.真,
+    TokenType.假,
+    TokenType.空,
+    TokenType.文本,
+    TokenType.模板文本,
+})
+
+# 「值型」token：本身即为一个值。其后的标识符更可能是整除右操作数，
+# 而右括号/右方括号/右花括号之后的标识符则更可能是行尾注释文字。
+_VALUE_LIKE_TYPES = frozenset({
+    TokenType.数值,
+    TokenType.标识符,
+    TokenType.真,
+    TokenType.假,
+    TokenType.空,
+    TokenType.文本,
+    TokenType.模板文本,
+})
+
+# // 之后出现这些标点时，可确定右侧是显式操作数
+_OPERAND_START_PUNCT = frozenset({'(', '（', '[', '-', '+'})
 
 
 class Lexer(LexerReaders):
@@ -106,6 +135,45 @@ class Lexer(LexerReaders):
         return False
 
     # ========================
+    # // 歧义判别（显式状态机）
+    # ========================
+
+    def _peek_after_slashes(self) -> str | None:
+        """返回 `//` 之后的首个非横向空白字符（纯前瞻，不移动游标）。"""
+        pos = self.pos + 2
+        length = len(self.source)
+        while pos < length and self.source[pos] in (" ", "\t"):
+            pos += 1
+        return self.source[pos] if pos < length else None
+
+    def _is_floor_div_context(self) -> bool:
+        """判定当前 `//` 是整除运算符还是行内注释。
+
+        状态机仅依赖两个要素：「上一 token 能否结束表达式」与「`//` 后首个非空白字符」：
+
+        1. 上一 token 不能结束表达式（如 `=`、`+`、`(`、行首）→ 注释。
+        2. `//` 之后没有内容（行尾）→ 注释。
+        3. 后继首字符是数字或 `(`/`[`/`+`/`-` → 整除（右侧为显式操作数）。
+        4. 后继首字符是标识符起始符：
+           - 上一 token 为「值型」→ 整除，例如 `x // y`、`42 // 余数`；
+           - 上一 token 为右括号类 → 注释，例如 `f() // 说明`。
+        5. 其余情况 → 注释。
+
+        注：独占一行的 `//` 已在 tokenize() 的行首处理阶段跳过，不会进入此判定。
+        """
+        if not self.tokens or self.tokens[-1].type not in _EXPR_END_TYPES:
+            return False
+
+        ch = self._peek_after_slashes()
+        if ch is None:
+            return False
+        if ch.isdigit() or ch in _OPERAND_START_PUNCT:
+            return True
+        if self._is_identifier_start(ch):
+            return self.tokens[-1].type in _VALUE_LIKE_TYPES
+        return False
+
+    # ========================
     # 主循环
     # ========================
 
@@ -175,46 +243,9 @@ class Lexer(LexerReaders):
                 self.advance()
                 continue
 
-            # 注释 或 整除运算符
+            # 注释 或 整除运算符（判别交给显式状态机）
             if char == "/" and self.peek() == "/":
-                # 判断 // 是整除运算符还是注释：
-                # 1. // 后面紧跟数值、括号等 → 整除
-                # 2. // 后面紧跟标识符时，需要结合前一个 token 判断
-                is_floor_div = False
-                if self.tokens and self.tokens[-1].type in (
-                    TokenType.数值,
-                    TokenType.标识符,
-                    TokenType.右括号,
-                    TokenType.右方括号,
-                    TokenType.右花括号,
-                    TokenType.真,
-                    TokenType.假,
-                    TokenType.空,
-                    TokenType.文本,
-                    TokenType.模板文本,
-                ):
-                    check_pos = self.pos + 2
-                    while check_pos < len(self.source) and self.source[check_pos] in (' ', '\t'):
-                        check_pos += 1
-                    if check_pos < len(self.source):
-                        ch = self.source[check_pos]
-                        if ch.isdigit() or ch in ('(', '（', '[', '-', '+'):
-                            is_floor_div = True
-                        elif self._is_identifier_start(ch):
-                            # // 后面是标识符：只有前一个 token 是 数值/标识符 时才判定为整除
-                            # 例如: x // y 是整除，但 f() // 注释 是注释
-                            if self.tokens[-1].type in (
-                                TokenType.数值,
-                                TokenType.标识符,
-                                TokenType.真,
-                                TokenType.假,
-                                TokenType.空,
-                                TokenType.文本,
-                                TokenType.模板文本,
-                            ):
-                                is_floor_div = True
-
-                if is_floor_div:
+                if self._is_floor_div_context():
                     self.advance()
                     self.advance()
                     self.tokens.append(self._make_token(TokenType.整除, "//"))
@@ -222,7 +253,7 @@ class Lexer(LexerReaders):
                     self._skip_line_comment()
                 continue
             if char == "/" and self.peek() == "*":
-                self.advance()  # 跳过 /
+                # _skip_block_comment 内部会自行消费开头的 /*
                 self._skip_block_comment()
                 continue
             if char == "注" and self.peek() == "：":

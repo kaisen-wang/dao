@@ -292,6 +292,27 @@ class LexerReaders:
             or ("\u4e00" <= char <= "\u9fff")
         )
 
+    def _peek_next_word(self, start_pos: int) -> tuple[str, int]:
+        """从 start_pos 前瞻下一个由标识符字符组成的词。
+
+        返回 ``(词, 词尾位置)``；纯读取 ``self.source``，不修改游标、行列、
+        括号深度或任何其它可变状态，因此不存在「前瞻回退遗漏」问题。
+        """
+        pos = start_pos
+        length = len(self.source)
+        while pos < length and self.source[pos] == " ":
+            pos += 1
+        word_start = pos
+        if pos < length and self._is_identifier_start(self.source[pos]):
+            while pos < length and self._is_identifier_char(self.source[pos]):
+                pos += 1
+        return self.source[word_start:pos], pos
+
+    def _consume_to(self, end_pos: int):
+        """把游标从当前位置推进到 end_pos（仅用于纯前瞻命中后的确认消费）。"""
+        while self.pos < end_pos:
+            self.advance()
+
     def _read_identifier(self) -> Token:
         """读取标识符或关键字"""
         start_line = self.line
@@ -315,66 +336,25 @@ class LexerReaders:
             # 运行异步是内置函数名，作为标识符处理
             return self._make_token(TokenType.标识符, word, start_line, start_col)
         elif word == "异步":
-            # 向前看是否紧跟"函数"
-            saved_pos = self.pos
-            saved_line = self.line
-            saved_col = self.column
-
-            # 跳过空格
-            while self.current_char == " ":
-                self.advance()
-
-            if self.current_char is not None and self._is_identifier_start(
-                self.current_char
-            ):
-                next_chars = []
-                while self.current_char is not None and self._is_identifier_char(
-                    self.current_char
-                ):
-                    next_chars.append(self.advance())
-                next_word = "".join(next_chars)
-                if next_word == "函数":
-                    return (
-                        self._make_token(TokenType.异步, "异步", start_line, start_col),
-                        self._make_token(
-                            TokenType.函数, "函数", self.line, self.column
-                        ),
-                    )
-
-            # 回退
-            self.pos = saved_pos
-            self.line = saved_line
-            self.column = saved_col
+            # 纯前瞻：不移动游标即可判定下一词是否为「函数」，
+            # 命中后再显式消费，彻底避免遗漏 bracket_depth 等状态回退。
+            next_word, word_end = self._peek_next_word(self.pos)
+            if next_word == "函数":
+                self._consume_to(word_end)
+                return (
+                    self._make_token(TokenType.异步, "异步", start_line, start_col),
+                    self._make_token(TokenType.函数, "函数", self.line, self.column),
+                )
 
         # 特殊处理：否则如果（两个词组合的关键字）
         if word == "否则":
-            # 向前看是否紧跟"如果"
-            saved_pos = self.pos
-            saved_line = self.line
-            saved_col = self.column
-
-            # 跳过空格
-            while self.current_char == " ":
-                self.advance()
-
-            if self.current_char is not None and self._is_identifier_start(
-                self.current_char
-            ):
-                next_chars = []
-                while self.current_char is not None and self._is_identifier_char(
-                    self.current_char
-                ):
-                    next_chars.append(self.advance())
-                next_word = "".join(next_chars)
-                if next_word == "如果":
-                    return self._make_token(
-                        TokenType.否则如果, "否则如果", start_line, start_col
-                    )
-
-            # 回退
-            self.pos = saved_pos
-            self.line = saved_line
-            self.column = saved_col
+            # 同样采用纯前瞻，命中后消费；未命中时游标从未移动，无需回退。
+            next_word, word_end = self._peek_next_word(self.pos)
+            if next_word == "如果":
+                self._consume_to(word_end)
+                return self._make_token(
+                    TokenType.否则如果, "否则如果", start_line, start_col
+                )
 
         # 检查是否是关键字
         token_type = KEYWORDS.get(word, TokenType.标识符)
