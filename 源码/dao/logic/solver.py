@@ -20,7 +20,10 @@ class QueryResult:
         self.variables = variables or []
 
     def get_binding(self, var_name: str) -> Any:
-        value = self.substitution.get(var_name)
+        # 查询变量与规则头变量同名时 unify 不产生绑定；不同名时会产生
+        # 「?查询变量 -> ?规则头变量」的链式绑定，最终值挂在规则头变量上。
+        # 必须走 get_value 递归解引用，否则结果字典只能拿到中间变量名。
+        value = self.substitution.get_value(LogicVariable(var_name))
         if value is None:
             return var_name
         return value

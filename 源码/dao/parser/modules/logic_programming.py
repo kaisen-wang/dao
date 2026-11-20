@@ -161,7 +161,10 @@ class LogicProgrammingParser:
     def parse_logic_negation(self) -> LogicNegation:
         """解析逻辑否定：非 已封禁(?用户)"""
         token = self.advance()  # 消费 非
-        negated_expr = self.parse_pipe()
+        # 只解析单个条件，不能让表达式层吞掉后继的「并且」。
+        # parse_pipe → parse_or → parse_and 会把相邻条件合并成 BinaryOp，
+        # 使规则体只剩下单个节点，多条件链因此丢失。
+        negated_expr = self.parse_not()
         return LogicNegation(
             expression=negated_expr,
             line=token.line,
@@ -179,7 +182,13 @@ class LogicProgrammingParser:
         ``在范围`` 属于中缀语法：调用本方法时变量名已被解析为 ``left``，
         检测到 ``在范围`` 后把变量名传给 :meth:`parse_logic_constraint`。
         """
-        left = self.parse_pipe()
+        # 停在「并且」之前：规则体由 parse_logic_rule 的外层循环按「并且」
+        # 逐个拆分。若沿用 parse_pipe，其内部的 parse_and 会把所有用「并且」
+        # 相连的条件吞并成一个 BinaryOp，解释器无法识别该节点，导致规则体
+        # 变成空列表（多条件规则查询返回空绑定字典）。
+        # parse_not 覆盖了谓词调用、比较、算术等条件语法，且不会消费「并且」
+        # /「或者」/「如果」；「在范围」不是比较运算符，仍留到下方处理。
+        left = self.parse_not()
         if self.current.type == TokenType.在范围:
             return self.parse_logic_constraint(left)
         return left
