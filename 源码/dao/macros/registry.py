@@ -19,10 +19,8 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set
 
 from ..ast_nodes import MacroDefinition, PatternMatchBody
-from ..tokens import TokenType
 
 logger = logging.getLogger('dao.macros')
 
@@ -32,7 +30,7 @@ class MacroInfo:
     """宏信息数据类"""
 
     name: str
-    parameters: List[str]
+    parameters: list[str]
     body: any  # 通常是 QuoteBlock 节点
     line: int
     column: int
@@ -47,8 +45,8 @@ class MacroRegistry:
 
     def __init__(self):
         """初始化注册表"""
-        self._macros: Dict[str, List[MacroInfo]] = {}  # 宏名 → 定义栈
-        self._scope_stack: List[Set[str]] = [set()]  # 作用域栈，每层记录该层定义的宏名
+        self._macros: dict[str, list[MacroInfo]] = {}  # 宏名 → 定义栈
+        self._scope_stack: list[set[str]] = [set()]  # 作用域栈，每层记录该层定义的宏名
         self._scope_depth: int = 0  # 当前作用域深度
 
     def enter_scope(self, scope_name: str = None):
@@ -138,7 +136,7 @@ class MacroRegistry:
 
         return True
 
-    def find_macro(self, name: str) -> Optional[MacroInfo]:
+    def find_macro(self, name: str) -> MacroInfo | None:
         """
         根据名称查找宏定义
 
@@ -153,7 +151,7 @@ class MacroRegistry:
 
         return self._macros[name][0]  # 返回当前作用域链顶部的宏
 
-    def get_macro_by_name(self, name: str, line: int = None) -> Optional[MacroInfo]:
+    def get_macro_by_name(self, name: str, line: int = None) -> MacroInfo | None:
         """
         根据名称查找宏定义
 
@@ -166,7 +164,7 @@ class MacroRegistry:
         """
         return self.find_macro(name)
 
-    def get_all_macros(self) -> List[MacroInfo]:
+    def get_all_macros(self) -> list[MacroInfo]:
         """获取所有宏的列表（去重）"""
         unique_macros = []
         seen = set()

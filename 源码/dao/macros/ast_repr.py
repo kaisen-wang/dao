@@ -17,11 +17,10 @@ AST到数据结构转换
 4. 保持与源AST的一致性
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from ..ast_nodes import (
     AbstractDecl,
-    AssertStmt,
     Assignment,
     AsyncFunctionDecl,
     AwaitAllExpr,
@@ -30,11 +29,8 @@ from ..ast_nodes import (
     BinaryOp,
     BlockExpr,
     BooleanLiteral,
-    BreakStmt,
     ChannelExpr,
-    ClassDecl,
     CompareOp,
-    ContinueStmt,
     DestructureAssign,
     DictLiteral,
     EnumDecl,
@@ -42,12 +38,10 @@ from ..ast_nodes import (
     ExportStmt,
     Expression,
     ExpressionStmt,
-    ForInStmt,
     ForRangeStmt,
     FunctionCall,
     FunctionDecl,
     Identifier,
-    IfStmt,
     ImportStmt,
     IndexAccess,
     LambdaExpr,
@@ -60,7 +54,6 @@ from ..ast_nodes import (
     LogicPredicate,
     LogicQuery,
     LogicRule,
-    LogicVariable,
     MacroCall,
     MacroDefinition,
     MatchCase,
@@ -75,24 +68,18 @@ from ..ast_nodes import (
     Program,
     QuoteBlock,
     ReceiveExpr,
-    ReturnStmt,
     SelectCase,
     SelectStmt,
-    SelfExpr,
     SendStmt,
     Statement,
     StringLiteral,
-    SuperExpr,
     SyncStmt,
     TemplateLiteral,
-    ThrowStmt,
     TraitDecl,
-    TryStmt,
     TypeCheckPattern,
     UnaryOp,
     UnquoteExpr,
     VariableDecl,
-    WhileStmt,
     YieldStmt,
 )
 from ..ast_nodes import (
@@ -128,14 +115,13 @@ from ..ast_nodes import (
 from ..ast_nodes import (
     WhileStmt as While,
 )
-from ..tokens import TokenType
 
 
 class ASTToData:
     """AST转数据结构"""
 
     @classmethod
-    def convert(cls, node: Union[Expression, Statement, List]) -> Any:
+    def convert(cls, node: Expression | Statement | list) -> Any:
         """转换节点或节点列表"""
         if isinstance(node, list):
             return [cls.convert(n) for n in node]
@@ -149,7 +135,7 @@ class ASTToData:
         return node
 
     @classmethod
-    def _convert_dataclass(cls, node: Any) -> Dict:
+    def _convert_dataclass(cls, node: Any) -> dict:
         """转换数据类节点"""
         result = {
             "__type__": type(node).__name__,
@@ -158,8 +144,7 @@ class ASTToData:
         }
 
         # 处理字段
-        fields = []
-        for field_name in getattr(node, "__dataclass_fields__", {}).keys():
+        for field_name in getattr(node, "__dataclass_fields__", {}):
             if field_name in ["line", "column"]:
                 continue
             value = getattr(node, field_name)
@@ -187,7 +172,7 @@ class DataToAST:
         return data
 
     @classmethod
-    def _convert_dict(cls, data: Dict) -> Any:
+    def _convert_dict(cls, data: dict) -> Any:
         """转换字典到节点"""
         type_name = data["__type__"]
         node_class = cls._get_class_by_name(type_name)
@@ -208,7 +193,8 @@ class DataToAST:
         # 创建节点实例
         try:
             return node_class(**kwargs)
-        except Exception as e:
+        # 节点字段可能来自任意数据，构造失败是预期的容错场景，返回 None 而非中断转换
+        except Exception as e:  # noqa: BLE001
             print(f"转换节点 {type_name} 时出错: {e}")
             return None
 
@@ -306,7 +292,7 @@ class ASTSerializer:
     """AST序列化工具"""
 
     @staticmethod
-    def to_json(node: Union[Expression, Statement, List], indent: int = 2) -> str:
+    def to_json(node: Expression | Statement | list, indent: int = 2) -> str:
         """序列化为JSON字符串"""
         import json
 
@@ -322,7 +308,7 @@ class ASTSerializer:
         return DataToAST.convert(data)
 
     @staticmethod
-    def to_file(node: Union[Expression, Statement, List], filename: str):
+    def to_file(node: Expression | Statement | list, filename: str):
         """保存到文件"""
         with open(filename, "w", encoding="utf-8") as f:
             f.write(ASTSerializer.to_json(node))

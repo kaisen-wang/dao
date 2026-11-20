@@ -17,31 +17,22 @@
 """
 
 import logging
-from typing import List
 
 from ..ast_nodes import (
     Assignment,
     BinaryOp,
-    BlockExpr,
     BooleanLiteral,
-    ConditionalExpr,
     Expression,
     ExpressionStmt,
     FunctionCall,
-    FunctionDecl,
     Identifier,
     IfStmt,
     IndexAccess,
-    ListLiteral,
-    MacroDefinition,
-    MemberAccess,
     NullLiteral,
     NumberLiteral,
     QuoteBlock,
     ReturnStmt,
-    Statement,
     StringLiteral,
-    ThrowStmt,
     TryStmt,
     UnaryOp,
     VariableDecl,
@@ -70,7 +61,7 @@ def register_builtin_macros(registry: MacroRegistry):
 
 def _make_macro_info(
     name: str,
-    parameters: List[str],
+    parameters: list[str],
     body: Expression,
     source_code: str = "",
 ) -> MacroInfo:

@@ -24,7 +24,7 @@
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set
+from typing import Optional
 
 
 @dataclass
@@ -34,7 +34,7 @@ class VariableInfo:
     name: str
     is_bound: bool = False
     definition_line: int = -1
-    used_lines: List[int] = None
+    used_lines: list[int] = None
 
     def __init__(self, name: str, is_bound: bool = False, definition_line: int = -1):
         self.name = name
@@ -53,8 +53,8 @@ class ScopeNode:
     """作用域节点"""
 
     name: str = ""
-    variables: Dict[str, VariableInfo] = None
-    children: List["ScopeNode"] = None
+    variables: dict[str, VariableInfo] = None
+    children: list["ScopeNode"] = None
     parent: Optional["ScopeNode"] = None
     line: int = -1
 
@@ -76,11 +76,11 @@ class ScopeNode:
         """检查变量是否在当前作用域中定义"""
         return name in self.variables
 
-    def get_variable(self, name: str) -> Optional[VariableInfo]:
+    def get_variable(self, name: str) -> VariableInfo | None:
         """获取变量信息（仅检查当前作用域）"""
         return self.variables.get(name)
 
-    def lookup_variable(self, name: str) -> Optional[VariableInfo]:
+    def lookup_variable(self, name: str) -> VariableInfo | None:
         """查找变量（沿着作用域链向上查找）"""
         current = self
         while current:
@@ -135,7 +135,7 @@ class MacroScope:
             if variable is not None:
                 variable.add_use(line)
 
-    def get_used_variables(self) -> List[VariableInfo]:
+    def get_used_variables(self) -> list[VariableInfo]:
         """获取当前作用域链中所有被使用的变量"""
         used = []
         processed = set()
@@ -151,7 +151,7 @@ class MacroScope:
         collect_variables(self.root)
         return used
 
-    def get_free_variables(self) -> List[VariableInfo]:
+    def get_free_variables(self) -> list[VariableInfo]:
         """获取自由变量（未在作用域中定义但被使用的变量）"""
         free = []
         processed = set()
@@ -167,7 +167,7 @@ class MacroScope:
         collect_free(self.root)
         return free
 
-    def analyze_captures(self) -> List[VariableInfo]:
+    def analyze_captures(self) -> list[VariableInfo]:
         """分析可能被宏捕获的变量
 
         基于作用域链分析捕获风险：
@@ -211,7 +211,7 @@ class MacroScope:
         check_scope(self.root)
         return count
 
-    def analyze_capture_risk(self) -> Dict[str, str]:
+    def analyze_capture_risk(self) -> dict[str, str]:
         """分析变量捕获风险等级
 
         Returns:
@@ -274,7 +274,7 @@ class MacroScope:
 
         rewrite_in_scope(self.root)
 
-    def apply_hygiene(self) -> Dict[str, str]:
+    def apply_hygiene(self) -> dict[str, str]:
         """
         应用卫生宏处理，重写可能被捕获的变量
 
@@ -301,7 +301,7 @@ class MacroScope:
 
         indent_str = "  " * indent
         print(f"{indent_str}作用域: {scope.name}")
-        print(f"{indent_str}变量: {', '.join([var for var in scope.variables.keys()])}")
+        print(f"{indent_str}变量: {', '.join([var for var in scope.variables])}")
         for child in scope.children:
             self.print_scope_tree(child, indent + 1)
 

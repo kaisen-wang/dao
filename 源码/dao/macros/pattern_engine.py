@@ -28,9 +28,10 @@
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any
 
 from ..ast_nodes import (
     BooleanLiteral,
@@ -189,7 +190,7 @@ class DuckTypeEnumAdapter(DaoEnumProtocol):
         return not isinstance(value, dict) and not isinstance(value, DaoEnumProtocol)
 
 
-def adapt_to_enum_protocol(value: Any) -> Optional[DaoEnumProtocol]:
+def adapt_to_enum_protocol(value: Any) -> DaoEnumProtocol | None:
     """将任意值适配为 DaoEnumProtocol 接口
 
     按协议层次依次尝试：
@@ -236,9 +237,12 @@ def _extract_object_value(value: Any) -> Any:
     obj_dict = getattr(value, '__dict__', None)
     if isinstance(obj_dict, dict):
         for attr_name, attr in obj_dict.items():
-            if not attr_name.startswith('_') and attr_name not in ('__dao_class__', '__variant__'):
-                if not callable(attr):
-                    return attr
+            if (
+                not attr_name.startswith('_')
+                and attr_name not in ('__dao_class__', '__variant__')
+                and not callable(attr)
+            ):
+                return attr
     return value
 
 
@@ -473,7 +477,7 @@ class PatternMatchEngine:
         self,
         pattern,
         value,
-        guard_fn: Optional[Callable[[dict], bool]] = None,
+        guard_fn: Callable[[dict], bool] | None = None,
         env=None,
     ) -> MatchResult:
         """带守卫条件的模式匹配
@@ -498,7 +502,8 @@ class PatternMatchEngine:
         if guard_fn is not None:
             try:
                 guard_passed = guard_fn(result.bindings)
-            except Exception as e:
+            # 守卫是可调用户代码，求值失败属于预期的匹配失败场景，保留宽泛捕获兜底
+            except Exception as e:  # noqa: BLE001
                 return MatchResult.failure(f"守卫条件求值失败: {e}")
             if not guard_passed:
                 return MatchResult.failure("守卫条件不满足")
@@ -509,9 +514,9 @@ class PatternMatchEngine:
         self,
         branches: list[PatternBranch],
         value: Any,
-        guard_evaluator: Optional[Callable] = None,
+        guard_evaluator: Callable | None = None,
         env=None,
-    ) -> tuple[Optional[PatternBranch], MatchResult]:
+    ) -> tuple[PatternBranch | None, MatchResult]:
         """按顺序匹配多个模式分支，返回第一个匹配成功的分支
 
         Args:
@@ -533,7 +538,8 @@ class PatternMatchEngine:
             if branch.guard is not None and guard_evaluator is not None:
                 try:
                     guard_passed = guard_evaluator(branch.guard, result.bindings, env)
-                except Exception:
+                # 守卫求值器可能抛出任意异常，按设计视为该分支守卫不通过
+                except Exception:  # noqa: BLE001
                     guard_passed = False
                 if not guard_passed:
                     continue

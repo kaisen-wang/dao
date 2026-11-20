@@ -20,10 +20,7 @@ from ..ast_nodes import (
     BooleanLiteral,
     EnumVariantPattern,
     Identifier,
-    NumberLiteral,
     PatternBranch,
-    StringLiteral,
-    TypeCheckPattern,
 )
 
 logger = logging.getLogger('dao.macros')
@@ -82,11 +79,13 @@ class ExhaustivenessChecker:
         """检查是否有通配符或变量绑定分支"""
         for branch in branches:
             pattern = branch.pattern
-            # 变量绑定模式（如 x）可以匹配任何值
-            if isinstance(pattern, Identifier) and pattern.name != "_":
-                # 但如果有守卫条件，则不一定穷尽
-                if branch.guard is None:
-                    return True
+            # 变量绑定模式（如 x）可以匹配任何值；但如果有守卫条件，则不一定穷尽
+            if (
+                isinstance(pattern, Identifier)
+                and pattern.name != "_"
+                and branch.guard is None
+            ):
+                return True
             # 通配符模式
             if isinstance(pattern, Identifier) and pattern.name == "_":
                 return True

@@ -27,7 +27,6 @@
 import copy
 import logging
 import re
-from typing import List, Optional, Union
 
 from ..ast_nodes import (
     BooleanLiteral,
@@ -43,7 +42,6 @@ from ..ast_nodes import (
     UnquoteExpr,
     VariableDecl,
 )
-from ..tokens import TokenType
 from .hygiene import HygieneProcessor
 from .registry import MacroInfo, MacroRegistry
 from .scope import MacroScope
@@ -68,7 +66,7 @@ class MacroExpander:
         self._call_stack = []  # 宏展开调用栈
 
     def expand(
-        self, node: Union[Expression, Statement, List], recursion_depth: int = 0
+        self, node: Expression | Statement | list, recursion_depth: int = 0
     ):
         """
         展开代码中的宏调用
@@ -168,7 +166,8 @@ class MacroExpander:
 
             return expanded
 
-        except Exception as e:
+        # 宏展开是容错流程：用户宏体可能触发任意异常，统一记录并按 error_mode 兜底处理
+        except Exception as e:  # noqa: BLE001
             # 记录展开错误，包含位置信息
             line = getattr(call, 'line', 0)
             column = getattr(call, 'column', 0)
@@ -267,9 +266,11 @@ class MacroExpander:
                 if isinstance(attr, list):
                     if any(self._contains_macro_call(item, macro_name) for item in attr):
                         return True
-                elif hasattr(attr, '__dataclass_fields__') or isinstance(attr, (Expression, Statement)):
-                    if self._contains_macro_call(attr, macro_name):
-                        return True
+                elif (
+                    hasattr(attr, '__dataclass_fields__')
+                    or isinstance(attr, (Expression, Statement))
+                ) and self._contains_macro_call(attr, macro_name):
+                    return True
 
         return False
 
@@ -285,7 +286,7 @@ class MacroExpander:
         return expanded
 
     def _expand_other_nodes(
-        self, node: Union[Expression, Statement], recursion_depth: int
+        self, node: Expression | Statement, recursion_depth: int
     ):
         """处理其他类型的节点"""
         if not hasattr(node, '__dataclass_fields__'):
@@ -307,7 +308,7 @@ class MacroExpander:
 
         return node
 
-    def _apply_hygiene(self, node, macro_parameters: List[str]):
+    def _apply_hygiene(self, node, macro_parameters: list[str]):
         """应用卫生宏处理"""
         # 深拷贝，避免修改原始宏体模板
         node = copy.deepcopy(node)
@@ -360,10 +361,9 @@ class MacroExpander:
                     self._collect_variables(attr, scope)
 
     def _apply_macro_parameters(
-        self, body: Expression, parameters: List[str], arguments: List[Expression]
+        self, body: Expression, parameters: list[str], arguments: list[Expression]
     ):
         """应用宏参数绑定"""
-        from .ast_ops import ASTOperations
 
         # 深拷贝传入的 body，防止多次调用之间的状态共享
         body = copy.deepcopy(body)
@@ -410,7 +410,7 @@ class MacroExpander:
         result = self._replace_in_node(target_body, replacements)
         return result
 
-    def _parse_default_value(self, value_str: Optional[str], param_name: str) -> Optional[Expression]:
+    def _parse_default_value(self, value_str: str | None, param_name: str) -> Expression | None:
         """解析宏参数默认值"""
         if value_str is None:
             return None

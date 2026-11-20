@@ -22,24 +22,7 @@
 3. 维护变量到唯一名称的映射
 """
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Set
 
-from ..ast_nodes import (
-    BinaryOp,
-    BooleanLiteral,
-    Expression,
-    FunctionCall,
-    Identifier,
-    MacroCall,
-    NullLiteral,
-    NumberLiteral,
-    QuoteBlock,
-    Statement,
-    StringLiteral,
-    UnaryOp,
-    UnquoteExpr,
-)
 from .scope import MacroScope
 
 
@@ -47,7 +30,7 @@ class HygieneProcessor:
     """卫生宏处理器"""
 
     def __init__(self):
-        self.variable_map: Dict[str, str] = {}  # 变量名映射表
+        self.variable_map: dict[str, str] = {}  # 变量名映射表
         self.counter = 0
 
     def process(self, node: any, scope: MacroScope, exclude_params: set | None = None):
@@ -100,9 +83,12 @@ class HygieneProcessor:
                 setattr(node, field_name, new_value)
 
         # 重写变量引用
-        if hasattr(node, "name") and isinstance(node.name, str):
-            if node.name in self.variable_map:
-                node.name = self.variable_map[node.name]
+        if (
+            hasattr(node, "name")
+            and isinstance(node.name, str)
+            and node.name in self.variable_map
+        ):
+            node.name = self.variable_map[node.name]
 
         return node
 
@@ -126,7 +112,7 @@ class HygieneProcessor:
             self.variable_map[original] = new_name
         return new_name
 
-    def get_rewrite_map(self) -> Dict[str, str]:
+    def get_rewrite_map(self) -> dict[str, str]:
         """获取变量重写映射表"""
         return dict(self.variable_map)
 
@@ -149,17 +135,17 @@ class HygieneAnalysis:
     """卫生分析工具"""
 
     @staticmethod
-    def get_free_variables(scope: MacroScope) -> List[str]:
+    def get_free_variables(scope: MacroScope) -> list[str]:
         """获取自由变量列表"""
         return [var.name for var in scope.get_free_variables()]
 
     @staticmethod
-    def get_bound_variables(scope: MacroScope) -> List[str]:
+    def get_bound_variables(scope: MacroScope) -> list[str]:
         """获取绑定变量列表"""
         return [var.name for var in scope.get_used_variables() if var.is_bound]
 
     @staticmethod
-    def get_capture_risk(scope: MacroScope) -> Dict[str, str]:
+    def get_capture_risk(scope: MacroScope) -> dict[str, str]:
         """分析变量捕获风险
 
         基于作用域链分析，返回变量名到风险描述的映射。
@@ -192,5 +178,5 @@ class HygieneAnalysis:
         print(f"自由变量: {', '.join(free_vars)}")
         if capture_risk:
             print("\n=== 变量捕获风险 ===")
-            for var, msg in capture_risk.items():
+            for msg in capture_risk.values():
                 print(msg)

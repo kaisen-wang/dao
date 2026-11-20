@@ -18,36 +18,8 @@ AST操作工具
 4. 提供错误处理和验证
 """
 
-from typing import Any, Callable, Dict, List, Optional, Union
-
-from ..ast_nodes import (
-    BinaryOp,
-    BooleanLiteral,
-    ChannelExpr,
-    Expression,
-    FunctionCall,
-    LogicBlock,
-    LogicConstraint,
-    LogicCut,
-    LogicFact,
-    LogicNegation,
-    LogicPredicate,
-    LogicQuery,
-    LogicRule,
-    MacroCall,
-    MacroDefinition,
-    NullLiteral,
-    NumberLiteral,
-    Program,
-    QuoteBlock,
-    ReceiveExpr,
-    Statement,
-    StringLiteral,
-    UnaryOp,
-    UnquoteExpr,
-)
-from ..ast_nodes import LogicVariable as LogicVar
-from ..tokens import TokenType
+from collections.abc import Callable
+from typing import Any
 
 
 def _iter_data_fields(node: Any):
@@ -63,7 +35,7 @@ class ASTOperations:
     """AST操作工具类"""
 
     @staticmethod
-    def replace_variables(node: Any, replacements: Dict[str, Any]) -> Any:
+    def replace_variables(node: Any, replacements: dict[str, Any]) -> Any:
         """替换节点中的变量引用"""
         if not replacements:
             return node
@@ -88,7 +60,7 @@ class ASTOperations:
         return node
 
     @staticmethod
-    def find_nodes(node: Any, node_type: type) -> List[Any]:
+    def find_nodes(node: Any, node_type: type) -> list[Any]:
         """查找所有特定类型的节点"""
         matches = []
 
@@ -111,7 +83,7 @@ class ASTOperations:
     @staticmethod
     def find_node_by_condition(
         node: Any, condition: Callable[[Any], bool]
-    ) -> List[Any]:
+    ) -> list[Any]:
         """按条件查找节点"""
         matches = []
 
@@ -180,7 +152,7 @@ class ASTOperations:
         return node
 
     @staticmethod
-    def extract_node_info(node: Any) -> Dict[str, Any]:
+    def extract_node_info(node: Any) -> dict[str, Any]:
         """提取节点信息"""
         info = {
             "type": type(node).__name__,
@@ -264,13 +236,11 @@ class ASTOperations:
         if isinstance(node, list):
             for n in node:
                 current_depth = ASTOperations.get_node_depth(n, depth + 1)
-                if current_depth > max_depth:
-                    max_depth = current_depth
+                max_depth = max(max_depth, current_depth)
             return max_depth
 
         for _, attr_value in _iter_data_fields(node):
             current_depth = ASTOperations.get_node_depth(attr_value, depth + 1)
-            if current_depth > max_depth:
-                max_depth = current_depth
+            max_depth = max(max_depth, current_depth)
 
         return max_depth
