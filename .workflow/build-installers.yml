@@ -35,7 +35,7 @@ stages:
         pythonVersion: '3.13'
         commands:
           - python -m pip install --upgrade pip
-          - python -m pip install "nuitka>=2.5" prompt-toolkit
+          - python -m pip install "nuitka>=2.5" prompt-toolkit patchelf
           - python -m pytest 源码/tests/ -q
           - python 源码/构建安装包.py
           - ls -lh dist/installers/

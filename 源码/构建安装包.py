@@ -19,10 +19,12 @@ r"""道语言 —— 跨平台系统级安装包构建脚本。
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -62,10 +64,34 @@ def detect_arch() -> tuple[str, str]:
     return machine, machine
 
 
+def ensure_patchelf() -> None:
+    """Linux 下确保 patchelf 可用（Nuitka onefile/standalone 必需）。
+
+    Gitee Go / GitHub Actions 的干净 runner 常缺此工具，且未必有 sudo/apt
+    权限。PyPI 的 ``patchelf`` wheel 自带二进制，pip 安装后 exe 落在解释器
+    同目录（已在 PATH 或 sysconfig scripts 目录），是最稳的补装方式。
+    """
+    if shutil.which("patchelf") is not None:
+        return
+    print("[提示] 未检测到 patchelf，Nuitka Linux onefile 需要它，正在通过 pip 安装…", flush=True)
+    run([sys.executable, "-m", "pip", "install", "patchelf"])
+    if shutil.which("patchelf") is None:
+        # pip 装到用户 scripts 目录（如 ~/.local/bin）时可能未进 PATH，补加。
+        scripts = Path(sysconfig.get_path("scripts"))
+        candidate = scripts / "patchelf"
+        if candidate.exists():
+            os.environ["PATH"] = f"{scripts}{os.pathsep}{os.environ.get('PATH', '')}"
+            print(f"[提示] 已将 {scripts} 加入 PATH", flush=True)
+        else:
+            raise RuntimeError("patchelf 安装后仍不可用，请手动安装：python -m pip install patchelf")
+
+
 def build_onefile(os_name: str) -> Path:
     """用 Nuitka 编译 onefile，返回可执行文件绝对路径。"""
     exe_name = "dao.exe" if os_name == "windows" else "dao"
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    if os_name == "linux":
+        ensure_patchelf()
     run([
         sys.executable, "-m", "nuitka",
         "--onefile",
