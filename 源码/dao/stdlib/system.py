@@ -3,8 +3,12 @@ import subprocess
 import sys
 
 from ..builtins.callables import BuiltinFunction
+from ..builtins.functions import get_builtins
+from ..builtins.hof import get_interpreter_builtins
 from ..environment import Environment
 from ..errors import 运行时错误
+from ..tokens import KEYWORDS
+from .registry import STDLIB_REGISTRY
 
 
 def _stdlib_取环境变量(名称, 默认值=None):
@@ -66,6 +70,21 @@ def _stdlib_退出(退出码=0):
     sys.exit(退出码)
 
 
+def _stdlib_关键字表():
+    """关键字表：返回道语言全部保留关键字的名称列表。"""
+    return list(KEYWORDS)
+
+
+def _stdlib_内置函数名():
+    """内置函数名：返回全局内置函数与高阶内置函数的名称列表。"""
+    return list(get_builtins()) + list(get_interpreter_builtins())
+
+
+def _stdlib_标准库模块名():
+    """标准库模块名：返回已注册的全部标准库模块名称列表。"""
+    return list(STDLIB_REGISTRY.keys())
+
+
 def create_module_env(interpreter=None) -> Environment:
     """创建系统模块的导出环境。"""
     env = Environment()
@@ -77,5 +96,8 @@ def create_module_env(interpreter=None) -> Environment:
     env.define("切换目录", BuiltinFunction("切换目录", _stdlib_切换目录, 1))
     env.define("退出", BuiltinFunction("退出", _stdlib_退出, -1))
     env.define("平台", sys.platform)
+    env.define("关键字表", BuiltinFunction("关键字表", _stdlib_关键字表, 0))
+    env.define("内置函数名", BuiltinFunction("内置函数名", _stdlib_内置函数名, 0))
+    env.define("标准库模块名", BuiltinFunction("标准库模块名", _stdlib_标准库模块名, 0))
     env.exports = list(env.values.keys())
     return env

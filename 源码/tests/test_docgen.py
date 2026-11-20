@@ -28,7 +28,7 @@ def test_collect_builtins():
     """基础内置函数：数量、类型与中文描述。"""
     module = collect_builtins()
     assert module.title == "基础内置函数"
-    assert len(module.functions) == 29
+    assert len(module.functions) == 33
     assert all(isinstance(func, FunctionDoc) for func in module.functions)
 
     by_name = {func.name: func for func in module.functions}
@@ -36,6 +36,10 @@ def test_collect_builtins():
     assert "打印函数" in by_name["打印"].description  # docstring 中文描述
     assert "输入" in by_name
     assert "取类型" in by_name
+    # 新增 IO/诊断原语均带中文描述
+    for 新增 in ("读字节", "字节长度", "错误输出", "诊断源码"):
+        assert 新增 in by_name
+        assert by_name[新增].description != "（暂无描述）"
     # 时间戳 没有 docstring，应使用占位描述
     assert by_name["时间戳"].description == "（暂无描述）"
 
@@ -77,6 +81,10 @@ def test_param_counts():
     assert builtins["范围"].param_count == -1
     assert builtins["范围"].arity_text == "可变参数"
     assert builtins["长度"].arity_text == "1"
+    assert builtins["读字节"].param_count == 1
+    assert builtins["字节长度"].param_count == 1
+    assert builtins["错误输出"].param_count == -1
+    assert builtins["诊断源码"].param_count == 1
 
     hof = {f.name: f for f in collect_hof().functions}
     assert hof["映射"].param_count == 2

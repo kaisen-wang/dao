@@ -6,9 +6,27 @@
 这些函数在解释器初始化时注册到全局环境中。
 """
 
+import sys
+
 from ..errors import 类型错误, 运行时错误
 from .callables import BuiltinFunction, DaoCallable, DaoFunction, InterpreterBuiltin
 from .oop_types import BoundMethod, DaoClass, DaoInstance
+
+
+def _转输出文本(arg) -> str:
+    """把一个值按道语言的中文显示规则转换为文本。"""
+    if arg is None:
+        return "空"
+    if isinstance(arg, bool):
+        return "真" if arg else "假"
+    if isinstance(arg, (DaoInstance, DaoClass)):
+        return repr(arg)
+    return str(arg)
+
+
+def _收集输出文本(args, sep) -> str:
+    """用指定分隔符拼接多个值的中文文本表示。"""
+    return sep.join(_转输出文本(arg) for arg in args)
 
 
 def _builtin_打印(*args, **kwargs):
@@ -19,20 +37,73 @@ def _builtin_打印(*args, **kwargs):
     sep = kwargs.get("分隔符", " ")
     end = kwargs.get("结尾", "\n")
     flush = kwargs.get("刷新", False)
-    output_parts = []
-    for arg in args:
-        if arg is None:
-            output_parts.append("空")
-        elif isinstance(arg, bool):
-            output_parts.append("真" if arg else "假")
-        elif isinstance(arg, DaoInstance):
-            output_parts.append(repr(arg))
-        elif isinstance(arg, DaoClass):
-            output_parts.append(repr(arg))
-        else:
-            output_parts.append(str(arg))
-    print(sep.join(output_parts), end=end, flush=bool(flush))
+    print(_收集输出文本(args, sep), end=end, flush=bool(flush))
     return None
+
+
+def _builtin_错误输出(*args, **kwargs):
+    """错误输出函数：输出内容到标准错误流
+
+    命名参数：分隔符、结尾、刷新，语义与 ``打印`` 一致。
+    """
+    sep = kwargs.get("分隔符", " ")
+    end = kwargs.get("结尾", "\n")
+    flush = kwargs.get("刷新", False)
+    sys.stderr.write(_收集输出文本(args, sep) + str(end))
+    if flush:
+        sys.stderr.flush()
+
+
+def _builtin_读字节(n):
+    """读字节函数：从标准输入读取指定字节数并返回字节数据"""
+    if isinstance(n, bool) or not isinstance(n, int):
+        raise 类型错误(f"读字节() 的字节数必须是整数，收到: {type(n).__name__}")
+    if n <= 0:
+        raise 运行时错误("读字节() 的字节数必须为正整数")
+    return sys.stdin.buffer.read(n)
+
+
+def _builtin_字节长度(文本):
+    """字节长度函数：返回文本的 UTF-8 编码字节数"""
+    if not isinstance(文本, str):
+        raise 类型错误(f"字节长度() 的参数必须是文本，收到: {type(文本).__name__}")
+    return len(文本.encode("utf-8"))
+
+
+def _builtin_诊断源码(源码字符串):
+    """诊断源码函数：分析源码并返回词法与语法错误诊断列表"""
+    # 延迟导入，避免与词法/语法分析器形成循环导入。
+    from ..errors import 词法错误, 语法错误, 道错误
+    from ..lexer import Lexer
+    from ..parser import Parser
+
+    if not isinstance(源码字符串, str):
+        raise 类型错误(f"诊断源码() 的参数必须是文本，收到: {type(源码字符串).__name__}")
+
+    def _转诊断(error):
+        if isinstance(error, 词法错误):
+            类型 = "词法错误"
+        elif isinstance(error, 语法错误):
+            类型 = "语法错误"
+        else:
+            类型 = type(error).__name__ or "编译错误"
+        return {
+            "行": max(1, int(error.line or 0)),
+            "列": max(1, int(error.column or 0)),
+            "类型": 类型,
+            "消息": str(error.message),
+        }
+
+    try:
+        tokens = Lexer(源码字符串).tokenize()
+    except 道错误 as error:
+        # 词法错误优先，命中一条即可返回，无需继续解析。
+        return [_转诊断(error)]
+    try:
+        Parser(tokens, 源码字符串).parse()
+    except 道错误 as error:
+        return [_转诊断(error)]
+    return []
 
 
 def _builtin_输入(prompt=""):
@@ -323,4 +394,8 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         "添加事实": BuiltinFunction("添加事实", _builtin_添加事实),
         "删除事实": BuiltinFunction("删除事实", _builtin_删除事实),
         "时间戳": BuiltinFunction("时间戳", _builtin_时间戳, 0),
+        "读字节": BuiltinFunction("读字节", _builtin_读字节, 1),
+        "字节长度": BuiltinFunction("字节长度", _builtin_字节长度, 1),
+        "错误输出": BuiltinFunction("错误输出", _builtin_错误输出),
+        "诊断源码": BuiltinFunction("诊断源码", _builtin_诊断源码, 1),
     }
