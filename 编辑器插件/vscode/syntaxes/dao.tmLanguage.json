@@ -121,57 +121,157 @@
     },
     "keywords": {
       "patterns": [
-        { "include": "#kw-control" },
-        { "include": "#kw-declaration" },
+        { "include": "#kw-control-conditional" },
+        { "include": "#kw-control-repeat" },
+        { "include": "#kw-control-return" },
+        { "include": "#kw-control-flow" },
         { "include": "#kw-exception" },
-        { "include": "#kw-oop" },
-        { "include": "#kw-concurrency" },
-        { "include": "#kw-logic" },
-        { "include": "#kw-macro" },
-        { "include": "#kw-logical-op" },
-        { "include": "#kw-module" },
-        { "include": "#kw-type" }
+        { "include": "#kw-declaration-function" },
+        { "include": "#kw-declaration-variable" },
+        { "include": "#kw-declaration-constant" },
+        { "include": "#kw-type-alias" },
+        { "include": "#kw-oop-modifier" },
+        { "include": "#kw-oop-class" },
+        { "include": "#kw-oop-enum" },
+        { "include": "#kw-oop-trait" },
+        { "include": "#kw-oop-inheritance" },
+        { "include": "#kw-oop-constructor" },
+        { "include": "#kw-oop-self" },
+        { "include": "#kw-oop-super" },
+        { "include": "#kw-oop-accessor" },
+        { "include": "#kw-oop-operator" },
+        { "include": "#kw-concurrency-async" },
+        { "include": "#kw-concurrency-combinator" },
+        { "include": "#kw-concurrency-channel-op" },
+        { "include": "#kw-concurrency-type" },
+        { "include": "#kw-logic-decl" },
+        { "include": "#kw-logic-op" },
+        { "include": "#kw-macro-define" },
+        { "include": "#kw-macro-quote" },
+        { "include": "#kw-module-import" },
+        { "include": "#kw-module-alias" },
+        { "include": "#kw-logical-op" }
       ]
     },
-    "kw-control": {
-      "name": "keyword.control.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:否则如果|遍历|对于|跳出|继续|匹配|情况|产出|步长|如果|否则|返回|当|在|从|到|默认)(?![\\p{L}\\p{N}_])"
+    "kw-control-conditional": {
+      "name": "keyword.control.conditional.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:否则如果|如果|否则|匹配|情况)(?![\\p{L}\\p{N}_])"
     },
-    "kw-declaration": {
-      "name": "storage.type.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:定义|常量|函数|设)(?![\\p{L}\\p{N}_])"
+    "kw-control-repeat": {
+      "name": "keyword.control.repeat.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:当|遍历|对于|步长|跳出|继续)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-control-return": {
+      "name": "keyword.control.return.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:返回|产出)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-control-flow": {
+      "name": "keyword.control.flow.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:在|从|到|默认)(?![\\p{L}\\p{N}_])"
     },
     "kw-exception": {
       "name": "keyword.control.exception.dao",
       "match": "(?<![\\p{L}\\p{N}_])(?:尝试|捕获|最终|抛出|断言)(?![\\p{L}\\p{N}_])"
     },
-    "kw-oop": {
-      "name": "keyword.other.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:受保护|继承自|初始化|本对象|父对象|运算符|私有|静态|特征|实现|获取|设置|抽象|枚举|类型)(?![\\p{L}\\p{N}_])"
+    "kw-declaration-function": {
+      "name": "keyword.declaration.function.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:定义|函数)(?![\\p{L}\\p{N}_])"
     },
-    "kw-concurrency": {
+    "kw-declaration-variable": {
+      "name": "keyword.declaration.variable.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:设)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-declaration-constant": {
+      "name": "keyword.declaration.constant.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:常量)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-type-alias": {
+      "name": "storage.type.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:类型别名)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-modifier": {
+      "name": "storage.modifier.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:受保护|私有|静态|抽象)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-class": {
+      "name": "entity.name.type.class.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:类型)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-enum": {
+      "name": "entity.name.type.enum.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:枚举)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-trait": {
+      "name": "entity.name.type.trait.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:特征)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-inheritance": {
+      "name": "keyword.other.inheritance.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:继承自|实现)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-constructor": {
+      "name": "keyword.other.constructor.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:初始化)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-self": {
+      "name": "variable.language.this.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:本对象)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-super": {
+      "name": "variable.language.super.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:父对象)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-accessor": {
+      "name": "keyword.other.accessor.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:获取|设置)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-oop-operator": {
+      "name": "keyword.other.operator.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:运算符)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-concurrency-async": {
+      "name": "keyword.control.async.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:异步|等待)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-concurrency-combinator": {
       "name": "keyword.other.concurrency.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:原子整数|原子布尔|互斥锁|异步|等待|全部|竞速|并行|通道|发送|接收|选择|超时|同步)(?![\\p{L}\\p{N}_])"
+      "match": "(?<![\\p{L}\\p{N}_])(?:全部|竞速|并行)(?![\\p{L}\\p{N}_])"
     },
-    "kw-logic": {
+    "kw-concurrency-channel-op": {
+      "name": "keyword.other.concurrency.channel.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:发送|接收|选择|超时|同步)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-concurrency-type": {
+      "name": "storage.type.concurrent.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:原子整数|原子布尔|互斥锁|通道)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-logic-decl": {
       "name": "keyword.other.logic.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:在范围|逻辑|事实|规则|查询|剪枝|非)(?![\\p{L}\\p{N}_])"
+      "match": "(?<![\\p{L}\\p{N}_])(?:逻辑|事实|规则|查询)(?![\\p{L}\\p{N}_])"
     },
-    "kw-macro": {
+    "kw-logic-op": {
+      "name": "keyword.operator.logic.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:在范围|剪枝|非)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-macro-define": {
+      "name": "keyword.declaration.macro.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:定义宏)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-macro-quote": {
       "name": "keyword.other.macro.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:定义宏|引述|引用|注入)(?![\\p{L}\\p{N}_])"
+      "match": "(?<![\\p{L}\\p{N}_])(?:引述|引用|注入)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-module-import": {
+      "name": "keyword.control.import.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:导入|导出)(?![\\p{L}\\p{N}_])"
+    },
+    "kw-module-alias": {
+      "name": "keyword.other.module.dao",
+      "match": "(?<![\\p{L}\\p{N}_])(?:作为)(?![\\p{L}\\p{N}_])"
     },
     "kw-logical-op": {
       "name": "keyword.operator.logical.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:并且|或者|不是|不在|且)(?![\\p{L}\\p{N}_])"
-    },
-    "kw-module": {
-      "name": "keyword.other.module.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:导入|导出|作为)(?![\\p{L}\\p{N}_])"
-    },
-    "kw-type": {
-      "name": "storage.type.dao",
-      "match": "(?<![\\p{L}\\p{N}_])(?:类型别名)(?![\\p{L}\\p{N}_])"
+      "match": "(?<![\\p{L}\\p{N}_])(?:并且|且|或者|不是|不在)(?![\\p{L}\\p{N}_])"
     },
     "operators": {
       "name": "keyword.operator.dao",

@@ -2,6 +2,9 @@
 " 说明：道语言暂无 tree-sitter grammar，因此使用 Vim 原生正则高亮。
 " 关键字表完整来源于 源码/dao/tokens.py 的 KEYWORDS 字典。
 " 共 79 个键（其中「运行异步」在解释器里按内置函数处理，此处一并高亮）。
+" 关键字按语义分为多组（声明/流程/条件/循环/模块/函数/类型/布尔/逻辑运算/
+" 异常/OOP 修饰符/OOP 结构/并发类型/并发控制/逻辑编程/宏），全部纳入
+" @daoInterp cluster 以保证模板字符串插值内同样高亮。
 
 if exists("b:current_syntax")
   finish
@@ -13,27 +16,41 @@ endif
 syn case match
 
 " ------------------------------------------------------------------
-" 关键字（链到 Vim 标准高亮组）
+" 关键字（按语义分组，链到 Vim 标准高亮组；每组长词在前）
 " ------------------------------------------------------------------
 
-" 声明与语句
-syn keyword daoStatement 定义 常量 设 返回 默认 产出 导入 导出 作为
-" 条件分支（长词在前）
+" 声明
+syn keyword daoDeclaration 定义 常量 设 函数
+" 流程 / 范围（返回、产出、默认及区间关键字）
+syn keyword daoFlow 返回 产出 默认 在 从 到
+" 条件分支
 syn keyword daoConditional 否则如果 如果 否则 匹配 情况
 " 循环
-syn keyword daoRepeat 当 遍历 对于 在 从 到 步长 跳出 继续
-" 函数与宏定义
-syn keyword daoFunction 函数 定义宏
-" 类型与 OOP（长词在前）
-syn keyword daoType 类型别名 运算符 继承自 初始化 类型 抽象 枚举 特征 实现
+syn keyword daoRepeat 当 遍历 对于 步长 跳出 继续
+" 模块
+syn keyword daoModule 导入 导出 作为
+" 函数与宏定义 / 内置异步运行函数
+syn keyword daoFunction 定义宏 运行异步
+" 类型声明
+syn keyword daoType 类型别名 类型 枚举 特征
 " 布尔值与空值
 syn keyword daoBoolean 真 假 空
 " 逻辑运算符（关键字形式）
 syn keyword daoOperatorKeyword 并且 或者 不是 不在 且 非
 " 异常处理
 syn keyword daoException 尝试 捕获 最终 抛出 断言
-" 对象 / 成员 / 并发 / 逻辑编程 / 宏 / 内置函数（长词在前）
-syn keyword daoSpecial 原子整数 原子布尔 受保护 互斥锁 在范围 本对象 父对象 私有 静态 获取 设置 异步 等待 全部 竞速 并行 通道 发送 接收 选择 超时 同步 逻辑 事实 规则 查询 剪枝 引述 引用 注入 运行异步
+" OOP 可见性 / 修饰符
+syn keyword daoOopModifier 受保护 私有 静态 抽象
+" OOP 结构（继承、构造、this/super、存取器、运算符重载）
+syn keyword daoOop 运算符 继承自 初始化 本对象 父对象 实现 获取 设置
+" 并发类型（通道、锁、原子量）
+syn keyword daoConcurrencyType 原子整数 原子布尔 互斥锁 通道
+" 并发控制（异步、组合子、通道操作与同步）
+syn keyword daoConcurrency 异步 等待 全部 竞速 并行 发送 接收 选择 超时 同步
+" 逻辑编程（逻辑块、事实、规则、查询、剪枝、范围约束）
+syn keyword daoLogic 逻辑 事实 规则 查询 剪枝 在范围
+" 宏系统（引述、引用、注入）
+syn keyword daoMacro 引述 引用 注入
 
 " ------------------------------------------------------------------
 " 数值
@@ -81,7 +98,7 @@ syn region daoString start=/'''/ end=/'''/ contains=daoEscape
 " ------------------------------------------------------------------
 " 模板字符串 `文本 {表达式}`，表达式内复用顶层高亮
 " ------------------------------------------------------------------
-syn cluster daoInterp contains=daoString,daoNumber,daoLogicVar,daoMacroInjection,daoMacroCall,daoOperator,daoStatement,daoConditional,daoRepeat,daoFunction,daoType,daoBoolean,daoOperatorKeyword,daoException,daoSpecial,daoLineComment,daoDocComment,daoNoteComment,daoBlockComment
+syn cluster daoInterp contains=daoString,daoNumber,daoLogicVar,daoMacroInjection,daoMacroCall,daoOperator,daoDeclaration,daoFlow,daoConditional,daoRepeat,daoModule,daoFunction,daoType,daoBoolean,daoOperatorKeyword,daoException,daoOopModifier,daoOop,daoConcurrencyType,daoConcurrency,daoLogic,daoMacro,daoLineComment,daoDocComment,daoNoteComment,daoBlockComment
 syn region daoInterpExpr start=/{/ end=/}/ contained contains=@daoInterp,daoInterpExpr
 syn region daoTemplate start=/`/ skip=/\\`/ end=/`/ contains=daoEscape,daoInterpExpr
 
@@ -98,15 +115,22 @@ syn region daoBlockComment start=/\/\*/ end=/\*\// contains=daoBlockComment,daoT
 " ------------------------------------------------------------------
 " 高亮链接
 " ------------------------------------------------------------------
-hi def link daoStatement        Statement
-hi def link daoConditional      Conditional
-hi def link daoRepeat           Repeat
-hi def link daoFunction         Function
-hi def link daoType             Type
-hi def link daoBoolean          Boolean
-hi def link daoOperatorKeyword  Operator
-hi def link daoException        Exception
-hi def link daoSpecial          Special
+hi def link daoDeclaration       Statement
+hi def link daoFlow              Statement
+hi def link daoConditional       Conditional
+hi def link daoRepeat            Repeat
+hi def link daoModule            Include
+hi def link daoFunction          Function
+hi def link daoType              Type
+hi def link daoBoolean           Boolean
+hi def link daoOperatorKeyword   Operator
+hi def link daoException         Exception
+hi def link daoOopModifier       StorageClass
+hi def link daoOop               Structure
+hi def link daoConcurrencyType   Type
+hi def link daoConcurrency       Special
+hi def link daoLogic             Special
+hi def link daoMacro             Macro
 hi def link daoNumber           Number
 hi def link daoLogicVar         Identifier
 hi def link daoMacroInjection   Special

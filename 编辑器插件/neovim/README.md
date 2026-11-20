@@ -9,7 +9,8 @@
 ```
 编辑器插件/neovim/
 ├── ftdetect/dao.vim    # 识别 *.道 与 *.dao 文件
-├── ftplugin/dao.lua    # 启动 LSP、设置缩进、定义用户命令
+├── ftplugin/dao.lua    # 启动内置 LSP、设置缩进、定义用户命令
+├── lsp/dao_ls.lua      # nvim-lspconfig server 配置（可贡献上游）
 ├── syntax/dao.vim      # 传统正则语法高亮（无 tree-sitter）
 └── README.md
 ```
@@ -73,6 +74,64 @@ use({ "<项目根目录>/编辑器插件/neovim", ft = "dao" })
 - 环境变量：自动把 `<项目根目录>/源码` 加入 `PYTHONPATH`，确保 `dao` 包可被导入；已有的 `PYTHONPATH` 会被保留。
 - 服务器能力：全量文档同步、补全、悬停、跳转定义、文档符号，并在打开/修改文档时发布中文诊断。
 - 重复启动保护：插件缓存客户端 id，同一会话不会重复拉起进程；打开新的 `.道` 文件会复用已有客户端。
+
+## nvim-lspconfig 接入
+
+`lsp/dao_ls.lua` 提供符合 nvim-lspconfig 约定的 server 配置（返回 `default_config` + `docs`），路径全部相对插件目录动态推导，可原样贡献到上游 `lua/lspconfig/server_configurations/dao_ls.lua`。它复用内置 ftplugin 的语义：同样的解释器、工作目录、`PYTHONPATH`、`root_dir`、`on_attach` 与 `capabilities`，并额外设置 `filetypes = { "dao" }` 与 `single_file_support = true`。
+
+### 方式一：配置已进入 lspconfig（或已放到 server_configurations 目录）
+
+```lua
+require('lspconfig').dao_ls.setup({})
+```
+
+由于该文件不在仓库内、无法相对推导源码路径，请显式告知源码目录（或在 `setup` 中覆盖 `cmd` / `env`）：
+
+```lua
+vim.g.dao_ls_source_dir = '<项目根目录>/源码'
+-- 可选：vim.g.dao_ls_python = '<解释器绝对路径>'
+require('lspconfig').dao_ls.setup({})
+```
+
+### 方式二：直接用本仓库内的文件本地注册
+
+```lua
+local dao_dir = '<项目根目录>/编辑器插件/neovim'
+package.path = dao_dir .. '/?.lua;' .. package.path
+
+local configs = require('lspconfig.configs')
+if not configs.dao_ls then
+  configs.dao_ls = require('lsp.dao_ls')  -- 对应 lsp/dao_ls.lua
+end
+require('lspconfig').dao_ls.setup({})
+```
+
+### 与内置 `:DaoLspStart` 的关系
+
+两种方式启动的是**同一个** `python -m dao.lsp` 服务器，但客户端不同（内置为 `dao`，lspconfig 为 `dao_ls`）。**任选其一即可，同时启用会拉起两个客户端并重复设置按键。** 默认是内置方式：只要把插件目录加入 `runtimepath`，`ftplugin/dao.lua` 就会在打开 `.道` / `.dao` 文件时自动启动。
+
+若改用 lspconfig 独占，请不要把 `<项目根目录>/编辑器插件/neovim` 整体加入 `runtimepath`（否则 ftplugin 仍会自动启动），改为按需加载文件类型识别与语法高亮：
+
+```lua
+local dao_dir = '<项目根目录>/编辑器插件/neovim'
+
+vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
+  pattern = { '*.道', '*.dao' },
+  callback = function()
+    vim.bo.filetype = 'dao'
+    vim.cmd('source ' .. dao_dir .. '/syntax/dao.vim')
+  end,
+})
+
+package.path = dao_dir .. '/?.lua;' .. package.path
+local configs = require('lspconfig.configs')
+if not configs.dao_ls then
+  configs.dao_ls = require('lsp.dao_ls')
+end
+require('lspconfig').dao_ls.setup({})
+```
+
+> 也可在保留内置方式的前提下仅试验 lspconfig：打开道语言文件后执行 `:DaoLspStop` 停止内置客户端，但下次打开文件仍会自动启动，因此不推荐长期并用。
 
 ## 命令与按键
 
