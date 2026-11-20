@@ -40,23 +40,25 @@ pytest tests/ -v
 ### 使用 Nuitka 打包为原生可执行文件
 
 ```bash
-# 安装 Nuitka 及依赖
-pip install nuitka ordered-set zstandard patchelf
-
-# 打包为单文件可执行程序
+# 一次性准备（隔离 venv）
 cd 源码
-python -m nuitka --onefile --standalone \
-    --enable-plugin=no-qt \
-    --include-package=dao \
-    --output-filename=道 \
-    --output-dir=../dist \
-    --assume-yes-for-downloads \
-    main.py
+./.venv/bin/python -m pip install 'nuitka>=2.5'
 
-# 运行打包后的可执行文件
-../dist/道                    # 启动 REPL
-../dist/道 examples/你好世界.道  # 执行文件
+# 一键构建为单文件原生可执行程序（产物 dist/nuitka/dao）
+bash 源码/打包原生版.sh
+
+# 运行（无需 Python 环境）
+dist/nuitka/dao --version                    # 显示版本号（等价于 -V）
+dist/nuitka/dao --help
+dist/nuitka/dao 源码/examples/你好世界.道   # 执行文件
+dist/nuitka/dao                              # 启动 REPL
+
+# 安装到 PATH（可选）
+bash 源码/安装原生版.sh            # 装到 ~/.local/bin/dao
+sudo bash 源码/安装原生版.sh --system  # 装到 /usr/local/bin/dao
 ```
+
+详见 [文档/17-原生打包与安装.md](文档/17-原生打包与安装.md)（环境要求、安装/卸载、与 Python 版一致性验证）。
 
 **REPL 示例：**
 ```
@@ -161,14 +163,20 @@ python -m nuitka --onefile --standalone \
 │   ├── 10-标准库.md
 │   ├── 11-关键字总表.md
 │   ├── 12-综合示例.md
-│   └── 13-结论与展望.md
-├── dist/                   ← Nuitka 打包输出
-│   └── 道                  ← 原生可执行文件（~8.5MB）
+│   ├── 13-结论与展望.md
+│   ├── 14-LSP语言服务器.md
+│   ├── 15-开发工具链.md
+│   ├── 16-开发者体验.md
+│   └── 17-原生打包与安装.md
+├── dist/                   ← 打包输出（.gitignore 忽略，不入库）
+│   ├── dao-language-0.1.0.vsix  ← VS Code 插件
+│   └── nuitka/dao          ← Nuitka 原生可执行文件（~47MB，需现场构建）
 └── 源码/                   ← 解释器源代码（Python 3.10+）
     ├── main.py             ← 主入口（REPL + 文件执行）
     ├── requirements.txt    ← Python 依赖
     ├── dao/                ← 核心解释器包
-    │   ├── __init__.py        ← 包初始化（版本 0.1.0）
+    │   ├── __init__.py        ← 包初始化（重导出版本号）
+    │   ├── version.py         ← 版本号单一来源（0.1.0）
     │   ├── tokens.py          ← 词元类型定义（32个关键字）
     │   ├── ast_nodes.py       ← AST 节点定义（30+节点类型）
     │   ├── environment.py     ← 词法作用域管理
