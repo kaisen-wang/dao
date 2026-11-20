@@ -4,7 +4,11 @@
   "description": "为「道」中文多范式编程语言提供语法高亮、括号匹配、注释切换，以及基于 LSP 的诊断、补全、悬停与跳转支持。",
   "version": "0.1.0",
   "publisher": "dao-lang",
-  "license": "MIT",
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/kaisen-wang/dao.git"
+  },
   "engines": {
     "vscode": "^1.75.0"
   },
