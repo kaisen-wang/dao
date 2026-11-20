@@ -23,53 +23,51 @@ triggers:
         - 'v*'
 
 stages:
-  - stage:
-      name: build-deb
-      displayName: 构建 Debian 安装包
-      strategy: naturally
-      trigger: auto
-      executor: []          # 使用 Gitee 托管 Linux 构建机
-      steps:
-        - step: build@python
-          name: build_deb
-          displayName: 编译并打包 .deb
-          pythonVersion: '3.13'
-          commands:
-            - python -m pip install --upgrade pip
-            - python -m pip install "nuitka>=2.5" prompt-toolkit
-            - python -m pytest 源码/tests/ -q
-            - python 源码/构建安装包.py
-            - ls -lh dist/installers/
-          artifacts:
-            - name: DAO_DEB
-              path:
-                - dist/installers/
-          caches:
-            - /root/.cache/pip
-          notify: []
-          strategy:
-            retry: '0'
+  - name: build-deb
+    displayName: 构建 Debian 安装包
+    strategy: naturally
+    trigger: auto
+    executor: []          # 使用 Gitee 托管 Linux 构建机
+    steps:
+      - step: build@python
+        name: build_deb
+        displayName: 编译并打包 .deb
+        pythonVersion: '3.13'
+        commands:
+          - python -m pip install --upgrade pip
+          - python -m pip install "nuitka>=2.5" prompt-toolkit
+          - python -m pytest 源码/tests/ -q
+          - python 源码/构建安装包.py
+          - ls -lh dist/installers/
+        artifacts:
+          - name: DAO_DEB
+            path:
+              - dist/installers/
+        caches:
+          - /root/.cache/pip
+        notify: []
+        strategy:
+          retry: '0'
 
-  - stage:
-      name: release
-      displayName: 发布到 Gitee Release
-      strategy: naturally
-      trigger: auto
-      executor: []
-      steps:
-        - step: release@gitee
-          name: release_gitee
-          displayName: Gitee Release
-          releaseName: 道语言 v${GITEE_PIPELINE_BUILD_NUMBER}
-          description: CHANGELOG.md
-          tagName: v${GITEE_PIPELINE_BUILD_NUMBER}
-          upstreamArtifact:
-            - DAO_DEB
-          # 用通配符避免硬编码版本号（版本号单一来源是 dao/version.py）
-          assertFiles:
-            - dist/installers/*.deb
-          prerelease: false
-          allowUpdate: true
-          notify: []
-          strategy:
-            retry: '0'
+  - name: release
+    displayName: 发布到 Gitee Release
+    strategy: naturally
+    trigger: auto
+    executor: []
+    steps:
+      - step: release@gitee
+        name: release_gitee
+        displayName: Gitee Release
+        releaseName: 道语言 v${GITEE_PIPELINE_BUILD_NUMBER}
+        description: CHANGELOG.md
+        tagName: v${GITEE_PIPELINE_BUILD_NUMBER}
+        upstreamArtifact:
+          - DAO_DEB
+        # 用通配符避免硬编码版本号（版本号单一来源是 dao/version.py）
+        assertFiles:
+          - dist/installers/*.deb
+        prerelease: false
+        allowUpdate: true
+        notify: []
+        strategy:
+          retry: '0'
