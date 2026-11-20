@@ -18,7 +18,10 @@ sys.path.insert(0, ROOT)  # noqa: E402
 from dao.lsp.features import compute_diagnostics  # noqa: E402
 
 MAIN_PY = os.path.join(ROOT, "main.py")
-PYTHON = os.path.join(ROOT, ".venv", "bin", "python")
+# 子进程复用当前 pytest 解释器：本地 (.venv/bin/python -m pytest) 与 CI
+# (python -m pytest) 都能命中各自已装好依赖的解释器，避免硬编码 .venv
+# 在干净 runner 上不存在（.venv 被 .gitignore 排除，不入库）。
+PYTHON = sys.executable
 CHECKER = os.path.join(REPO_ROOT, "示例", "自举", "静态检查器.道")
 SELF_CHECK = os.path.join(REPO_ROOT, "示例", "自举", "自举自检.道")
 ENV_TARGET = "DAO_CHECK_TARGET"

@@ -64,26 +64,62 @@ def detect_arch() -> tuple[str, str]:
     return machine, machine
 
 
+def _patchelf_script_dirs() -> list[Path]:
+    """返回 patchelf 可能的落点：解释器 scripts 目录 + pip --user 目录。
+
+    CI 中系统 site-packages 常不可写，pip 会自动退回 ``--user``，把 wheel
+    自带的 patchelf 二进制放进 ``~/.local/bin``（默认不在 PATH）。这里把
+    默认 scheme 与 user scheme 的 scripts 目录都纳入检查。
+    """
+    schemes = ["nt_user"] if os.name == "nt" else ["posix_user"]
+    candidates = [sysconfig.get_path("scripts")]
+    for scheme in schemes:
+        try:
+            candidates.append(sysconfig.get_path("scripts", scheme=scheme))
+        except (KeyError, ValueError):
+            pass
+    result: list[Path] = []
+    for item in candidates:
+        if item:
+            path = Path(item)
+            if path not in result:
+                result.append(path)
+    return result
+
+
+def _activate_patchelf() -> bool:
+    """若候选目录里已有 patchelf，注入 PATH 并返回 True。"""
+    exe_name = "patchelf.exe" if os.name == "nt" else "patchelf"
+    for directory in _patchelf_script_dirs():
+        candidate = directory / exe_name
+        if candidate.is_file():
+            os.environ["PATH"] = f"{directory}{os.pathsep}{os.environ.get('PATH', '')}"
+            if shutil.which("patchelf") is not None:
+                print(f"[提示] 已启用 patchelf：{candidate}", flush=True)
+                return True
+    return False
+
+
 def ensure_patchelf() -> None:
     """Linux 下确保 patchelf 可用（Nuitka onefile/standalone 必需）。
 
     Gitee Go / GitHub Actions 的干净 runner 常缺此工具，且未必有 sudo/apt
     权限。PyPI 的 ``patchelf`` wheel 自带二进制，pip 安装后 exe 落在解释器
-    同目录（已在 PATH 或 sysconfig scripts 目录），是最稳的补装方式。
+    scripts 目录或 ``--user`` 脚本目录，是最稳的补装方式。
     """
     if shutil.which("patchelf") is not None:
         return
+    # 先查候选目录：CI 流水线第 2 步往往已 pip install patchelf，只是装在
+    # ~/.local/bin 未进 PATH。直接启用可避免无意义的重复安装。
+    if _activate_patchelf():
+        return
     print("[提示] 未检测到 patchelf，Nuitka Linux onefile 需要它，正在通过 pip 安装…", flush=True)
     run([sys.executable, "-m", "pip", "install", "patchelf"])
-    if shutil.which("patchelf") is None:
-        # pip 装到用户 scripts 目录（如 ~/.local/bin）时可能未进 PATH，补加。
-        scripts = Path(sysconfig.get_path("scripts"))
-        candidate = scripts / "patchelf"
-        if candidate.exists():
-            os.environ["PATH"] = f"{scripts}{os.pathsep}{os.environ.get('PATH', '')}"
-            print(f"[提示] 已将 {scripts} 加入 PATH", flush=True)
-        else:
-            raise RuntimeError("patchelf 安装后仍不可用，请手动安装：python -m pip install patchelf")
+    if not _activate_patchelf():
+        raise RuntimeError(
+            "patchelf 安装后仍不可用，请手动安装：python -m pip install patchelf，"
+            "并把用户 scripts 目录（如 ~/.local/bin）加入 PATH"
+        )
 
 
 def build_onefile(os_name: str) -> Path:
