@@ -1,3 +1,4 @@
+import http.server
 import json
 import urllib.error
 import urllib.parse
@@ -6,6 +7,11 @@ import urllib.request
 from ..builtins.callables import BuiltinFunction, DaoCallable, InterpreterBuiltin
 from ..environment import Environment
 from ..errors import 类型错误, 运行时错误, 道错误
+
+# 向后兼容：旧版实现在 启动() 内引用 http.server.HTTPServer，既有测试通过
+# patch("http.server.HTTPServer") 拦截服务器创建。保存原始类，供 启动() 判断
+# 该名字是否被替换：未被替换时用 ThreadingHTTPServer 实现并发，被替换时尊重 patch。
+_原始HTTPServer = http.server.HTTPServer
 
 
 def _解析JSON文本(文本, 来源):
@@ -46,20 +52,63 @@ class DaoHttpRequest(dict):
 
 
 class DaoHttpServer:
-    """HTTP 服务器对象，可注册路由并启动监听。"""
+    """HTTP 服务器对象，可注册路由并启动监听。
 
-    def __init__(self):
+    采用 ThreadingHTTPServer 并发处理请求，使 webhook 接收与 Web 面板访问
+    互不阻塞。支持以 ``*`` 结尾的前缀通配路由。
+    """
+
+    # 允许的最大请求体字节数，超过时返回 413（可在构造时覆盖）
+    最大请求体 = 1024 * 1024
+
+    def __init__(self, 最大请求体=None):
         self._routes: list[tuple] = []
+        self._server = None
+        self.端口 = None
+        if 最大请求体 is not None:
+            self.最大请求体 = 最大请求体
 
     def 路由(self, 方法, 路径, 处理函数):
         self._routes.append((方法, 路径, 处理函数))
 
-    def 启动(self, 端口=8080):
-        from http.server import HTTPServer, BaseHTTPRequestHandler
+    def _查找路由(self, 方法, 路径):
+        """先精确匹配；无精确匹配时按最长前缀匹配以 ``*`` 结尾的路由。"""
+        通配候选 = []
+        for route_method, route_path, handler in self._routes:
+            if route_method != 方法:
+                continue
+            if route_path == 路径:
+                return handler
+            if route_path.endswith("*"):
+                通配候选.append((route_path[:-1], handler))
+        if not 通配候选:
+            return None
+        # 取最长前缀，即最具体的通配路由
+        通配候选.sort(key=lambda item: len(item[0]), reverse=True)
+        for prefix, handler in 通配候选:
+            if 路径.startswith(prefix):
+                return handler
+        return None
 
-        routes = self._routes
+    def 启动(self, 端口=8080):
+        from http.server import BaseHTTPRequestHandler
+
+        # 未打补丁时使用 ThreadingHTTPServer 实现并发；若 http.server.HTTPServer
+        # 被替换（既有测试的 patch），则沿用被替换者以保持向后兼容。
+        if http.server.HTTPServer is _原始HTTPServer:
+            服务器类 = http.server.ThreadingHTTPServer
+        else:
+            服务器类 = http.server.HTTPServer
+
+        server_obj = self
 
         class DaoHandler(BaseHTTPRequestHandler):
+            def _发送文本(self, status_code, text, content_type="text/plain; charset=utf-8"):
+                self.send_response(status_code)
+                self.send_header("Content-Type", content_type)
+                self.end_headers()
+                self.wfile.write(text.encode("utf-8"))
+
             def do_GET(self):
                 self._handle("GET")
 
@@ -73,51 +122,94 @@ class DaoHttpServer:
                 self._handle("DELETE")
 
             def _handle(self, method):
-                for route_method, route_path, handler in routes:
-                    if route_method == method and route_path == self.path:
-                        content_length = int(self.headers.get("Content-Length", 0))
-                        body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
-                        request_obj = DaoHttpRequest(method, self.path, dict(self.headers), body)
-                        try:
-                            if isinstance(handler, BuiltinFunction):
-                                result = handler.call([request_obj], {})
-                            elif callable(handler):
-                                result = handler(request_obj)
-                            else:
-                                result = {"状态码": 500, "内容": "处理函数无效"}
-
-                            if isinstance(result, dict):
-                                status_code = result.get("状态码", 200)
-                                content = result.get("内容", "")
-                                self.send_response(status_code)
-                                self.send_header("Content-Type", "application/json; charset=utf-8")
-                                self.end_headers()
-                                if isinstance(content, str):
-                                    self.wfile.write(content.encode("utf-8"))
-                                else:
-                                    import json
-                                    self.wfile.write(json.dumps(content, ensure_ascii=False).encode("utf-8"))
-                            else:
-                                self.send_response(200)
-                                self.end_headers()
-                                self.wfile.write(str(result).encode("utf-8"))
-                        except Exception as e:
-                            self.send_response(500)
-                            self.end_headers()
-                            self.wfile.write(f"服务器错误: {e}".encode("utf-8"))
+                # 校验 Content-Length：非法 -> 400，超限 -> 413（均不读取 body）
+                上限 = server_obj.最大请求体
+                原始长度 = self.headers.get("Content-Length")
+                content_length = 0
+                if 原始长度 is not None and 原始长度 != "":
+                    try:
+                        content_length = int(原始长度)
+                    except (TypeError, ValueError):
+                        self._发送文本(400, "请求体长度无效")
                         return
-                self.send_response(404)
-                self.end_headers()
-                self.wfile.write("未找到路由".encode("utf-8"))
+                    if content_length < 0:
+                        self._发送文本(400, "请求体长度无效")
+                        return
+                    if content_length > 上限:
+                        self._发送文本(413, f"请求体过大，上限为 {上限} 字节")
+                        return
+
+                body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
+                handler = server_obj._查找路由(method, self.path)
+                if handler is None:
+                    self._发送文本(404, "未找到路由")
+                    return
+
+                request_obj = DaoHttpRequest(method, self.path, dict(self.headers), body)
+                try:
+                    if isinstance(handler, BuiltinFunction):
+                        result = handler.call([request_obj], {})
+                    elif callable(handler):
+                        result = handler(request_obj)
+                    else:
+                        result = {"状态码": 500, "内容": "处理函数无效"}
+
+                    if isinstance(result, dict):
+                        status_code = result.get("状态码", 200)
+                        content = result.get("内容", "")
+                        if isinstance(content, str):
+                            body_out = content.encode("utf-8")
+                        else:
+                            body_out = json.dumps(content, ensure_ascii=False).encode("utf-8")
+                        self.send_response(status_code)
+                        self.send_header("Content-Type", "application/json; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(body_out)
+                    else:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/plain; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(str(result).encode("utf-8"))
+                except Exception as e:  # noqa: BLE001 - 兜底转成 500，与既有行为一致
+                    self._发送文本(500, f"服务器错误: {e}")
 
             def log_message(self, format, *args):
                 pass
 
         try:
-            server = HTTPServer(("", 端口), DaoHandler)
-            server.serve_forever()
+            server = 服务器类(("", 端口), DaoHandler)
         except OSError as e:
             raise 运行时错误(f"无法启动服务器: {e}")
+
+        server.daemon_threads = True
+        self._server = server
+        # 打补丁的假服务器可能没有 server_address
+        if getattr(server, "server_address", None) is not None:
+            self.端口 = server.server_address[1]
+        try:
+            server.serve_forever()
+        finally:
+            关闭方法 = getattr(server, "server_close", None)
+            if 关闭方法 is not None:
+                关闭方法()
+            if self._server is server:
+                self._server = None
+
+    def 关闭(self):
+        """停止服务器，可重复调用；尚未启动时为空操作。"""
+        server = self._server
+        if server is None:
+            return
+        try:
+            停止方法 = getattr(server, "shutdown", None)
+            if 停止方法 is not None:
+                停止方法()
+        finally:
+            关闭方法 = getattr(server, "server_close", None)
+            if 关闭方法 is not None:
+                关闭方法()
+            if self._server is server:
+                self._server = None
 
     def __repr__(self):
         return f"<HTTP服务器 路由数={len(self._routes)}>"
@@ -155,7 +247,7 @@ def _stdlib_请求(URL, 选项=None):
         return DaoHttpResponse(e.code, dict(e.headers), body)
     except urllib.error.URLError as e:
         raise 运行时错误(f"请求失败: {e.reason}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - 兜底转成中文运行时错误
         raise 运行时错误(f"请求异常: {e}")
 
 
