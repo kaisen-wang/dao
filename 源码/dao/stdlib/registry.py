@@ -26,6 +26,7 @@ def _init_registry():
         db,
         encoding,
         file,
+        llm,
         log,
         math,
         network,
@@ -50,6 +51,7 @@ def _init_registry():
     register_module("密码", crypto.create_module_env)
     register_module("数据库", db.create_module_env)
     register_module("调度", schedule.create_module_env)
+    register_module("大模型", llm.create_module_env)
 
 
 _initialized = False

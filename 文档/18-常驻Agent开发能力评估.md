@@ -157,3 +157,21 @@ v0.1 前的语言层缺口已全部补齐。采用四个子代理并行开发、
 3. Web 面板模板/静态服务与进程守护、压测/混沌脚手架。
 
 以上均属业务工程，不需要再改语言层。
+
+## 18.10 LLM 统一接口层落地（2026-11-22，并行开发第二轮）
+
+按用户要求优先落地常驻 Agent 的大模型调用底座，**暂不做 GitHub**。沿用四子代理并行、主代理独占接口契约与集成文件的分工，按文件范围隔离。
+
+| 交付 | 文件 | 成果 |
+|---|---|---|
+| 接口契约（主代理） | `dao/llm/types.py` / `base.py` / `factory.py` / `__init__.py` | 统一数据模型（ChatMessage/ChatRequest/ChatResponse/StreamChunk/Usage）+ 异常层次；Provider 抽象基类（chat/chat_stream/list_models，预留 chat_with_tools）；register_provider / create_provider 工厂 |
+| Ollama Provider | `dao/llm/providers/ollama.py`、`tests/test_llm_ollama.py` | 完整实现（15 测试）：host/model/timeout 配置、NDJSON 流式、thinking/usage 字段映射、回调提前终止、HTTP mock |
+| 远程 Provider 骨架 | `dao/llm/providers/openai.py` / `anthropic.py`、`tests/test_llm_remote.py` | OpenAI Chat Completions + Anthropic Messages（13 测试）：请求头/体拼装、SSE 流式解析、配置缺失与 HTTP 错误，全部 mock 不打外网；填 key 即可用 |
+| 道语言桥接 | `dao/stdlib/llm.py`、`tests/test_stdlib/test_llm.py`、`示例/AI对话/接口层示例.道` | 「大模型」模块 5 个中文函数（16 测试）：中文键响应、`成功/错误` 约定、道语言端到端 |
+| 文档 | `文档/19-大模型接口层.md`、`文档/标准库API/大模型.md` | 设计契约与 API 参考 |
+
+**集成改动**：`dao/stdlib/registry.py` 注册第 15 个模块「大模型」；`tests/test_docgen.py` 与 `test_docgen_stdlib.py` 的模块数 14→15、文档数 16→17；`文档/10-标准库.md` 与 `文档/标准库API/README.md` 同步模块清单。
+
+**验收（主代理独立实测）**：全量 `cd 源码 && ./.venv/bin/python -m pytest tests/ -q` → **1552 passed / 2 skipped**（较此前工作区基线 1508 增加 44；18.9 的 1490 之后另有两轮共 +18）；新增与修改文件 ruff 全通过；本地 `ollama serve` + gemma4:e4b 上端到端跑通示例（非流式问答 + 653 块流式输出 + 模型列表）。设计细节见文档 19。
+
+**未做**：GitHub 事件适配器、Web 面板、工具调用协议（Function Calling / Tool Use）、成本熔断——仍属 18.9 的下一轮待做；本层只补齐 LLM 调用底座，Eval/Worker/Watchdog 可直接复用。

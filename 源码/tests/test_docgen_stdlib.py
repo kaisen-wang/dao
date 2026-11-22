@@ -34,7 +34,7 @@ from dao.tools.docgen import (
 主要模块 = (
     "文本", "数学", "集合", "时间", "编码", "文件",
     "系统", "测试", "日志", "网络", "异步IO",
-    "密码", "数据库", "调度",
+    "密码", "数据库", "调度", "大模型",
 )
 
 
@@ -76,7 +76,7 @@ def test_全部stdlib导出函数无占位描述():
         for f in m.functions
         if f.description == 暂无描述
     ]
-    assert len(modules) == 14
+    assert len(modules) == 15
     assert total >= 100
     assert placeholders == []
 
@@ -132,7 +132,7 @@ def test_参数个数与Python可调用签名相容():
 def test_生成Markdown含模块标题与函数表(模块表):
     """generate_docs 与 render_module_doc 均产出含模块标题与函数表的 Markdown。"""
     docs = generate_docs()
-    assert len(docs) == 16
+    assert len(docs) == 17
     for title, text in docs.items():
         assert text.startswith(f"# {title}\n")
         assert "## 函数" in text

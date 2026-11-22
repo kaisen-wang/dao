@@ -120,9 +120,9 @@ def test_markdown_format():
 
 
 def test_generate_docs_all_modules():
-    """所有模块（16 个）都能生成非空 Markdown 文档。"""
+    """所有模块（17 个）都能生成非空 Markdown 文档。"""
     docs = generate_docs()
-    assert len(docs) == 16
+    assert len(docs) == 17
     assert "基础内置函数" in docs and "高阶内置函数" in docs
     for title, text in docs.items():
         assert text.startswith(f"# {title}\n")
@@ -172,7 +172,7 @@ def test_cli_output_dir(tmp_path, capsys):
     assert docgen.main(["--output", str(out_dir)]) == 0
     capsys.readouterr()
     files = list(out_dir.glob("*.md"))
-    assert len(files) == 16
+    assert len(files) == 17
     assert (out_dir / "数学.md").read_text(encoding="utf-8").startswith("# 数学\n")
     assert (out_dir / "基础内置函数.md").exists()
 
