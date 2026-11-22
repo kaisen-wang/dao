@@ -61,10 +61,13 @@ class DaoHttpServer:
     # 允许的最大请求体字节数，超过时返回 413（可在构造时覆盖）
     最大请求体 = 1024 * 1024
 
-    def __init__(self, 最大请求体=None):
+    def __init__(self, 最大请求体=None, interpreter=None):
         self._routes: list[tuple] = []
         self._server = None
         self.端口 = None
+        # 持有解释器引用，用于把道语言函数（DaoCallable）作为路由处理函数回调。
+        # 纯 Python 测试直接构造时无需传入，保持向后兼容。
+        self.interpreter = interpreter
         if 最大请求体 is not None:
             self.最大请求体 = 最大请求体
 
@@ -140,15 +143,27 @@ class DaoHttpServer:
                         return
 
                 body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
-                handler = server_obj._查找路由(method, self.path)
+                # 浏览器/curl 会把中文路径编码成百分号形式（如 /审计 -> /%E5%AE%A1%E8%AE%A1），
+                # 解码后再匹配中文路由，避免误判为 404。
+                请求路径 = urllib.parse.unquote(self.path)
+                handler = server_obj._查找路由(method, 请求路径)
                 if handler is None:
                     self._发送文本(404, "未找到路由")
                     return
 
-                request_obj = DaoHttpRequest(method, self.path, dict(self.headers), body)
+                request_obj = DaoHttpRequest(method, 请求路径, dict(self.headers), body)
                 try:
-                    if isinstance(handler, BuiltinFunction):
+                    if isinstance(handler, (BuiltinFunction, InterpreterBuiltin)):
                         result = handler.call([request_obj], {})
+                    elif isinstance(handler, DaoCallable):
+                        # 道语言函数（含匿名函数）不是 Python callable，需借解释器回调。
+                        if server_obj.interpreter is None:
+                            result = {
+                                "状态码": 500,
+                                "内容": "服务器未绑定解释器，无法调用道语言处理函数",
+                            }
+                        else:
+                            result = server_obj.interpreter.call_function(handler, [request_obj])
                     elif callable(handler):
                         result = handler(request_obj)
                     else:
@@ -319,8 +334,13 @@ def _流式请求实现(interpreter, URL, 选项, 处理函数):
 
 
 def _stdlib_创建服务器():
-    """创建一个 HTTP 服务器对象。"""
+    """创建一个 HTTP 服务器对象（无解释器版本，供既有 Python 测试直接调用）。"""
     return DaoHttpServer()
+
+
+def _创建服务器实现(interpreter):
+    """InterpreterBuiltin 版本：让服务器持有解释器，支持道语言函数作为路由 handler。"""
+    return DaoHttpServer(interpreter=interpreter)
 
 
 def _stdlib_URL编码(文本):
@@ -341,7 +361,6 @@ def create_module_env(interpreter=None) -> Environment:
     """创建网络模块的导出环境。"""
     env = Environment()
     env.define("请求", BuiltinFunction("请求", _stdlib_请求, -1))
-    env.define("创建服务器", BuiltinFunction("创建服务器", _stdlib_创建服务器, 0))
     env.define("URL编码", BuiltinFunction("URL编码", _stdlib_URL编码, 1))
     env.define("URL解码", BuiltinFunction("URL解码", _stdlib_URL解码, 1))
 
@@ -351,5 +370,13 @@ def create_module_env(interpreter=None) -> Environment:
     if interpreter is not None:
         流式请求.set_interpreter(interpreter)
     env.define("流式请求", 流式请求)
+
+    # 创建服务器同样改用 InterpreterBuiltin，使服务器对象持有解释器，
+    # 从而支持把道语言函数注册为路由处理函数。原 _stdlib_创建服务器() 保持无参
+    # 签名不变，供既有 Python 测试直接调用。
+    创建服务器 = InterpreterBuiltin("创建服务器", _创建服务器实现, 0)
+    if interpreter is not None:
+        创建服务器.set_interpreter(interpreter)
+    env.define("创建服务器", 创建服务器)
     env.exports = list(env.values.keys())
     return env

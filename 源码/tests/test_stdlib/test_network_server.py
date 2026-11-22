@@ -5,10 +5,13 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from dao.builtins.callables import DaoCallable
 from dao.stdlib.network import DaoHttpServer
 
 
@@ -256,5 +259,58 @@ def test_处理函数抛异常返回500():
         状态码, 响应体, _ = _请求(server.端口, "/boom")
         assert 状态码 == 500
         assert "故意出错" in 响应体
+    finally:
+        _关闭(server, thread)
+
+
+class _假道函数(DaoCallable):
+    """最小 DaoCallable 替身，用于验证服务器回调解释器路径。"""
+
+    def __init__(self, 返回内容):
+        self.返回内容 = 返回内容
+
+
+def test_道语言函数作为路由处理函数经解释器回调():
+    """看板等脚本注册的道函数不是 Python callable，必须借解释器回调。"""
+    server = DaoHttpServer()
+    解释器 = MagicMock()
+    解释器.call_function.side_effect = lambda func, args, kwargs=None: {
+        "状态码": 200,
+        "内容": f"道函数响应:{args[0]['路径']}",
+    }
+    server.interpreter = 解释器
+    server.路由("GET", "/dao", _假道函数("占位"))
+    thread = _启动(server)
+    try:
+        状态码, 响应体, _ = _请求(server.端口, "/dao")
+        assert 状态码 == 200
+        assert 响应体 == "道函数响应:/dao"
+        解释器.call_function.assert_called_once()
+    finally:
+        _关闭(server, thread)
+
+
+def test_中文路由经百分号编码后能匹配():
+    """浏览器/curl 会把中文路径编码成 %XX，服务器须解码后再匹配路由。"""
+    server = DaoHttpServer()
+    server.路由("GET", "/审计", lambda req: {"状态码": 200, "内容": "审计页"})
+    thread = _启动(server)
+    try:
+        状态码, 响应体, _ = _请求(server.端口, urllib.parse.quote("/审计"))
+        assert 状态码 == 200
+        assert 响应体 == "审计页"
+    finally:
+        _关闭(server, thread)
+
+
+def test_道函数处理函数在无解释器时返回500():
+    """未绑定解释器时给出明确中文提示，而非静默 500。"""
+    server = DaoHttpServer()
+    server.路由("GET", "/dao", _假道函数("占位"))
+    thread = _启动(server)
+    try:
+        状态码, 响应体, _ = _请求(server.端口, "/dao")
+        assert 状态码 == 500
+        assert "未绑定解释器" in 响应体
     finally:
         _关闭(server, thread)
