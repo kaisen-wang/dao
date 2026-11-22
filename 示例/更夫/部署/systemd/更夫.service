@@ -1,0 +1,52 @@
+[Unit]
+Description=更夫 Nightwatch — 常驻研发协作 Agent（道语言 Python 解释器）
+# 本文件是配置样例，未做真实云主机部署验证；详细说明见 ../README.md。
+# 注意：本机 systemd 259 拒绝中文单元文件名，生产安装请改名为 ASCII 名（如 gengfu.service）。
+# 在网络就绪后再启动；如生产环境无需外网，可去掉这两行。
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# simple 类型：ExecStart 进程就是主进程，退出即视为服务停止，由 Restart 拉起。
+Type=simple
+
+# ---- 启动命令（三项均为绝对路径）----
+# 1) 绝对 Python 解释器路径：当前指向开发机 .venv 软链。
+#    生产环境务必替换为真实安装路径，例如 /opt/gengfu/venv/bin/python。
+# 2) 道语言脚本不能由 python 直接执行（直接执行 .道 会触发 SyntaxError），
+#    必须由解释器 main.py 载入；main.py 同样使用绝对路径。
+# 3) 入口脚本绝对路径：接入层/入口.道；生产环境可换成实际长驻入口（见 README）。
+ExecStart=/home/carson/code/test/道/源码/.venv/bin/python /home/carson/code/test/道/源码/main.py /home/carson/code/test/道/示例/更夫/接入层/入口.道
+
+# 道语言模块搜索基于 os.getcwd()，必须切到 示例/更夫 根目录，
+# 否则「从 基础设施层.存储 导入 ...」等相对模块导入会失败。
+WorkingDirectory=/home/carson/code/test/道/示例/更夫
+
+# 进程崩溃或被 kill 后总是自动拉起，间隔 5 秒。
+Restart=always
+RestartSec=5
+
+# 运行账号：当前为开发机账号；生产环境请改为专用系统账号（如 gengfu），不要用 root。
+User=carson
+
+# ---- 环境变量（生产值请按现场修改）----
+# GENGFU_NO_LLM=1：关闭本地 ollama，走关键词规则 + 模板报告降级路径（无需外部模型服务）。
+# 其余四项为中文变量名，道语言层通过 取环境变量("键名") 读取。
+# 【重要限制】本机 systemd 259 实测：systemd 只接受 ASCII 变量名 [A-Za-z_][A-Za-z0-9_]，
+# 下面 4 行中文变量名会被判定为 Invalid environment assignment 并忽略（verify 有告警）。
+# 若需让中文变量真正进入进程环境，请按 ../README.md「systemd 中文变量名限制」一节
+# 用包装脚本 export 后再 exec 同一条绝对 Python 命令；此处保留这些行用于表达配置意图与契约要求。
+Environment=GENGFU_NO_LLM=1
+Environment=更夫端口=8765
+Environment=更夫数据库=/var/lib/gengfu/gengfu.db
+Environment=更夫Webhook端口=8766
+Environment=更夫演示模式=0
+
+# ---- 日志：交给 journald 采集，使用 journalctl -u 更夫 -f 查看 ----
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=更夫
+
+[Install]
+# 多用户运行级别开机自启（配合 systemctl enable 使用）。
+WantedBy=multi-user.target
