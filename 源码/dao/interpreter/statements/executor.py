@@ -754,8 +754,17 @@ class StatementExecutor(LogicExecutor):
                     continue
                 return self._exec_block(case.body, case_env)
 
+            # 裸标识符 + 守卫：守卫表达式需要引用被绑定的变量，强制按绑定模式处理
+            force_bind = (
+                case.guard is not None
+                and isinstance(case.pattern, Identifier)
+                and not case.is_wildcard
+            )
+
             # 检查模式是否匹配
-            match_result = self._match_pattern(case.pattern, subject, case_env)
+            match_result = self._match_pattern(
+                case.pattern, subject, case_env, force_bind=force_bind
+            )
             if match_result:
                 if case.guard and not self._is_truthy(self.eval_expression(case.guard, case_env)):
                     continue
@@ -763,7 +772,9 @@ class StatementExecutor(LogicExecutor):
 
         return None
 
-    def _match_pattern(self, pattern, subject, env: Environment) -> bool:
+    def _match_pattern(
+        self, pattern, subject, env: Environment, force_bind: bool = False
+    ) -> bool:
         """匹配模式与主体"""
         from ...ast_nodes import (
             DictPattern,
@@ -907,6 +918,11 @@ class StatementExecutor(LogicExecutor):
             if isinstance(pattern, Identifier) and pattern.name == "_":
                 return True  # 通配符匹配任何值
             elif isinstance(pattern, Identifier):
+                # 已定义的标识符 → 值分派：比较主体与该变量的值；
+                # 未定义的标识符 → 绑定模式：把主体绑定到该名字（保留既有语义）；
+                # 带守卫时强制绑定，使守卫能引用刚绑定的变量。
+                if not force_bind and env.has(pattern.name):
+                    return self.eval_expression(pattern, env) == subject
                 env.define(pattern.name, subject)
                 return True
             else:
