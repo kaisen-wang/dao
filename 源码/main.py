@@ -3,13 +3,17 @@
 道（Dao）编程语言 - 主入口
 =========================
 
-提供两种运行模式：
+提供三种运行模式：
 1. REPL模式：交互式命令行（无参数启动）
 2. 文件模式：执行 .道 文件（传入文件路径）
+3. 项目模式：读取项目根目录的 道.配置，按「入口」字段运行项目
 
 使用方法：
-    python main.py                  # 启动 REPL
-    python main.py 你好世界.道      # 执行文件
+    python main.py                      # 启动 REPL
+    python main.py 你好世界.道          # 执行文件
+    python main.py run                  # 运行当前项目（读取 道.配置）
+    python main.py 运行                 # 同上（中文命令）
+    python main.py run 路径/到/项目     # 运行指定目录下的项目
 """
 
 import argparse
@@ -82,6 +86,95 @@ def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False,
     except KeyboardInterrupt:
         print("\n程序被中断")
         sys.exit(130)
+
+
+# ---------------------------------------------------------------------------
+# 项目模式：dao run / 道 运行
+# ---------------------------------------------------------------------------
+
+CONFIG_FILENAME = "道.配置"
+RUN_COMMANDS = ("run", "运行")
+
+
+def resolve_entry_path(project_dir: str, entry: str) -> str:
+    """把 ``道.配置`` 的「入口」字段解析为实际文件路径。
+
+    兼容四种写法：
+
+    * ``接入层/入口.道`` —— 带目录的相对路径，原样使用
+    * ``入口.道``        —— 当前目录下的文件名
+    * ``接入层.入口``    —— 点分模块路径，转成 ``接入层/入口.道``
+    * ``入口``           —— 模块名，转成 ``入口.道``
+
+    :param project_dir: 项目根目录（绝对路径）
+    :param entry: 配置文件中的「入口」值
+    :return: 入口文件的绝对路径
+    :raises ValueError: 入口为空或无法解析
+    """
+    entry = entry.strip()
+    if not entry:
+        raise ValueError("配置项「入口」为空")
+
+    if os.path.isabs(entry) or "/" in entry or "\\" in entry:
+        rel_path = entry
+    else:
+        parts = entry.split(".")
+        if parts[-1] == "道":
+            # 入口.道 / 接入层.入口.道 —— 末段是扩展名，不是模块名
+            parts = parts[:-1]
+        rel_path = os.path.join(*parts) if parts else ""
+        if not rel_path:
+            raise ValueError(f"无效的入口配置：{entry}")
+
+    if not rel_path.endswith(".道"):
+        rel_path += ".道"
+
+    return os.path.normpath(os.path.join(project_dir, rel_path))
+
+
+def run_project(project_path: str | None = None, mode: str = "interpreter",
+                type_check: bool = False, disasm: bool = False, jit: bool = False):
+    """读取 ``道.配置`` 并运行项目入口。
+
+    :param project_path: 项目目录，默认当前工作目录
+    :raises SystemExit: 配置缺失、入口缺失或入口文件不存在时退出并报错
+    """
+    from dao.package.config import PackageConfig
+
+    project_dir = os.path.abspath(project_path or os.getcwd())
+    if not os.path.isdir(project_dir):
+        print(f"错误：项目目录不存在：{project_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    config_path = os.path.join(project_dir, CONFIG_FILENAME)
+    if not os.path.isfile(config_path):
+        print(f"错误：项目目录下找不到 {CONFIG_FILENAME}：{project_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        config = PackageConfig.from_file(config_path)
+    except (OSError, UnicodeError, ValueError) as e:
+        print(f"错误：无法读取 {CONFIG_FILENAME}：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    entry = (config.entry or "").strip()
+    if not entry:
+        print(f"错误：{CONFIG_FILENAME} 中未配置「入口」", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        entry_path = resolve_entry_path(project_dir, entry)
+    except ValueError as e:
+        print(f"错误：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not os.path.isfile(entry_path):
+        print(f"错误：入口文件不存在：{entry_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # 模块导入基于 cwd 解析，切到项目根目录后再执行入口
+    os.chdir(project_dir)
+    run_file(entry_path, mode=mode, type_check=type_check, disasm=disasm, jit=jit)
 
 
 def _handle_macro_debug_command(line: str, interpreter: Interpreter):
@@ -399,23 +492,52 @@ def run_repl():
             break
 
 
-def main():
-    """主函数"""
-    arg_parser = argparse.ArgumentParser(description="道（Dao）编程语言")
-    arg_parser.add_argument("-V", "--version", action="version", version=version_text(),
-                            help="显示版本号信息并退出")
-    arg_parser.add_argument("file", nargs="?", help="要执行的 .道 文件")
+def _add_execution_args(arg_parser: argparse.ArgumentParser):
+    """给解析器添加通用的执行选项。"""
     arg_parser.add_argument("--mode", choices=["interpreter", "vm"], default="interpreter",
                             help="执行模式：interpreter（默认）或 vm")
     arg_parser.add_argument("--type-check", action="store_true", help="启用类型推断检查")
     arg_parser.add_argument("--disasm", action="store_true", help="输出字节码反汇编结果（仅 VM 模式）")
     arg_parser.add_argument("--jit", action="store_true", help="启用 JIT 编译（仅 VM 模式）")
-    args = arg_parser.parse_args()
+
+
+def _main_run(argv: list[str], command: str = "run"):
+    """解析 ``run`` / ``运行`` 子命令的参数。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="读取项目根目录的 道.配置，按「入口」字段运行项目",
+    )
+    arg_parser.add_argument("path", nargs="?", default=".",
+                            help="项目目录（默认当前目录）")
+    _add_execution_args(arg_parser)
+    args = arg_parser.parse_args(argv)
+
+    run_project(args.path, mode=args.mode, type_check=args.type_check,
+                disasm=args.disasm, jit=args.jit)
+
+
+def _main_default(argv: list[str]):
+    """原有的 REPL / 单文件执行模式。"""
+    arg_parser = argparse.ArgumentParser(description="道（Dao）编程语言")
+    arg_parser.add_argument("-V", "--version", action="version", version=version_text(),
+                            help="显示版本号信息并退出")
+    arg_parser.add_argument("file", nargs="?", help="要执行的 .道 文件")
+    _add_execution_args(arg_parser)
+    args = arg_parser.parse_args(argv)
 
     if args.file:
         run_file(args.file, mode=args.mode, type_check=args.type_check, disasm=args.disasm, jit=args.jit)
     else:
         run_repl()
+
+
+def main():
+    """主函数"""
+    argv = sys.argv[1:]
+    if argv and argv[0] in RUN_COMMANDS:
+        _main_run(argv[1:], argv[0])
+    else:
+        _main_default(argv)
 
 
 if __name__ == "__main__":

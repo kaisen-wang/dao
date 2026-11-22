@@ -33,6 +33,11 @@ python main.py examples/你好世界.道
 # 使用字节码虚拟机模式执行
 python main.py --mode vm examples/你好世界.道
 
+# 项目模式：进入项目根目录后，按 道.配置 的「入口」运行项目
+cd ../示例/更夫
+python ../源码/main.py run        # 中文命令：python ../源码/main.py 运行
+cd ../源码
+
 # 运行测试
 pytest tests/ -v
 ```
@@ -51,6 +56,7 @@ bash 源码/打包原生版.sh
 dist/nuitka/dao --version                    # 显示版本号（等价于 -V）
 dist/nuitka/dao --help
 dist/nuitka/dao 源码/examples/你好世界.道   # 执行文件
+dist/nuitka/dao run                          # 在项目根目录按 道.配置 运行项目（中文：dao 运行）
 dist/nuitka/dao                              # 启动 REPL
 
 # 安装到 PATH（可选）
@@ -173,7 +179,7 @@ sudo bash 源码/安装原生版.sh --system  # 装到 /usr/local/bin/dao
 ├── .workflow/              ← Gitee Go：Linux .deb 构建 + Release
 │   └── build-installers.yml
 ├── dist/                   ← 打包输出（.gitignore 忽略，不入库）
-│   ├── dao-language-1.0.2.vsix  ← VS Code 插件
+│   ├── dao-language-1.1.0.vsix  ← VS Code 插件
 │   ├── nuitka/dao          ← Nuitka 原生可执行文件（~47MB，需现场构建）
 │   └── installers/         ← 系统级安装包（.deb/.pkg/setup.exe）
 └── 源码/                   ← 解释器源代码（Python 3.10+）
@@ -184,7 +190,7 @@ sudo bash 源码/安装原生版.sh --system  # 装到 /usr/local/bin/dao
     ├── requirements.txt    ← Python 依赖
     ├── dao/                ← 核心解释器包
     │   ├── __init__.py        ← 包初始化（重导出版本号）
-    │   ├── version.py         ← 版本号单一来源（1.0.2）
+    │   ├── version.py         ← 版本号单一来源（1.1.0）
     │   ├── tokens.py          ← 词元类型定义（32个关键字）
     │   ├── ast_nodes.py       ← AST 节点定义（30+节点类型）
     │   ├── environment.py     ← 词法作用域管理
