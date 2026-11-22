@@ -172,12 +172,18 @@ class DaoHttpServer:
                     if isinstance(result, dict):
                         status_code = result.get("状态码", 200)
                         content = result.get("内容", "")
+                        # 处理函数可用「内容类型」显式声明响应类型（兼容英文键 Content-Type）。
+                        # 默认仍为 application/json，保持既有行为不变。
+                        content_type = result.get(
+                            "内容类型",
+                            result.get("Content-Type", "application/json; charset=utf-8"),
+                        )
                         if isinstance(content, str):
                             body_out = content.encode("utf-8")
                         else:
                             body_out = json.dumps(content, ensure_ascii=False).encode("utf-8")
                         self.send_response(status_code)
-                        self.send_header("Content-Type", "application/json; charset=utf-8")
+                        self.send_header("Content-Type", content_type)
                         self.end_headers()
                         self.wfile.write(body_out)
                     else:

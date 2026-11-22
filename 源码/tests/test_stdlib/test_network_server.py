@@ -314,3 +314,53 @@ def test_道函数处理函数在无解释器时返回500():
         assert "未绑定解释器" in 响应体
     finally:
         _关闭(server, thread)
+
+
+def test_响应字典可显式指定内容类型():
+    """HTML 页面声明「内容类型」后不被默认的 application/json 头误标。"""
+    server = DaoHttpServer()
+    server.路由(
+        "GET",
+        "/page",
+        lambda req: {
+            "状态码": 200,
+            "内容": "<!DOCTYPE html><html><body>看板</body></html>",
+            "内容类型": "text/html; charset=utf-8",
+        },
+    )
+    server.路由("GET", "/data", lambda req: {"状态码": 200, "内容": {"ok": True}})
+    thread = _启动(server)
+    try:
+        状态码, 响应体, 响应头 = _请求(server.端口, "/page")
+        assert 状态码 == 200
+        assert 响应头["Content-Type"] == "text/html; charset=utf-8"
+        assert "<!DOCTYPE html>" in 响应体
+        # 未声明时保持既有默认行为，避免破坏既有 API 与测试。
+        状态码, 响应体, 响应头 = _请求(server.端口, "/data")
+        assert 状态码 == 200
+        assert 响应头["Content-Type"] == "application/json; charset=utf-8"
+        assert json.loads(响应体) == {"ok": True}
+    finally:
+        _关闭(server, thread)
+
+
+def test_响应字典兼容英文Content_Type键():
+    """同时接受英文键 Content-Type，方便已有代码迁移。"""
+    server = DaoHttpServer()
+    server.路由(
+        "GET",
+        "/en",
+        lambda req: {
+            "状态码": 200,
+            "内容": "hi",
+            "Content-Type": "text/plain; charset=utf-8",
+        },
+    )
+    thread = _启动(server)
+    try:
+        状态码, 响应体, 响应头 = _请求(server.端口, "/en")
+        assert 状态码 == 200
+        assert 响应体 == "hi"
+        assert 响应头["Content-Type"] == "text/plain; charset=utf-8"
+    finally:
+        _关闭(server, thread)
