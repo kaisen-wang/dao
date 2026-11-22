@@ -38,7 +38,16 @@ from dao.stdlib.llm import (
 )
 from dao.stdlib.loader import StdlibLoader
 
-导出名集合 = {"消息", "创建客户端", "对话", "流式对话", "列出模型"}
+导出名集合 = {
+    "消息",
+    "创建客户端",
+    "对话",
+    "流式对话",
+    "列出模型",
+    "工具定义",
+    "工具结果",
+    "工具对话",
+}
 
 
 class 假Provider(Provider):
@@ -92,7 +101,7 @@ class 假解释器:
 
 
 class Test模块环境:
-    def test_五个导出函数存在且参数个数正确(self):
+    def test_八个导出函数存在且参数个数正确(self):
         env = create_module_env()
         assert set(env.exports) == 导出名集合
         assert set(env.values) == 导出名集合
@@ -101,6 +110,9 @@ class Test模块环境:
         assert env.values["对话"].param_count == 3
         assert env.values["流式对话"].param_count == 4
         assert env.values["列出模型"].param_count == 1
+        assert env.values["工具定义"].param_count == -1
+        assert env.values["工具结果"].param_count == 2
+        assert env.values["工具对话"].param_count == 5
 
     def test_工厂重复调用元数据稳定(self):
         env1 = create_module_env()

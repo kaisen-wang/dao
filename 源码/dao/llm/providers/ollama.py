@@ -56,6 +56,23 @@ def _含统计字段(data: dict[str, Any]) -> bool:
     )
 
 
+def _解析工具参数(原始参数: Any) -> dict[str, Any]:
+    """把 tool call 的 arguments 归一为字典。
+
+    后端可能直接给出 dict，也可能给出 JSON 字符串；字符串解码失败或解码结果
+    不是对象时按空字典处理。原始内容始终保留在响应 ``raw`` 中（即后端原样响应）。
+    """
+    if isinstance(原始参数, dict):
+        return 原始参数
+    if isinstance(原始参数, str):
+        try:
+            解码 = json.loads(原始参数)
+        except (ValueError, TypeError):
+            return {}
+        return 解码 if isinstance(解码, dict) else {}
+    return {}
+
+
 @register_provider("ollama")
 class OllamaProvider(Provider):
     """Ollama 后端实现，对接 ``/api/chat`` 与 ``/api/tags``。
@@ -155,6 +172,67 @@ class OllamaProvider(Provider):
             usage=_提取用量(data),
             model=data.get("model") or "",
             finish_reason=data.get("done_reason"),
+            raw=data,
+        )
+
+    def chat_with_tools(self, request: ChatRequest) -> ChatResponse:
+        """工具调用对话：提交 tools 并把后端 tool_calls 归一为统一结构。
+
+        ``request.tools`` 为 OpenAI 风格 tool 字典列表，原样作为 Ollama
+        ``/api/chat`` 的 ``tools`` 字段；无 tools 时直接委托 :meth:`chat`。
+        响应 ``message.tool_calls`` 归一为 ``{"id","name","arguments"}`` 英文键
+        列表：后端无调用编号时按位置生成 ``call_0`` 等；``arguments`` 为 JSON
+        字符串时用 ``json.loads`` 解码，失败按空字典处理（原文仍在 ``raw``）。
+        """
+        if not request.tools:
+            return self.chat(request)
+
+        请求体 = self._请求体(request, False)
+        # 保留 tool 消息的 tool_call_id / tool_calls 等字段，支持多轮工具对话。
+        请求体["messages"] = [m.to_dict() for m in request.messages]
+        请求体["tools"] = request.tools
+
+        response = self._打开响应(self._地址("/api/chat"), 请求体)
+        try:
+            data = json.loads(self._读取文本(response))
+        except json.JSONDecodeError as exc:
+            raise ProviderError(f"Ollama 响应不是合法 JSON：{exc}") from None
+        except urllib.error.URLError as exc:
+            raise ProviderError(f"Ollama 读取响应失败：{exc.reason}") from None
+        except Exception as exc:  # noqa: BLE001 - 兜底转成中文 ProviderError
+            raise ProviderError(f"Ollama 响应异常：{exc}") from None
+        finally:
+            self._关闭(response)
+        if not isinstance(data, dict):
+            raise ProviderError("Ollama 响应格式异常：期望 JSON 对象")
+        if data.get("error"):
+            raise ProviderError(f"Ollama 返回错误：{data['error']}")
+
+        消息 = data.get("message") or {}
+        if not isinstance(消息, dict):
+            消息 = {}
+        工具调用: list[dict[str, Any]] = []
+        for 序号, 调用 in enumerate(消息.get("tool_calls") or []):
+            if not isinstance(调用, dict):
+                continue
+            函数 = 调用.get("function")
+            if not isinstance(函数, dict):
+                函数 = {}
+            编号 = 调用.get("id") or f"call_{序号}"
+            工具调用.append(
+                {
+                    "id": str(编号),
+                    "name": str(函数.get("name") or ""),
+                    "arguments": _解析工具参数(函数.get("arguments")),
+                }
+            )
+        return ChatResponse(
+            content=消息.get("content") or "",
+            thinking=消息.get("thinking"),
+            usage=_提取用量(data),
+            model=data.get("model") or "",
+            finish_reason=data.get("done_reason"),
+            tool_calls=工具调用 or None,
             raw=data,
         )
 

@@ -91,6 +91,43 @@ def assistant(content: str) -> ChatMessage:
 
 
 @dataclass
+class ToolDefinition:
+    """一个可调用工具的定义（与具体 Provider 无关）。
+
+    ``parameters`` 使用英文键的 JSON Schema（type / properties / required）；
+    ``to_dict`` 输出 OpenAI 风格的 function tool 字典，供 ``ChatRequest.tools`` 使用。
+    """
+
+    name: str
+    description: str = ""
+    parameters: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为 OpenAI 风格 tool 字典。"""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
+
+@dataclass
+class ToolCall:
+    """模型请求调用一次工具，参数已解析为字典。"""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """转成中文键字典，供道语言桥接层直接消费。"""
+        return {"编号": self.id, "名称": self.name, "参数": self.arguments}
+
+
+@dataclass
 class Usage:
     """一次调用的 token 用量；``extra`` 承载后端特有指标。"""
 
@@ -155,6 +192,14 @@ class ChatResponse:
             "完成原因": self.finish_reason or "",
             "用量": self.usage.to_dict(),
             "成功": True,
+            "工具调用": [
+                {
+                    "编号": 调用.get("id", ""),
+                    "名称": 调用.get("name", ""),
+                    "参数": 调用.get("arguments", {}),
+                }
+                for 调用 in (self.tool_calls or [])
+            ],
             "原始": self.raw,
         }
 

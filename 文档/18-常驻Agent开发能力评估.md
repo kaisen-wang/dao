@@ -3,6 +3,8 @@
 > 更新：2026-11-22。对照 `任务/常驻研发协作 Agent.md`（PRD v0.1，代号「更夫 Nightwatch」），盘点道语言现有运行时与标准库能力，给出缺口清单、补齐顺序与架构取舍。
 >
 > **结论**：语言本身不是瓶颈。HTTP 服务端/客户端、异步子进程、文件 IO、JSON、正则、环境变量、日志、协程并发均已具备，写端到端原型没有障碍。原阻塞 v1.0 的 **SQLite 持久化、HMAC/哈希/UUID、定时调度、HTTP 服务端并发** 四项已于 2026-11-21 全部补齐（见 18.9）；剩余缺口集中在 GitHub/LLM 协议封装、Web 面板与工程脚手架，属业务工程而非语言能力。
+>
+> **第三轮进展（2026-11-22）**：LLM 工具调用协议层已落地——统一 `ToolDefinition`／`ToolCall` 类型、三个 Provider 的 `chat_with_tools`、三个中文桥接函数，以及更夫 Worker 的工具驱动执行，详见 §18.11。本文 §18.4／§18.5／§18.6／§18.9／§18.10 中关于「LLM 工具调用缺失／未做」的表述均为**当时的状态快照**，保留原文作为历史记录；最新状态以 §18.11 为准。
 
 ## 18.1 评估范围与方法
 
@@ -67,7 +69,7 @@ FR-01 轮询兜底 60s、FR-16 Watchdog 30 分钟内发现停滞、FR-12 日预�
 | 缺口 | 说明 | 性质 |
 |---|---|---|
 | GitHub API 封装 | 分页、条件请求、速率限制仍需用 `网络.请求` + `编码.JSON` 手写；**webhook 验签原语已具备**（`密码.验证HMAC`），只差封装为 GitHub 事件适配器 | 业务工程 |
-| LLM 工具调用协议 | 现有示例仅朴素 `/api/chat`；Worker 需要 Function Calling / Tool Use 的结构化往返与六类报告协议 | 业务工程 |
+| LLM 工具调用协议 | 现有示例仅朴素 `/api/chat`；Worker 需要 Function Calling / Tool Use 的结构化往返与六类报告协议（第三轮已补齐协议层，见 §18.11） | 业务工程 |
 | Web 面板渲染 | 无模板引擎、无静态文件服务，HTML 需手写或再补模块 | 业务工程 |
 | 进程守护与崩溃恢复 | 解释器本身不是 daemon，7×24 与 `kill -9` 恢复需外层 systemd/supervisor，道语言只写恢复逻辑 | 部署工程 |
 | 压测与混沌脚手架 | §12 的 300 消息合成负载、kill -9 / 断网 / 重复投递 ×10 无现成 harness | 测试工程 |
@@ -80,7 +82,7 @@ FR-01 轮询兜底 60s、FR-16 Watchdog 30 分钟内发现停滞、FR-12 日预�
 |---|---|---|
 | FR-01 事件接入 | 部分→基本具备 | HTTP 并发服务端 + 通配路由 + 验签原语（`密码.验证HMAC`）+ 去重键（`UUID`/`随机令牌`）均已有；只差 GitHub 适配器封装 |
 | FR-02 准入矩阵 | 有 | 条件/字典/正则齐备 |
-| FR-03 语义评估 Eval | 部分 | JSON 与 HTTP 有；工具调用协议缺 |
+| FR-03 语义评估 Eval | 部分→基本具备 | JSON 与 HTTP 有；工具调用协议第三轮已补齐（见 §18.11） |
 | FR-04 三级执行模式 | 有 | 条件与状态表达齐备 |
 | FR-05 不可变授权 | 有 | 冻结集合 + `数据库` 落库均具备 |
 | FR-06 Thread⇄Ticket 订阅 | 有 | 字典/集合数据结构齐备 |
@@ -103,7 +105,7 @@ FR-01 轮询兜底 60s、FR-16 Watchdog 30 分钟内发现停滞、FR-12 日预�
 |---|---|---|---|
 | v0.1 前 | `db.py`（SQLite WAL）+ `crypto.py`（哈希/HMAC/UUID）+ 服务端并发化 | **已完成**（2026-11-21，见 18.9） | 三项 100～200 行 Python 薄封装 |
 | v0.2 前 | 定时调度器 + GitHub webhook 验签封装 | 调度器**已完成**；验签原语已具备（`密码.验证HMAC`），待封装为 GitHub 适配器 | 中 |
-| v1.0 前 | LLM 工具调用协议层 + Web 面板 + 守护/压测脚手架 | 未开始 | 大，属业务工程而非语言能力 |
+| v1.0 前 | LLM 工具调用协议层 + Web 面板 + 守护/压测脚手架 | 部分完成：工具调用层第三轮已落地（见 §18.11）；Web 面板与守护/压测仍未开始 | 大，属业务工程而非语言能力 |
 
 ## 18.7 架构取舍
 
@@ -153,7 +155,7 @@ v0.1 前的语言层缺口已全部补齐。采用四个子代理并行开发、
 **下一轮待做**（对应 18.6 的 v0.2/v1.0）：
 
 1. GitHub webhook 事件适配器——验签原语（`密码.验证HMAC`）与并发服务端已具备，只差把 payload 归一化为 Trigger 的封装；
-2. LLM 工具调用协议层（Function Calling / Tool Use + 六类报告）；
+2. LLM 工具调用协议层（Function Calling / Tool Use + 六类报告）——**第三轮已落地**（统一类型 + `chat_with_tools` + 中文桥接 + 工具驱动执行，见 §18.11）；
 3. Web 面板模板/静态服务与进程守护、压测/混沌脚手架。
 
 以上均属业务工程，不需要再改语言层。
@@ -174,4 +176,25 @@ v0.1 前的语言层缺口已全部补齐。采用四个子代理并行开发、
 
 **验收（主代理独立实测）**：全量 `cd 源码 && ./.venv/bin/python -m pytest tests/ -q` → **1552 passed / 2 skipped**（较此前工作区基线 1508 增加 44；18.9 的 1490 之后另有两轮共 +18）；新增与修改文件 ruff 全通过；本地 `ollama serve` + gemma4:e4b 上端到端跑通示例（非流式问答 + 653 块流式输出 + 模型列表）。设计细节见文档 19。
 
-**未做**：GitHub 事件适配器、Web 面板、工具调用协议（Function Calling / Tool Use）、成本熔断——仍属 18.9 的下一轮待做；本层只补齐 LLM 调用底座，Eval/Worker/Watchdog 可直接复用。
+**未做**（截至第二轮，保留原文作为历史快照）：GitHub 事件适配器、Web 面板、工具调用协议（Function Calling / Tool Use）、成本熔断——属 18.9 的下一轮待做；本层只补齐 LLM 调用底座，Eval/Worker/Watchdog 可直接复用。
+
+> 第三轮更新：其中**工具调用协议已落地**（见 §18.11）；其余三项仍未做。
+
+## 18.11 工具调用协议层落地（2026-11-22，并行开发第三轮）
+
+按共享契约《示例/更夫/迭代规约-工具调用.md》补全第二轮预留的 `chat_with_tools` 扩展点，把 LLM 从「生成一句文本」升级为「调用工具干活」，范围仍限非 GitHub 部分。沿用四子代理并行、主代理独占共享契约与集成的分工。
+
+| 交付 | 文件 | 成果 |
+|---|---|---|
+| 接口契约（主代理） | `dao/llm/types.py` / `base.py` | 新增统一类型 `ToolDefinition`（`to_dict()` 输出 OpenAI 风格 tool 字典）与 `ToolCall`（`to_dict()` 输出中文键 `编号/名称/参数`）；`ChatRequest.tools`、`ChatResponse.tool_calls` 由预留字段启用为真正数据通道，`ChatResponse.to_dict()` 新增 `工具调用` 键（无调用为 `[]`，向后兼容） |
+| Ollama Provider | `dao/llm/providers/ollama.py`、`tests/test_llm_tools_ollama.py` | 实现 `chat_with_tools`：解析 `message.tool_calls`，早期无 `id` 时按位置生成 `call_0` 等，`arguments` 为 JSON 字符串时解码；无 tools 时委托 `chat` |
+| 远程 Provider | `dao/llm/providers/openai.py` / `anthropic.py`、`tests/test_llm_tools_remote.py` | OpenAI 加 `tools` 与 `tool_choice="auto"`，解析 `arguments` JSON；Anthropic 把 tool 定义转成 `input_schema`，归一化 `tool_use` 块；全部 HTTP mock 不打外网 |
+| 道语言桥接（主代理） | `dao/stdlib/llm.py`、`tests/test_llm_tools_core.py` | 新增三个中文函数：`工具定义`（中文键/英文 JSON Schema 参数模式）、`工具对话`（InterpreterBuiltin，固定 5 参，自动多轮 + 回调执行 + tool 消息回填）、`工具结果`（手动构造 tool 消息）；失败一律返回 `{"成功":假,"错误":...}` |
+| 更夫集成 | `基础设施层/语言模型.道`、`应用层/执行.道`、`接入层/入口.道`、`测试/测试LLM接入.道` | 新增 `.支持工具()`／`.工具对话()`；`执行工单` 增加可选 `工具列表`／`工具回调`，成功时末报告附工具调用记录与用量，失败退回模板；入口新增「工具驱动执行」演示；测试扩至 16+ 用例 |
+| 文档与示例 | `文档/19-大模型接口层.md`（§19.10）、`文档/标准库API/大模型.md`、`示例/AI对话/工具调用示例.道`、`示例/更夫/使用说明.md`／`架构说明.md` | 协议契约、逐函数 API、独立示例与工具驱动执行说明 |
+
+**统一 tool_calls 结构**：Provider 层为英文键 `[{"id","name","arguments"}]`，道语言层为中文键 `[{"编号","名称","参数"}]`（`ChatResponse.to_dict()` 的 `工具调用` 字段）；请求侧 tool 定义为 OpenAI 风格 `{"type":"function","function":{...}}`。数据流为「道语言 → stdlib → Provider.chat_with_tools → 后端 → 归一化 → 回调执行 → tool 消息回填 → 下一轮」。
+
+**降级与上限**：后端不支持（`UnsupportedError`）或调用失败时返回失败字典而非抛异常；工具回调自身异常转成结果文本；`最大轮次` 默认 5 且须为正整数，达上限仍无答复时返回失败字典并保留已积累记录，防止死循环。**LLM 仍是增强项而非依赖**，工具失败时业务退回模板／规则路径，演示不中断。
+
+**当前剩余缺口**（承接 18.9／18.10）：GitHub 事件适配器、Web 面板、成本熔断、进程守护与压测/混沌脚手架；本轮不涉及。

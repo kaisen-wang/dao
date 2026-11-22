@@ -25,6 +25,19 @@ from ..types import (
 )
 
 
+def _解析工具参数(arguments: Any) -> dict[str, Any]:
+    """把工具调用参数归一为字典：字典原样返回，JSON 字符串解码，失败回退空字典。"""
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str) and arguments.strip():
+        try:
+            结果 = json.loads(arguments)
+        except (ValueError, TypeError):
+            return {}
+        return 结果 if isinstance(结果, dict) else {}
+    return {}
+
+
 @register_provider("openai")
 class OpenAIProvider(Provider):
     """OpenAI 兼容 API 的 Provider 实现。"""
@@ -51,8 +64,28 @@ class OpenAIProvider(Provider):
 
     @staticmethod
     def _消息列表(request: ChatRequest) -> list[dict[str, Any]]:
-        """把统一消息转换为 OpenAI 的 ``{role, content}`` 结构。"""
-        return [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        """把统一消息转换为 OpenAI 结构，保留工具调用的多轮上下文。"""
+        结果: list[dict[str, Any]] = []
+        for msg in request.messages:
+            项: dict[str, Any] = {"role": msg.role, "content": msg.content}
+            if msg.tool_calls:
+                项["tool_calls"] = [
+                    {
+                        "id": 调用.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": 调用.get("name", ""),
+                            "arguments": json.dumps(
+                                调用.get("arguments", {}), ensure_ascii=False
+                            ),
+                        },
+                    }
+                    for 调用 in msg.tool_calls
+                ]
+            if msg.tool_call_id is not None:
+                项["tool_call_id"] = msg.tool_call_id
+            结果.append(项)
+        return 结果
 
     def _打开(self, req: urllib.request.Request) -> Any:
         """发起请求，并把 urllib 异常统一转成中文 ProviderError。"""
@@ -87,6 +120,43 @@ class OpenAIProvider(Provider):
             raw=raw,
         )
 
+    @staticmethod
+    def _解析工具响应(raw: dict[str, Any], request: ChatRequest) -> ChatResponse:
+        """把含 tool_calls 的 OpenAI 响应归一为统一 ChatResponse。"""
+        choices = raw.get("choices") or []
+        first = choices[0] if choices else {}
+        message = first.get("message") or {}
+        usage_raw = raw.get("usage") or {}
+        usage = Usage(
+            prompt_tokens=int(usage_raw.get("prompt_tokens") or 0),
+            completion_tokens=int(usage_raw.get("completion_tokens") or 0),
+            total_tokens=int(usage_raw.get("total_tokens") or 0),
+        )
+        tool_calls: list[dict[str, Any]] = []
+        调用列表 = message.get("tool_calls") or []
+        for 序号, 调用 in enumerate(调用列表):
+            if not isinstance(调用, dict):
+                continue
+            函数 = 调用.get("function") or {}
+            if not isinstance(函数, dict):
+                函数 = {}
+            tool_calls.append(
+                {
+                    "id": str(调用.get("id") or f"call_{序号}"),
+                    "name": str(函数.get("name") or ""),
+                    "arguments": _解析工具参数(函数.get("arguments")),
+                }
+            )
+        return ChatResponse(
+            content=str(message.get("content") or ""),
+            model=str(raw.get("model") or request.model or ""),
+            role=str(message.get("role") or "assistant"),
+            finish_reason=first.get("finish_reason"),
+            tool_calls=tool_calls,
+            usage=usage,
+            raw=raw,
+        )
+
     def chat(self, request: ChatRequest) -> ChatResponse:
         """同步对话：POST /chat/completions 并解析完整响应。"""
         body: dict[str, Any] = {
@@ -106,6 +176,33 @@ class OpenAIProvider(Provider):
         with self._打开(req) as response:
             raw = json.loads(response.read().decode("utf-8"))
         return self._解析响应(raw, request)
+
+    def chat_with_tools(self, request: ChatRequest) -> ChatResponse:
+        """工具调用对话：携带 tools 与 tool_choice，归一化响应中的 tool_calls。
+
+        无 tools 时与 ``chat`` 行为一致（直接委托），保证向后兼容。
+        """
+        if not request.tools:
+            return self.chat(request)
+        body: dict[str, Any] = {
+            "model": request.model or self.model,
+            "messages": self._消息列表(request),
+            "stream": False,
+            "tools": request.tools,
+            "tool_choice": "auto",
+        }
+        if request.temperature is not None:
+            body["temperature"] = request.temperature
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=data,
+            headers=self._请求头(),
+            method="POST",
+        )
+        with self._打开(req) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+        return self._解析工具响应(raw, request)
 
     @staticmethod
     def _响应行(response: Any) -> Iterator[str]:

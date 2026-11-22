@@ -25,6 +25,19 @@ from ..types import (
 )
 
 
+def _解析工具参数(arguments: Any) -> dict[str, Any]:
+    """把工具调用参数归一为字典：字典原样返回，JSON 字符串解码，失败回退空字典。"""
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str) and arguments.strip():
+        try:
+            结果 = json.loads(arguments)
+        except (ValueError, TypeError):
+            return {}
+        return 结果 if isinstance(结果, dict) else {}
+    return {}
+
+
 @register_provider("anthropic")
 class AnthropicProvider(Provider):
     """Anthropic Messages API 的 Provider 实现。"""
@@ -52,14 +65,48 @@ class AnthropicProvider(Provider):
 
     @staticmethod
     def _拆分消息(request: ChatRequest) -> tuple[list[str], list[dict[str, Any]]]:
-        """把 system 消息抽到顶层文本列表，其余保留为对话消息。"""
+        """把 system 抽到顶层，并把工具上下文转成 Anthropic 的 content 块。
+
+        assistant 的 tool_calls 转成 ``tool_use`` 块；role=tool 的消息转成
+        user 消息中的 ``tool_result`` 块，以满足多轮工具对话的协议要求。
+        """
         system_parts: list[str] = []
         messages: list[dict[str, Any]] = []
         for msg in request.messages:
             if msg.role == "system":
                 system_parts.append(msg.content)
-            else:
+                continue
+            if msg.role == "tool":
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": msg.tool_call_id or "",
+                                "content": msg.content,
+                            }
+                        ],
+                    }
+                )
+                continue
+            if not msg.tool_calls:
+                # 普通消息保持字符串格式，与既有请求体兼容。
                 messages.append({"role": msg.role, "content": msg.content})
+                continue
+            内容: list[dict[str, Any]] = []
+            if msg.content:
+                内容.append({"type": "text", "text": msg.content})
+            for 调用 in msg.tool_calls:
+                内容.append(
+                    {
+                        "type": "tool_use",
+                        "id": 调用.get("id", ""),
+                        "name": 调用.get("name", ""),
+                        "input": 调用.get("arguments", {}),
+                    }
+                )
+            messages.append({"role": msg.role, "content": 内容})
         return system_parts, messages
 
     def _打开(self, req: urllib.request.Request) -> Any:
@@ -96,6 +143,66 @@ class AnthropicProvider(Provider):
             raw=raw,
         )
 
+    @staticmethod
+    def _转工具定义(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """把 OpenAI 风格 tool 字典转成 Anthropic 的 name/input_schema 定义。"""
+        结果: list[dict[str, Any]] = []
+        for 工具 in tools:
+            if not isinstance(工具, dict):
+                continue
+            函数 = 工具.get("function") or {}
+            if not isinstance(函数, dict):
+                continue
+            名称 = str(函数.get("name") or "")
+            if not 名称:
+                continue
+            结果.append(
+                {
+                    "name": 名称,
+                    "description": str(函数.get("description") or ""),
+                    "input_schema": 函数.get("parameters") or {},
+                }
+            )
+        return 结果
+
+    @staticmethod
+    def _解析工具响应(raw: dict[str, Any], request: ChatRequest) -> ChatResponse:
+        """把含 tool_use 内容块的 Anthropic 响应归一为统一 ChatResponse。"""
+        blocks = raw.get("content") or []
+        文本片段: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        for 块 in blocks:
+            if not isinstance(块, dict):
+                continue
+            类型 = 块.get("type")
+            if 类型 == "tool_use":
+                tool_calls.append(
+                    {
+                        "id": str(块.get("id") or f"call_{len(tool_calls)}"),
+                        "name": str(块.get("name") or ""),
+                        "arguments": _解析工具参数(块.get("input")),
+                    }
+                )
+            elif 类型 == "text":
+                文本片段.append(str(块.get("text") or ""))
+        usage_raw = raw.get("usage") or {}
+        prompt_tokens = int(usage_raw.get("input_tokens") or 0)
+        completion_tokens = int(usage_raw.get("output_tokens") or 0)
+        usage = Usage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        )
+        return ChatResponse(
+            content="".join(文本片段),
+            model=str(raw.get("model") or request.model or ""),
+            role="assistant",
+            finish_reason=raw.get("stop_reason"),
+            tool_calls=tool_calls,
+            usage=usage,
+            raw=raw,
+        )
+
     def chat(self, request: ChatRequest) -> ChatResponse:
         """同步对话：POST /messages 并解析完整响应。"""
         system_parts, messages = self._拆分消息(request)
@@ -117,6 +224,34 @@ class AnthropicProvider(Provider):
         with self._打开(req) as response:
             raw = json.loads(response.read().decode("utf-8"))
         return self._解析响应(raw, request)
+
+    def chat_with_tools(self, request: ChatRequest) -> ChatResponse:
+        """工具调用对话：把 tools 转成 Anthropic 风格并归一化 tool_use 响应。
+
+        无 tools 时与 ``chat`` 行为一致（直接委托），保证向后兼容。
+        """
+        if not request.tools:
+            return self.chat(request)
+        system_parts, messages = self._拆分消息(request)
+        body: dict[str, Any] = {
+            "model": request.model or self.model,
+            "max_tokens": request.max_tokens or 4096,
+            "messages": messages,
+            "stream": False,
+            "tools": self._转工具定义(request.tools),
+        }
+        if system_parts:
+            body["system"] = "\n".join(system_parts)
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/messages",
+            data=data,
+            headers=self._请求头(),
+            method="POST",
+        )
+        with self._打开(req) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+        return self._解析工具响应(raw, request)
 
     @staticmethod
     def _响应行(response: Any) -> Iterator[str]:

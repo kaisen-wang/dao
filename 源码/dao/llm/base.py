@@ -40,5 +40,12 @@ class Provider(ABC):
         """列出当前后端可用的模型名。"""
 
     def chat_with_tools(self, request: ChatRequest) -> ChatResponse:
-        """工具调用（预留扩展点）；默认不支持。"""
+        """工具调用（Function Calling / Tool Use）扩展点。
+
+        默认不支持，抛 ``UnsupportedError``。子类实现时必须把后端返回的
+        tool_calls 归一化为 ``{"id", "name", "arguments"}`` 英文键列表并填入
+        ``ChatResponse.tool_calls``；``arguments`` 须为已解析的字典，后端无调用
+        编号时按位置生成（如 ``call_0``）。无 tools 的请求应与 ``chat`` 行为一致
+        （可内部委托给 ``chat``）。
+        """
         raise UnsupportedError(f"Provider {self.name} 不支持工具调用")
