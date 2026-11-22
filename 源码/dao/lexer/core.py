@@ -24,19 +24,7 @@ _EXPR_END_TYPES = frozenset({
     TokenType.模板文本,
 })
 
-# 「值型」token：本身即为一个值。其后的标识符更可能是整除右操作数，
-# 而右括号/右方括号/右花括号之后的标识符则更可能是行尾注释文字。
-_VALUE_LIKE_TYPES = frozenset({
-    TokenType.数值,
-    TokenType.标识符,
-    TokenType.真,
-    TokenType.假,
-    TokenType.空,
-    TokenType.文本,
-    TokenType.模板文本,
-})
-
-# // 之后出现这些标点时，可确定右侧是显式操作数
+# // 之后出现这些标点时，可确定右侧是显式数值操作数
 _OPERAND_START_PUNCT = frozenset({'(', '（', '[', '-', '+'})
 
 
@@ -146,18 +134,47 @@ class Lexer(LexerReaders):
             pos += 1
         return self.source[pos] if pos < length else None
 
+    def _after_identifier_is_comment_text(self) -> bool:
+        """`//` 后读取一个标识符，判断其后的内容是否表明这是注释文字。
+
+        注释常带中文标点（`，。、` 等）或后续独立词；表达式则以后续运算符、
+        西文逗号或行尾结束。仅用于「上一 token 为变量」的歧义场景。
+        """
+        pos = self.pos + 2
+        length = len(self.source)
+        while pos < length and self.source[pos] in (" ", "\t"):
+            pos += 1
+        if pos >= length or not self._is_identifier_start(self.source[pos]):
+            return True
+        while pos < length and self._is_identifier_char(self.source[pos]):
+            pos += 1
+        while pos < length and self.source[pos] in (" ", "\t", "\r"):
+            pos += 1
+        if pos >= length or self.source[pos] == "\n":
+            return False
+        ch = self.source[pos]
+        if ch in "，。、；：！？）】》”’‘“【《":
+            return True
+        if self._is_identifier_start(ch):
+            return True
+        return False
+
     def _is_floor_div_context(self) -> bool:
         """判定当前 `//` 是整除运算符还是行内注释。
 
-        状态机仅依赖两个要素：「上一 token 能否结束表达式」与「`//` 后首个非空白字符」：
+        状态机依赖「上一 token」与「`//` 后的内容」：
 
         1. 上一 token 不能结束表达式（如 `=`、`+`、`(`、行首）→ 注释。
         2. `//` 之后没有内容（行尾）→ 注释。
-        3. 后继首字符是数字或 `(`/`[`/`+`/`-` → 整除（右侧为显式操作数）。
-        4. 后继首字符是标识符起始符：
-           - 上一 token 为「值型」→ 整除，例如 `x // y`、`42 // 余数`；
-           - 上一 token 为右括号类 → 注释，例如 `f() // 说明`。
-        5. 其余情况 → 注释。
+        3. 后继首字符是数字或 `(`/`[`/`+`/`-` → 整除（右侧为显式数值操作数）。
+        4. 后继首字符是标识符：
+           - 上一 token 是变量且该标识符后无注释特征（中文标点/后续词）→ 整除
+             （保留 ``返回 被除数 // 除数, ...`` 这类用法）；
+           - 其余情况 → 注释。
+
+        这样 ``甲 = "a" // 说明``、``定义 x = 5 // 说明，这里是文字`` 等行尾注释
+        都能被正确跳过，而 ``10 // 3``、``被除数 // 除数`` 等整除写法不受影响。
+        若右操作数需为字面量之外的复杂表达式，请改用括号（如 ``x // (y + 1)``）。
 
         注：独占一行的 `//` 已在 tokenize() 的行首处理阶段跳过，不会进入此判定。
         """
@@ -170,7 +187,10 @@ class Lexer(LexerReaders):
         if ch.isdigit() or ch in _OPERAND_START_PUNCT:
             return True
         if self._is_identifier_start(ch):
-            return self.tokens[-1].type in _VALUE_LIKE_TYPES
+            return (
+                self.tokens[-1].type == TokenType.标识符
+                and not self._after_identifier_is_comment_text()
+            )
         return False
 
     # ========================

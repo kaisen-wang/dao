@@ -115,3 +115,47 @@ class TestFloorDivBoundaries:
         types = self._types(source)
         assert TokenType.文档注释 in types
         assert capture_output(source) == "42"
+
+
+class TestTrailingLineComment:
+    """行尾 // 注释：右侧为标识符（含中文文字）时一律按注释处理"""
+
+    @staticmethod
+    def _types(source: str):
+        return [
+            t.type
+            for t in Lexer(source).tokenize()
+            if t.type not in (TokenType.换行, TokenType.文件结束)
+        ]
+
+    def test_comment_after_string_with_chinese_comma(self):
+        """字符串后的行尾注释含中文逗号时不再触发解析错误"""
+        source = '导出 常量 甲 = "a" // 说明，这是注释\n'
+        assert TokenType.整除 not in self._types(source)
+        env = eval_env(source)
+        assert env.get("甲") == "a"
+
+    def test_comment_after_number_with_text(self):
+        """数值后的行尾注释含普通文字时不再被当成整除右操作数"""
+        source = "定义 x = 5 // 说明文字\n"
+        assert TokenType.整除 not in self._types(source)
+        assert eval_env(source).get("x") == 5
+
+    def test_comment_after_identifier_with_text(self):
+        """标识符后的行尾注释也按注释处理"""
+        source = "定义 甲 = 3\n定义 乙 = 甲 // 这是说明，不是操作数\n"
+        assert TokenType.整除 not in self._types(source)
+        assert eval_env(source).get("乙") == 3
+
+    def test_comment_with_punctuation_and_print(self):
+        """行尾注释含顿号、句号等标点时整行仍可正常执行"""
+        output = capture_output('打印("OK") // 输出 OK、没有报错。\n')
+        assert output == "OK"
+
+    def test_variable_over_variable_still_floor_div(self):
+        """变量 // 变量（其后仍接表达式）保持整除语义，不被误判为注释"""
+        source = "函数 f(甲, 乙)\n    返回 甲 // 乙, 甲 % 乙\n"
+        assert TokenType.整除 in self._types(source)
+        env = eval_env(source + "定义 (商, 余) = f(17, 5)\n")
+        assert env.get("商") == 3
+        assert env.get("余") == 2

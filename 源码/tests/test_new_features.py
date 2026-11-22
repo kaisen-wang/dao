@@ -381,6 +381,54 @@ class TestPatternMatching:
         output = capture_output(source)
         assert output.strip() == "匹配到1"
 
+    def test_bare_identifier_cases_dispatch_by_value(self):
+        """已定义的标识符作为情况模式时按值分派，不再总命中第一个分支"""
+        source = (
+            '定义 A = "A"\n'
+            '定义 B = "B"\n'
+            '定义 v = "B"\n'
+            '匹配 v\n'
+            '    情况 A: 打印("命中 A")\n'
+            '    情况 B: 打印("命中 B")\n'
+        )
+        assert capture_output(source).strip() == "命中 B"
+
+    def test_bare_identifier_first_case_not_always_matched(self):
+        """主体等于第一个分支的值时命中第一个，否则命中后续分支"""
+        source = (
+            '定义 A = "A"\n'
+            '定义 B = "B"\n'
+            '定义 v = "A"\n'
+            '匹配 v\n'
+            '    情况 A: 打印("命中 A")\n'
+            '    情况 B: 打印("命中 B")\n'
+        )
+        assert capture_output(source).strip() == "命中 A"
+
+    def test_numeric_constant_dispatch(self):
+        """数值常量同样按值分派"""
+        source = (
+            '定义 一 = 1\n'
+            '定义 二 = 2\n'
+            '定义 v = 2\n'
+            '匹配 v\n'
+            '    情况 一: 打印("one")\n'
+            '    情况 二: 打印("two")\n'
+        )
+        assert capture_output(source).strip() == "two"
+
+    def test_undefined_identifier_still_binds(self):
+        """未定义的标识符仍保留绑定语义（递归/兜底分支）"""
+        source = (
+            '函数 fib(n)\n'
+            '    匹配 n\n'
+            '        情况 0: 返回 0\n'
+            '        情况 1: 返回 1\n'
+            '        情况 其他值: 返回 fib(其他值 - 1) + fib(其他值 - 2)\n'
+            '打印(fib(6))\n'
+        )
+        assert capture_output(source).strip() == "8"
+
 
 class TestEnumPatternMatching:
     """枚举模式匹配测试"""
