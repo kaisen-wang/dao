@@ -1,0 +1,47 @@
+[Unit]
+Description=更夫 Nightwatch - 常驻研发协作 Agent (dao interpreter)
+# 第九轮生产用 ASCII 单元名（中文名 更夫.service 仅作历史样例保留，systemd 259 会拒绝中文单元文件名）。
+# 本文件为生产配置模板，未做真实云主机部署验证；详细说明见 ../README.md。
+# 在网络就绪后再启动；如生产环境无需外网可去掉这两行。
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# simple 类型：ExecStart 主进程即服务主进程，退出由 Restart 拉起。
+Type=simple
+
+# ---- 启动命令 ----
+# ExecStart 指向启动包装脚本（ASCII 文件名 启动包装.sh）。
+# 【现场替换】/opt/gengfu 为部署根目录占位，请把整段路径替换为实际安装位置；
+# 包装脚本内部再指定 python / main.py / 工作目录的绝对路径（见脚本内注释）。
+ExecStart=/opt/gengfu/示例/更夫/部署/systemd/启动包装.sh
+
+# 优雅停机：touch 停机标记文件，由长驻入口心跳（5 秒）检测后取消调度并退出。
+# 【现场替换】/opt/gengfu/run/gengfu.stop 需与包装脚本导出的 更夫停机标记 保持一致，
+# 并确保 /opt/gengfu/run 存在且运行账号 gengfu 可写。
+ExecStop=/bin/sh -c 'touch /opt/gengfu/run/gengfu.stop'
+
+# 道语言模块搜索基于 os.getcwd()（cwd），必须切到 示例/更夫 根目录，
+# 否则「从 基础设施层.存储 导入 ...」等相对导入会失败。WorkingDirectory 按现场替换。
+WorkingDirectory=/opt/gengfu/示例/更夫
+
+# 进程崩溃或被 kill 后总是自动拉起，间隔 5 秒。
+Restart=always
+RestartSec=5
+
+# 运行账号：生产专用系统账号 gengfu（不要用 root）。
+User=gengfu
+
+# ---- 环境变量 ----
+# unit 内不得写任何中文环境变量名：systemd 259 只接受 ASCII 变量名
+# [A-Za-z_][A-Za-z0-9_]，中文名会被判定为 Invalid environment assignment 并忽略。
+# 五个变量全部由 ExecStart 的包装脚本以 ASCII 中转后 export 进进程环境，
+# 口径见 ../systemd/启动包装.sh 与 ../README.md 环境变量表。
+
+# ---- 日志：交给 journald，用 journalctl -u gengfu -f 查看 ----
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gengfu
+
+[Install]
+WantedBy=multi-user.target
