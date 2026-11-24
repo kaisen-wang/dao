@@ -149,6 +149,22 @@ def require_tool(name: str) -> None:
         raise RuntimeError(f"缺少打包工具 {name}，请先安装（见文档 17）")
 
 
+def find_iscc() -> str:
+    """定位 Inno Setup 编译器（PATH 未配置时自动探测默认安装位置）。"""
+    found = shutil.which("iscc")
+    if found:
+        return found
+    candidates = [
+        Path(os.environ.get("ProgramFiles", "")) / "Inno Setup 6" / "ISCC.exe",
+        Path(os.environ.get("ProgramFiles(x86)", "")) / "Inno Setup 6" / "ISCC.exe",
+        Path.home() / "AppData" / "Local" / "Programs" / "Inno Setup 6" / "ISCC.exe",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    raise RuntimeError("缺少打包工具 iscc，请先安装 Inno Setup 6（见文档 17）")
+
+
 def make_deb(exe: Path, version: str, arch_deb: str, arch_label: str) -> Path:
     """生成 Debian 包，安装到 /usr/bin/dao。"""
     require_tool("dpkg-deb")
@@ -213,24 +229,119 @@ def make_pkg(exe: Path, version: str, arch_label: str) -> Path:
 
 
 def make_windows_installer(exe: Path, version: str, arch_label: str) -> Path:
-    """用 Inno Setup 生成 Windows 安装器 setup.exe。"""
-    require_tool("iscc")
+    """用 Inno Setup 生成 Windows 安装器 setup.exe。
+
+    安装时把 ``{app}`` 追加到当前用户 PATH（去重、大小写不敏感），卸载时
+    精确移除该条目；``ChangesEnvironment`` 负责通知已运行的程序刷新环境变量。
+    同时在 ``%LOCALAPPDATA%\\Microsoft\\WindowsApps`` 写入 ``dao.cmd`` 垫片，
+    使安装前已打开的终端也能立即使用 ``dao`` 命令（无需重开窗口）。
+    采用用户级安装（无需管理员权限），默认目录为 ``%LOCALAPPDATA%\\Dao``。
+    """
+    iscc = find_iscc()
     exe_win = str(exe).replace("/", "\\")
     out_win = str(OUT_DIR).replace("/", "\\")
     base = f"dao_{version}_windows_{arch_label}_setup"
+
+    # 单独持有 Pascal 脚本，避免与上方 f-string 的 {app} 花括号相互转义。
+    path_script = r"""
+[Code]
+const
+  EnvPathKey = 'Environment';
+  InstallKey = 'Software\Dao Language';
+
+function DaoInstallPath: String;
+var
+  Dir: String;
+begin
+  if RegQueryStringValue(HKCU, InstallKey, 'InstallPath', Dir) then
+    Result := Dir
+  else
+    Result := ExpandConstant('{app}');
+end;
+
+function DaoShim: String;
+begin
+  Result := ExpandConstant('{localappdata}\Microsoft\WindowsApps\dao.cmd');
+end;
+
+function PathHasApp(const PathValue: String): Boolean;
+begin
+  Result := Pos(';' + Uppercase(DaoInstallPath) + ';', ';' + Uppercase(PathValue) + ';') > 0;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  OldPath, ShimDir: String;
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+  RegWriteStringValue(HKCU, InstallKey, 'InstallPath', ExpandConstant('{app}'));
+  if RegQueryStringValue(HKCU, EnvPathKey, 'Path', OldPath) then
+  begin
+    if not PathHasApp(OldPath) then
+      RegWriteStringValue(HKCU, EnvPathKey, 'Path', OldPath + ';' + DaoInstallPath);
+  end;
+  // WindowsApps 默认已在用户 PATH 中，写入垫片可让旧终端立即识别 dao。
+  ShimDir := ExpandConstant('{localappdata}\Microsoft\WindowsApps');
+  if not DirExists(ShimDir) then
+    ForceDirectories(ShimDir);
+  SaveStringToFile(DaoShim, '@"' + ExpandConstant('{app}\dao.exe') + '" %*' + #13#10, False);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  OldPath, Entry, NewPath, Target: String;
+  Sep: Integer;
+begin
+  // 卸载器自删除会进入第二阶段的 /SECONDPHASE，该阶段不再触发 usPostUninstall，
+  // 因此必须在 usUninstall（处理卸载日志之前）完成 PATH 清理。
+  if CurUninstallStep <> usUninstall then
+    Exit;
+  Target := Uppercase(DaoInstallPath);
+  if Target = '' then
+    Exit;
+  if not RegQueryStringValue(HKCU, EnvPathKey, 'Path', OldPath) then
+    Exit;
+  NewPath := '';
+  Sep := Pos(';', OldPath);
+  while Sep > 0 do
+  begin
+    Entry := Copy(OldPath, 1, Sep - 1);
+    Delete(OldPath, 1, Sep);
+    if Uppercase(Entry) <> Target then
+    begin
+      if NewPath <> '' then
+        NewPath := NewPath + ';';
+      NewPath := NewPath + Entry;
+    end;
+    Sep := Pos(';', OldPath);
+  end;
+  if Uppercase(OldPath) <> Target then
+  begin
+    if (NewPath <> '') and (OldPath <> '') then
+      NewPath := NewPath + ';';
+    NewPath := NewPath + OldPath;
+  end;
+  RegWriteStringValue(HKCU, EnvPathKey, 'Path', NewPath);
+  DeleteFile(DaoShim);
+  RegDeleteValue(HKCU, InstallKey, 'InstallPath');
+  RegDeleteKeyIfEmpty(HKCU, InstallKey);
+end;
+"""
 
     iss = OUT_DIR / f".{base}.iss"
     iss.write_text(
         f"[Setup]\n"
         f"AppName=Dao Language\n"
         f"AppVersion={version}\n"
-        f"DefaultDirName={{autopf}}\\Dao\n"
+        f"DefaultDirName={{localappdata}}\\Dao\n"
         f"DefaultGroupName=Dao Language\n"
         f"OutputDir={out_win}\n"
         f"OutputBaseFilename={base}\n"
         f"Compression=lzma2\n"
         f"SolidCompression=yes\n"
-        f"PrivilegesRequired=admin\n"
+        f"PrivilegesRequired=lowest\n"
+        f"ChangesEnvironment=yes\n"
         f"\n"
         f"[Languages]\n"
         f'Name: "english"; MessagesFile: "compiler:Default.isl"\n'
@@ -239,10 +350,11 @@ def make_windows_installer(exe: Path, version: str, arch_label: str) -> Path:
         f'Source: "{exe_win}"; DestDir: "{{app}}"; Flags: ignoreversion\n'
         f"\n"
         f"[Icons]\n"
-        f'Name: "{{group}}\\Dao Language"; Filename: "{{app}}\\dao.exe"\n',
+        f'Name: "{{group}}\\Dao Language"; Filename: "{{app}}\\dao.exe"\n'
+        + path_script,
         encoding="utf-8",
     )
-    run(["iscc", "/Qp", str(iss)])
+    run([iscc, "/Qp", str(iss)])
     iss.unlink(missing_ok=True)
 
     installer = OUT_DIR / f"{base}.exe"

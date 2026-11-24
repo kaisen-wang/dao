@@ -37,6 +37,8 @@ node_modules/
 .arts/
 .claude/
 .ruff_cache/
+.opencode/
+dao-vscode/
 
 ### Python ###
 venv/
@@ -48,6 +50,12 @@ __pycache__/
 *.pyo
 *.egg-info/
 .pytest_cache/
+
+### Nuitka ###
+build.log
+main.build/
+main.onefile-build/
+/*.c
 .coverage
 .coverage.*
 
