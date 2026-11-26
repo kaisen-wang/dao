@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 
-from .config import PackageConfig
+from .config import PackageConfig, resolve_entry_path
+from .packer import install_package
 from .resolver import PackageResolver
 
 
@@ -58,7 +59,9 @@ class PackageManager:
                 if len(parts) == 1:
                     entry = resolved.config.entry if resolved.config else None
                     if entry:
-                        return os.path.join(resolved.path, entry)
+                        entry_path = resolve_entry_path(resolved.path, entry)
+                        if os.path.isfile(entry_path):
+                            return entry_path
                     return resolved.path
                 else:
                     sub_path = os.path.join(resolved.path, *parts[1:]) + ".道"
@@ -70,15 +73,24 @@ class PackageManager:
 
         return None
 
-    def install(self, name: str, version_str: str | None = None) -> bool:
-        local_packages = os.path.join(self.project_dir, "道包")
-        os.makedirs(local_packages, exist_ok=True)
+    def install(
+        self,
+        archive_path: str,
+        global_install: bool = False,
+        force: bool = False,
+    ) -> str:
+        """安装一个 ``.道包`` 归档，返回安装后的包目录。
 
-        pkg_dir = os.path.join(local_packages, name)
-        if os.path.exists(pkg_dir):
-            return True
-
-        return False
+        安装成功后会清空配置与解析器缓存，使新依赖立即对当前解释器生效。
+        """
+        target = install_package(
+            archive_path,
+            project_dir=self.project_dir,
+            global_install=global_install,
+            force=force,
+        )
+        self.invalidate_cache()
+        return target
 
     def invalidate_cache(self) -> None:
         self._config = None

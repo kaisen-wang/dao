@@ -1,8 +1,43 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from .version import Version, VersionConstraint
+
+
+def resolve_entry_path(project_dir: str, entry: str) -> str:
+    """把 ``道.配置`` 的「入口」字段解析为实际的 ``.道`` 文件路径。
+
+    兼容四种写法：
+
+    * ``接入层/入口.道`` —— 带目录的相对路径，原样使用
+    * ``入口.道``        —— 当前目录下的文件名
+    * ``接入层.入口``    —— 点分模块路径，转成 ``接入层/入口.道``
+    * ``入口``           —— 模块名，转成 ``入口.道``
+
+    CLI 项目模式与包管理器共用此函数，保证「运行项目」和「导入依赖包」
+    对入口字段的理解一致。
+    """
+    entry = entry.strip()
+    if not entry:
+        raise ValueError("配置项「入口」为空")
+
+    if os.path.isabs(entry) or "/" in entry or "\\" in entry:
+        rel_path = entry
+    else:
+        parts = entry.split(".")
+        if parts[-1] == "道":
+            # 入口.道 / 接入层.入口.道 —— 末段是扩展名，不是模块名
+            parts = parts[:-1]
+        rel_path = os.path.join(*parts) if parts else ""
+        if not rel_path:
+            raise ValueError(f"无效的入口配置：{entry}")
+
+    if not rel_path.endswith(".道"):
+        rel_path += ".道"
+
+    return os.path.normpath(os.path.join(project_dir, rel_path))
 
 
 @dataclass

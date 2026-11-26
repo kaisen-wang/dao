@@ -8,12 +8,16 @@
 2. 文件模式：执行 .道 文件（传入文件路径）
 3. 项目模式：读取项目根目录的 道.配置，按「入口」字段运行项目
 
+另提供依赖包子命令：pack / 打包、install / 安装、packages / 包列表。
+
 使用方法：
     python main.py                      # 启动 REPL
     python main.py 你好世界.道          # 执行文件
     python main.py run                  # 运行当前项目（读取 道.配置）
     python main.py 运行                 # 同上（中文命令）
     python main.py run 路径/到/项目     # 运行指定目录下的项目
+    python main.py pack                 # 把当前项目打成 .道包
+    python main.py install 包.道包      # 把 .道包 安装到当前项目
 """
 
 import argparse
@@ -26,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dao.errors import 道错误
 from dao.interpreter import Interpreter
 from dao.lexer import Lexer
+from dao.package.config import resolve_entry_path
 from dao.parser import Parser
 from dao.version import banner_text, version_text
 
@@ -94,42 +99,13 @@ def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False,
 
 CONFIG_FILENAME = "道.配置"
 RUN_COMMANDS = ("run", "运行")
+PACK_COMMANDS = ("pack", "打包")
+INSTALL_COMMANDS = ("install", "安装")
+LIST_COMMANDS = ("packages", "包列表")
 
 
-def resolve_entry_path(project_dir: str, entry: str) -> str:
-    """把 ``道.配置`` 的「入口」字段解析为实际文件路径。
-
-    兼容四种写法：
-
-    * ``接入层/入口.道`` —— 带目录的相对路径，原样使用
-    * ``入口.道``        —— 当前目录下的文件名
-    * ``接入层.入口``    —— 点分模块路径，转成 ``接入层/入口.道``
-    * ``入口``           —— 模块名，转成 ``入口.道``
-
-    :param project_dir: 项目根目录（绝对路径）
-    :param entry: 配置文件中的「入口」值
-    :return: 入口文件的绝对路径
-    :raises ValueError: 入口为空或无法解析
-    """
-    entry = entry.strip()
-    if not entry:
-        raise ValueError("配置项「入口」为空")
-
-    if os.path.isabs(entry) or "/" in entry or "\\" in entry:
-        rel_path = entry
-    else:
-        parts = entry.split(".")
-        if parts[-1] == "道":
-            # 入口.道 / 接入层.入口.道 —— 末段是扩展名，不是模块名
-            parts = parts[:-1]
-        rel_path = os.path.join(*parts) if parts else ""
-        if not rel_path:
-            raise ValueError(f"无效的入口配置：{entry}")
-
-    if not rel_path.endswith(".道"):
-        rel_path += ".道"
-
-    return os.path.normpath(os.path.join(project_dir, rel_path))
+# 入口路径解析与包管理器共用 dao.package.config.resolve_entry_path，
+# 这里通过导入保持 main.resolve_entry_path 的既有调用方式。
 
 
 def run_project(project_path: str | None = None, mode: str = "interpreter",
@@ -516,6 +492,83 @@ def _main_run(argv: list[str], command: str = "run"):
                 disasm=args.disasm, jit=args.jit)
 
 
+def _main_pack(argv: list[str], command: str = "pack"):
+    """把项目打成 ``.道包`` 依赖包。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="把道语言项目打成 .道包 依赖包（需 道.配置）",
+    )
+    arg_parser.add_argument("path", nargs="?", default=".",
+                            help="项目目录（默认当前目录）")
+    arg_parser.add_argument("-o", "--output",
+                            help="输出文件路径或目录（默认写到项目根目录）")
+    args = arg_parser.parse_args(argv)
+
+    from dao.package.packer import pack_project
+
+    try:
+        archive_path = pack_project(args.path, args.output)
+    except (OSError, ValueError) as e:
+        print(f"错误：打包失败：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"已生成依赖包：{archive_path}")
+
+
+def _main_install(argv: list[str], command: str = "install"):
+    """安装 ``.道包`` 依赖包。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="安装 .道包 到项目的 道包/ 目录（或全局目录）",
+    )
+    arg_parser.add_argument("archive", help="要安装的 .道包 文件")
+    arg_parser.add_argument("-p", "--project", default=".",
+                            help="目标项目目录（默认当前目录）")
+    arg_parser.add_argument("-g", "--global", dest="global_install", action="store_true",
+                            help="安装到 ~/.道/包/ 全局目录")
+    arg_parser.add_argument("-f", "--force", action="store_true",
+                            help="已安装不同版本时强制覆盖")
+    args = arg_parser.parse_args(argv)
+
+    from dao.package.packer import install_package
+
+    try:
+        target = install_package(
+            args.archive,
+            project_dir=args.project,
+            global_install=args.global_install,
+            force=args.force,
+        )
+    except (OSError, ValueError) as e:
+        print(f"错误：安装失败：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"已安装依赖：{target}")
+
+
+def _main_list_packages(argv: list[str], command: str = "包列表"):
+    """列出已安装的依赖包。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="列出已安装的道语言依赖包",
+    )
+    arg_parser.add_argument("path", nargs="?", default=".",
+                            help="项目目录（默认当前目录）")
+    arg_parser.add_argument("-g", "--global", dest="global_install", action="store_true",
+                            help="列出 ~/.道/包/ 全局目录")
+    args = arg_parser.parse_args(argv)
+
+    from dao.package.packer import list_installed_packages
+
+    packages = list_installed_packages(args.path, args.global_install)
+    if not packages:
+        print("尚未安装任何依赖包")
+    else:
+        print("已安装依赖：")
+        for name, version in packages:
+            print(f"  {name} {version}")
+
+
 def _main_default(argv: list[str]):
     """原有的 REPL / 单文件执行模式。"""
     arg_parser = argparse.ArgumentParser(description="道（Dao）编程语言")
@@ -536,6 +589,12 @@ def main():
     argv = sys.argv[1:]
     if argv and argv[0] in RUN_COMMANDS:
         _main_run(argv[1:], argv[0])
+    elif argv and argv[0] in PACK_COMMANDS:
+        _main_pack(argv[1:], argv[0])
+    elif argv and argv[0] in INSTALL_COMMANDS:
+        _main_install(argv[1:], argv[0])
+    elif argv and argv[0] in LIST_COMMANDS:
+        _main_list_packages(argv[1:], argv[0])
     else:
         _main_default(argv)
 
