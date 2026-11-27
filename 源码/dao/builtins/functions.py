@@ -399,3 +399,43 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         "错误输出": BuiltinFunction("错误输出", _builtin_错误输出),
         "诊断源码": BuiltinFunction("诊断源码", _builtin_诊断源码, 1),
     }
+
+
+# ========================================================
+# Python 互操作桥（追加，不改动上方既有函数）
+# ========================================================
+
+# 延迟导入，避免内置函数模块与互操作包形成循环依赖。
+from ..interop import bridge as _互操作桥  # noqa: E402
+
+
+def _builtin_列出Python模块():
+    """列出所有可通过互操作桥加载的白名单 Python 模块名称。"""
+    return _互操作桥.列出可用模块()
+
+
+def _builtin_载入Python模块(模块名):
+    """载入白名单内的 Python 模块，返回供 调用Python函数() 使用的不透明句柄。"""
+    return _互操作桥.载入模块(模块名)
+
+
+def _builtin_调用Python函数(模块句柄, 函数名, *参数, **命名参数):
+    """通过模块句柄调用白名单允许的 Python 函数，或读取白名单常量。"""
+    return _互操作桥.调用模块函数(模块句柄, 函数名, *参数, **命名参数)
+
+
+# 以包装方式扩展注册表，保持上方 get_builtins 原样不动。
+_原_get_builtins = get_builtins
+
+
+def get_builtins() -> dict[str, BuiltinFunction]:
+    """返回所有基础内置函数（含 Python 互操作桥）。"""
+    内置表 = _原_get_builtins()
+    内置表.update(
+        {
+            "列出Python模块": BuiltinFunction("列出Python模块", _builtin_列出Python模块, 0),
+            "载入Python模块": BuiltinFunction("载入Python模块", _builtin_载入Python模块, 1),
+            "调用Python函数": BuiltinFunction("调用Python函数", _builtin_调用Python函数),
+        }
+    )
+    return 内置表

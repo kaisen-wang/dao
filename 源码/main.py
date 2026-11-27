@@ -41,18 +41,26 @@ from dao.version import banner_text, version_text
 
 def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>",
                mode: str = "interpreter", type_check: bool = False, disasm: bool = False,
-               jit: bool = False) -> object:
+               jit: bool = False, type_check_warn: bool = False) -> object:
     lexer = Lexer(source, filename)
     tokens = lexer.tokenize()
     parser = Parser(tokens, source)
     ast = parser.parse()
 
-    if type_check:
+    if type_check or type_check_warn:
         from dao.types.checker import TypeInferenceEngine
-        engine = TypeInferenceEngine()
+        base_dir = os.getcwd() if filename == "<输入>" else os.path.dirname(os.path.abspath(filename))
+        engine = TypeInferenceEngine(base_dir=base_dir)
         reports = engine.check(ast)
-        for r in reports:
-            print(f"类型警告: {r.message} (行{r.line})")
+        if reports and type_check:
+            # 阻断模式：输出中文诊断并以非 0 退出码停止执行。
+            for r in reports:
+                print(f"类型错误: {r.message} (行{r.line}, 列{r.column})", file=sys.stderr)
+            sys.exit(1)
+        if reports and type_check_warn:
+            # 仅警告模式：保留旧行为，打印警告后继续执行。
+            for r in reports:
+                print(f"类型警告: {r.message} (行{r.line}, 列{r.column})")
 
     if mode == "vm":
         from dao.bytecode.compiler import BytecodeCompiler
@@ -73,7 +81,7 @@ def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>"
 
 
 def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False,
-             disasm: bool = False, jit: bool = False):
+             disasm: bool = False, jit: bool = False, type_check_warn: bool = False):
     """执行一个 .道 文件"""
     if not os.path.exists(filepath):
         print(f"错误：文件 '{filepath}' 不存在")
@@ -86,7 +94,7 @@ def run_file(filepath: str, mode: str = "interpreter", type_check: bool = False,
 
     try:
         run_source(source, interpreter, filepath, mode=mode, type_check=type_check,
-                   disasm=disasm, jit=jit)
+                   disasm=disasm, jit=jit, type_check_warn=type_check_warn)
     except 道错误 as e:
         if not e.filename:
             e.filename = filepath
@@ -114,7 +122,8 @@ BUILD_COMMANDS = ("build", "构建应用", "打包应用")
 
 
 def run_project(project_path: str | None = None, mode: str = "interpreter",
-                type_check: bool = False, disasm: bool = False, jit: bool = False):
+                type_check: bool = False, disasm: bool = False, jit: bool = False,
+                type_check_warn: bool = False):
     """读取 ``道.配置`` 并运行项目入口。
 
     :param project_path: 项目目录，默认当前工作目录
@@ -155,7 +164,8 @@ def run_project(project_path: str | None = None, mode: str = "interpreter",
 
     # 模块导入基于 cwd 解析，切到项目根目录后再执行入口
     os.chdir(project_dir)
-    run_file(entry_path, mode=mode, type_check=type_check, disasm=disasm, jit=jit)
+    run_file(entry_path, mode=mode, type_check=type_check, disasm=disasm, jit=jit,
+             type_check_warn=type_check_warn)
 
 
 def _handle_macro_debug_command(line: str, interpreter: Interpreter):
@@ -477,13 +487,16 @@ def _add_execution_args(arg_parser: argparse.ArgumentParser):
     """给解析器添加通用的执行选项。"""
     arg_parser.add_argument("--mode", choices=["interpreter", "vm"], default="interpreter",
                             help="执行模式：interpreter（默认）或 vm")
-    arg_parser.add_argument("--type-check", action="store_true", help="启用类型推断检查")
+    arg_parser.add_argument("--type-check", action="store_true",
+                            help="启用阻断式类型检查（发现类型错误时输出诊断并以非 0 退出码停止执行）")
+    arg_parser.add_argument("--type-check-warn", action="store_true",
+                            help="只输出类型警告、不阻断执行（兼容旧行为）")
     arg_parser.add_argument("--disasm", action="store_true", help="输出字节码反汇编结果（仅 VM 模式）")
     arg_parser.add_argument("--jit", action="store_true", help="启用 JIT 编译（仅 VM 模式）")
 
 
 def _run_app(archive: str, mode: str = "interpreter", type_check: bool = False,
-             disasm: bool = False, jit: bool = False):
+             disasm: bool = False, jit: bool = False, type_check_warn: bool = False):
     """解压并运行一个 ``.道应用``（由 ``run`` 命令在参数为应用包时调用）。"""
     from dao.package.app import check_app_dao_version, extract_app, inspect_app
 
@@ -500,7 +513,7 @@ def _run_app(archive: str, mode: str = "interpreter", type_check: bool = False,
         app_dir = extract_app(archive, temp_dir)
         os.chdir(app_dir)
         run_project(app_dir, mode=mode, type_check=type_check,
-                    disasm=disasm, jit=jit)
+                    disasm=disasm, jit=jit, type_check_warn=type_check_warn)
     finally:
         os.chdir(original_cwd)
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -524,11 +537,13 @@ def _main_run(argv: list[str], command: str = "run"):
 
     if args.path.endswith(APP_SUFFIX):
         _run_app(args.path, mode=args.mode, type_check=args.type_check,
-                 disasm=args.disasm, jit=args.jit)
+                 disasm=args.disasm, jit=args.jit,
+                 type_check_warn=args.type_check_warn)
         return
 
     run_project(args.path, mode=args.mode, type_check=args.type_check,
-                disasm=args.disasm, jit=args.jit)
+                disasm=args.disasm, jit=args.jit,
+                type_check_warn=args.type_check_warn)
 
 
 def _main_pack(argv: list[str], command: str = "pack"):
@@ -647,7 +662,8 @@ def _main_default(argv: list[str]):
     args = arg_parser.parse_args(argv)
 
     if args.file:
-        run_file(args.file, mode=args.mode, type_check=args.type_check, disasm=args.disasm, jit=args.jit)
+        run_file(args.file, mode=args.mode, type_check=args.type_check, disasm=args.disasm,
+                 jit=args.jit, type_check_warn=args.type_check_warn)
     else:
         run_repl()
 

@@ -284,10 +284,15 @@ class TestChannelStatementBranches:
         env = Environment()
         ch = Channel()
         env.define("ch", ch)
+        # 无缓冲通道为 rendezvous 语义：send 阻塞直到接收者会合，需在另一线程接收
+        received = []
+        receiver = threading.Thread(target=lambda: received.append(ch.receive(timeout=5)))
+        receiver.start()
         interp.exec_send_stmt(
             SendStmt(channel=Identifier(name="ch"), value=NumberLiteral(value=9)), env
         )
-        assert ch.receive() == 9
+        receiver.join(timeout=5)
+        assert received == [9]
 
         env.define("non_ch", 42)
         with pytest.raises(类型错误):
@@ -597,8 +602,11 @@ class TestChannelAsyncInterfaces:
         ch = Channel()
 
         async def run():
-            await ch.send_async(41)
-            return await ch.receive_async()
+            # rendezvous：发送与接收必须并发会合（gather 让二者同时推进）
+            sent, received = await asyncio.gather(
+                ch.send_async(41), ch.receive_async()
+            )
+            return received
 
         assert asyncio.run(run()) == 41
 
@@ -669,15 +677,23 @@ class TestChannelAsyncInterfaces:
         ch = AsyncChannel()
 
         async def run():
-            await ch.send_async(45)
-            return await ch.receive_async()
+            # 原生异步无缓冲通道：发送/接收并发 rendezvous
+            sent, received = await asyncio.gather(
+                ch.send_async(45), ch.receive_async()
+            )
+            return received
 
         assert asyncio.run(run()) == 45
 
     def test_async_channel_sync_wrappers_and_closed(self):
         ch = AsyncChannel()
-        ch.send(47)
-        assert ch.receive() == 47
+        # 同步包装同样是 rendezvous：用线程并发配对发送与接收
+        received = []
+        receiver = threading.Thread(target=lambda: received.append(ch.receive(timeout=5)))
+        receiver.start()
+        ch.send(47, timeout=5)
+        receiver.join(timeout=5)
+        assert received == [47]
         ch.close()
         with pytest.raises(运行时错误):
             ch.send(1)

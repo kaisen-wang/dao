@@ -47,12 +47,13 @@ class TestChannel:
     """无缓冲通道测试"""
 
     def test_send_and_receive(self):
-        ch = Channel()
+        # rendezvous 语义下无缓冲通道须并发会合；这里用容量 1 的缓冲通道测顺序收发
+        ch = BufferedChannel(1)
         ch.send(42)
         assert ch.receive() == 42
 
     def test_close_channel(self):
-        ch = Channel()
+        ch = BufferedChannel(1)
         ch.send(1)
         ch.close()
         assert ch.closed is True
@@ -284,8 +285,9 @@ class TestConcurrencyInterpreter:
         assert output.strip() == '真'
 
     def test_channel_create_and_send_receive(self):
+        # 无缓冲通道为 rendezvous 语义，顺序收发需并发配对；这里用容量 1 通道
         source = (
-            '定义 ch = 通道()\n'
+            '定义 ch = 通道(1)\n'
             'ch.发送(42)\n'
             '定义 值 = ch.接收()\n'
             '打印(值)\n'
@@ -309,7 +311,7 @@ class TestConcurrencyInterpreter:
 
     def test_channel_close(self):
         source = (
-            '定义 ch = 通道()\n'
+            '定义 ch = 通道(1)\n'
             'ch.发送(99)\n'
             'ch.关闭()\n'
             '打印(ch.已关闭)\n'

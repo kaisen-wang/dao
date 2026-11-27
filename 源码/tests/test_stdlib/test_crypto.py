@@ -8,14 +8,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from dao.errors import 类型错误
 from dao.stdlib.crypto import (
     _stdlib_HMACSHA256,
+    _stdlib_MD5,
+    _stdlib_SHA1,
     _stdlib_SHA256,
+    _stdlib_SHA512,
     _stdlib_UUID,
     _stdlib_随机令牌,
+    _stdlib_随机字节,
     _stdlib_验证HMAC,
     create_module_env,
 )
 
-导出名集合 = {"SHA256", "HMACSHA256", "验证HMAC", "UUID", "随机令牌"}
+导出名集合 = {
+    "SHA256", "MD5", "SHA1", "SHA512", "HMACSHA256", "验证HMAC",
+    "UUID", "随机令牌", "随机字节",
+}
 
 
 class TestSHA256:
@@ -127,11 +134,11 @@ class Test类型错误:
 
 
 class Test模块环境:
-    def test_create_module_env_导出集合恰好为五个(self):
+    def test_create_module_env_导出集合恰好为九个(self):
         env = create_module_env()
         assert set(env.exports) == 导出名集合
         assert set(env.values) == 导出名集合
-        assert len(env.exports) == 5
+        assert len(env.exports) == 9
 
     def test_create_module_env_元数据稳定(self):
         env1 = create_module_env()
@@ -151,3 +158,48 @@ class Test模块环境:
         assert env.values["验证HMAC"].param_count == 3
         assert env.values["UUID"].param_count == 0
         assert env.values["随机令牌"].param_count == -1
+        assert env.values["随机字节"].param_count == -1
+
+
+class Test摘要算法扩展:
+    def test_MD5已知向量(self):
+        assert _stdlib_MD5("abc") == "900150983cd24fb0d6963f7d28e17f72"
+
+    def test_SHA1已知向量(self):
+        assert _stdlib_SHA1("abc") == "a9993e364706816aba3e25717850c26c9cd0d89d"
+
+    def test_SHA512已知向量(self):
+        结果 = _stdlib_SHA512("abc")
+        assert len(结果) == 128
+        assert 结果.startswith("ddaf35a193617aba")
+
+    def test_摘要算法非文本抛异常(self):
+        for 函数 in (_stdlib_MD5, _stdlib_SHA1, _stdlib_SHA512):
+            try:
+                函数(123)
+                assert False, "应抛出类型错误"
+            except 类型错误:
+                pass
+
+
+class Test随机字节:
+    def test_随机字节长度与类型(self):
+        结果 = _stdlib_随机字节(16)
+        assert isinstance(结果, bytes)
+        assert len(结果) == 16
+        assert _stdlib_随机字节(16) != _stdlib_随机字节(16)
+
+    def test_随机字节默认长度(self):
+        assert len(_stdlib_随机字节()) == 32
+
+    def test_随机字节非法参数抛异常(self):
+        try:
+            _stdlib_随机字节("32")
+            assert False, "应抛出类型错误"
+        except 类型错误:
+            pass
+        try:
+            _stdlib_随机字节(-1)
+            assert False, "应抛出类型错误"
+        except 类型错误:
+            pass

@@ -1,10 +1,23 @@
 import operator
 
+from ..ast_nodes import (
+    BooleanLiteral,
+    DictPattern,
+    EnumVariantPattern,
+    FunctionCall,
+    Identifier,
+    ListPattern,
+    MemberAccess,
+    NullLiteral,
+    NumberLiteral,
+    StringLiteral,
+    TypeCheckPattern,
+)
 from ..bytecode.code_object import CodeObject
 from ..bytecode.frame import Frame
 from ..bytecode.opcodes import OpCode
 from ..builtins import BuiltinFunction, get_builtins
-from ..errors import 运行时错误
+from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误
 
 
 class VirtualMachine:
@@ -181,10 +194,14 @@ class VirtualMachine:
                 frame.push(self._builtin_str_member(obj, name))
             elif isinstance(obj, list):
                 frame.push(self._builtin_list_member(obj, name))
+            elif self._is_enum(obj):
+                frame.push(self._eval_enum_member(obj, name))
+            elif self._is_enum_variant(obj):
+                frame.push(self._eval_enum_variant_member(obj, name, frame))
             elif hasattr(obj, name):
                 frame.push(getattr(obj, name))
             else:
-                frame.push(None)
+                raise 名称错误(f"对象没有属性 '{name}'")
         elif op == OpCode.STORE_ATTR:
             value = frame.pop()
             obj = frame.pop()
@@ -196,6 +213,19 @@ class VirtualMachine:
         elif op == OpCode.LOAD_INDEX:
             index = frame.pop()
             obj = frame.pop()
+            # 与 AST 解释器保持一致：仅列表/字典/文本支持索引访问，
+            # 元组等其它类型应抛类型错误而非依赖 Python 的 __getitem__。
+            if not isinstance(obj, (list, dict, str)):
+                raise 类型错误(
+                    f"类型 '{type(obj).__name__}' 不支持索引访问"
+                )
+            if isinstance(obj, dict) and index not in obj:
+                raise 名称错误(f"字典中不存在键 '{index}'")
+            if isinstance(obj, (list, str)) and isinstance(index, int):
+                if index < -len(obj) or index >= len(obj):
+                    raise 索引错误(
+                        f"索引 {index} 超出范围 (长度 {len(obj)})"
+                    )
             frame.push(obj[index])
         elif op == OpCode.STORE_INDEX:
             value = frame.pop()
@@ -229,7 +259,252 @@ class VirtualMachine:
         elif op == OpCode.LOGICAL_OR:
             right, left = frame.pop(), frame.pop()
             frame.push(left or right)
+        elif op == OpCode.BUILD_ENUM:
+            from ..ast_nodes import EnumVariant
+            from ..interpreter.statements import DaoEnum
+
+            name, values, variant_tuples = frame.code.constants[operand]
+            variants = [EnumVariant(name=v, params=list(p)) for v, p in variant_tuples]
+            frame.push(DaoEnum(name, values, variants))
+        elif op == OpCode.MATCH_PATTERN:
+            pattern, is_wildcard = frame.code.constants[operand]
+            subject = frame.pop()
+            frame.push(self._match_pattern(pattern, subject, frame, is_wildcard))
+        elif op == OpCode.BUILD_CHANNEL:
+            from ..concurrency.channels import BufferedChannel, Channel
+
+            capacity = frame.code.constants[operand]
+            frame.push(Channel() if capacity is None else BufferedChannel(capacity))
+        elif op == OpCode.SEND_VALUE:
+            value = frame.pop()
+            channel = frame.pop()
+            from ..concurrency.channels import BufferedChannel, Channel
+
+            if not isinstance(channel, (Channel, BufferedChannel)):
+                raise 类型错误("发送操作的目标必须是通道对象")
+            channel.send(value)
+        elif op == OpCode.RECEIVE_VALUE:
+            channel = frame.pop()
+            frame.push(channel.receive())
         return None
+
+    # ========================
+    # 枚举与模式匹配辅助
+    # ========================
+
+    @staticmethod
+    def _is_enum(obj) -> bool:
+        from ..interpreter.statements import DaoEnum
+        return isinstance(obj, DaoEnum)
+
+    @staticmethod
+    def _is_enum_variant(obj) -> bool:
+        from ..interpreter.statements import DaoEnumVariant
+        return isinstance(obj, DaoEnumVariant)
+
+    def _eval_enum_member(self, enum_obj, name: str):
+        """求值枚举类型的成员：简单变体或带参变体构造器。"""
+        from ..interpreter.statements import DaoEnumVariant
+
+        if name not in enum_obj.values:
+            raise 运行时错误(f"枚举 '{enum_obj.name}' 中不存在变体 '{name}'")
+        if enum_obj.has_variant_params(name):
+            return BuiltinFunction(
+                name,
+                lambda *args: DaoEnumVariant(enum_obj.name, name, tuple(args)),
+            )
+        return DaoEnumVariant(enum_obj.name, name)
+
+    def _eval_enum_variant_member(self, variant, name: str, frame: Frame | None = None):
+        """求值枚举变体实例：内建字段与按参数名访问的关联值。"""
+        if name == "数据":
+            return variant.data
+        if name == "变体名":
+            return variant.variant_name
+        if name == "枚举名":
+            return variant.enum_name
+
+        # 关联值按变体参数名访问，例如 结果.成功(5).值
+        enum_obj = None
+        if frame is not None:
+            scope = frame
+            while scope is not None:
+                if variant.enum_name in scope.locals:
+                    enum_obj = scope.locals[variant.enum_name]
+                    break
+                scope = scope.parent
+        if enum_obj is None:
+            enum_obj = self.globals.get(variant.enum_name)
+        if enum_obj is not None:
+            for v in getattr(enum_obj, "variants", []):
+                if getattr(v, "name", None) == variant.variant_name:
+                    params = getattr(v, "params", [])
+                    if name in params:
+                        idx = params.index(name)
+                        if idx < len(variant.data):
+                            return variant.data[idx]
+                    break
+
+        raise 运行时错误(
+            f"枚举 '{variant.enum_name}.{variant.variant_name}' 没有属性 '{name}'"
+        )
+
+    def _name_defined(self, name: str, frame: Frame) -> bool:
+        """变量是否已在静态作用域链或全局作用域中定义。"""
+        scope = frame
+        while scope is not None:
+            if name in scope.locals:
+                return True
+            scope = scope.parent
+        return name in self.globals
+
+    def _load_name_value(self, name: str, frame: Frame):
+        scope = frame
+        while scope is not None:
+            if name in scope.locals:
+                return scope.locals[name]
+            scope = scope.parent
+        return self.globals[name]
+
+    @staticmethod
+    def _literal_value(expr):
+        """求值简单字面量模式；非字面量返回 (False, None)。"""
+        if isinstance(expr, NullLiteral):
+            return True, None
+        if isinstance(expr, (NumberLiteral, StringLiteral, BooleanLiteral)):
+            return True, expr.value
+        return False, None
+
+    def _match_pattern(self, pattern, subject, frame: Frame, is_wildcard: bool) -> bool:
+        """模式匹配核心：与 AST 解释器 ``StatementExecutor._match_pattern`` 对齐。
+
+        绑定变量直接写入 ``frame.locals``，供内联编译的分支体读取。
+        """
+        from ..interpreter.statements import DaoEnumVariant
+
+        if is_wildcard:
+            return True
+
+        if isinstance(pattern, Identifier):
+            if pattern.name == "_":
+                return True
+            if self._name_defined(pattern.name, frame):
+                return self._load_name_value(pattern.name, frame) == subject
+            frame.locals[pattern.name] = subject
+            return True
+
+        ok, value = self._literal_value(pattern)
+        if ok:
+            return value == subject
+
+        if isinstance(pattern, EnumVariantPattern):
+            if not isinstance(subject, DaoEnumVariant):
+                return False
+            if (
+                subject.enum_name != pattern.enum_name
+                or subject.variant_name != pattern.variant_name
+            ):
+                return False
+            if pattern.binding:
+                data = subject.data
+                frame.locals[pattern.binding] = (
+                    data[0] if len(data) == 1 else data if data else None
+                )
+            return True
+
+        # 枚举变体模式：结果.成功(v) / 颜色.红
+        if isinstance(pattern, FunctionCall) and isinstance(pattern.callee, MemberAccess):
+            obj = pattern.callee.object
+            if isinstance(obj, Identifier):
+                if not isinstance(subject, DaoEnumVariant):
+                    return False
+                if (
+                    subject.enum_name != obj.name
+                    or subject.variant_name != pattern.callee.member
+                ):
+                    return False
+                if pattern.arguments:
+                    binding = pattern.arguments[0]
+                    if isinstance(binding, Identifier) and binding.name != "_":
+                        data = subject.data
+                        frame.locals[binding.name] = (
+                            data[0] if len(data) == 1 else data if data else None
+                        )
+                return True
+
+        if isinstance(pattern, MemberAccess) and isinstance(pattern.object, Identifier):
+            if not isinstance(subject, DaoEnumVariant):
+                return False
+            return (
+                subject.enum_name == pattern.object.name
+                and subject.variant_name == pattern.member
+            )
+
+        if isinstance(pattern, TypeCheckPattern):
+            checks = {
+                "列表": lambda v: isinstance(v, list),
+                "字典": lambda v: isinstance(v, dict),
+                "数值": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+                "文本": lambda v: isinstance(v, str),
+                "布尔": lambda v: isinstance(v, bool),
+                "函数": lambda v: callable(v),
+            }
+            checker = checks.get(pattern.type_name)
+            return checker(subject) if checker else False
+
+        if isinstance(pattern, ListPattern):
+            if not isinstance(subject, list):
+                return False
+            elements = pattern.elements
+            if pattern.has_spread:
+                fixed = len(elements) - 1
+                if len(subject) < fixed:
+                    return False
+                for i in range(fixed):
+                    elem = elements[i]
+                    if isinstance(elem, Identifier):
+                        if elem.name == "_":
+                            continue
+                        frame.locals[elem.name] = subject[i]
+                    else:
+                        ok, val = self._literal_value(elem)
+                        if not ok or val != subject[i]:
+                            return False
+                spread = elements[-1]
+                if isinstance(spread, Identifier) and spread.name != "_":
+                    frame.locals[spread.name] = subject[fixed:]
+                return True
+            if len(subject) != len(elements):
+                return False
+            for i, elem in enumerate(elements):
+                if isinstance(elem, Identifier):
+                    if elem.name == "_":
+                        continue
+                    frame.locals[elem.name] = subject[i]
+                else:
+                    ok, val = self._literal_value(elem)
+                    if not ok or val != subject[i]:
+                        return False
+            return True
+
+        if isinstance(pattern, DictPattern):
+            if not isinstance(subject, dict):
+                return False
+            for key_expr, value_expr in pattern.pairs:
+                ok, key = self._literal_value(key_expr)
+                if not ok or key not in subject:
+                    return False
+                if isinstance(value_expr, Identifier):
+                    if value_expr.name == "_":
+                        continue
+                    frame.locals[value_expr.name] = subject[key]
+                else:
+                    ok, val = self._literal_value(value_expr)
+                    if not ok or val != subject[key]:
+                        return False
+            return True
+
+        return False
 
     @staticmethod
     def _resolve_builtin_member(methods: dict, name: str, expr_name: str):

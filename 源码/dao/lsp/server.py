@@ -24,6 +24,7 @@ from .protocol import read_message, write_message
 
 # JSON-RPC 2.0 标准错误码
 _METHOD_NOT_FOUND = -32601
+_INVALID_PARAMS = -32602
 _INTERNAL_ERROR = -32603
 
 SERVER_INFO = {"name": "道语言服务器", "version": __version__}
@@ -41,6 +42,10 @@ CAPABILITIES = {
     "definitionProvider": True,
     "referencesProvider": True,
     "documentSymbolProvider": True,
+    # 基于缩进的源码规范化；支持客户端通过 options.tabSize 指定缩进宽度。
+    "documentFormattingProvider": True,
+    # 重命名支持 prepareRename，编辑器可先展示占位文本与范围再执行。
+    "renameProvider": {"prepareProvider": True},
 }
 
 
@@ -83,6 +88,9 @@ class LanguageServer:
             "textDocument/definition": self._on_definition,
             "textDocument/references": self._on_references,
             "textDocument/documentSymbol": self._on_document_symbol,
+            "textDocument/formatting": self._on_formatting,
+            "textDocument/rename": self._on_rename,
+            "textDocument/prepareRename": self._on_prepare_rename,
         }
 
     # ========================
@@ -308,6 +316,55 @@ class LanguageServer:
         source = self.documents.get(self._uri(params), "")
         return features.document_symbols(source), []
 
+    @staticmethod
+    def _whole_document_range(source: str) -> dict:
+        """覆盖整篇文档的 LSP ``Range``，用于格式化 TextEdit。"""
+        lines = source.split("\n")
+        return {
+            "start": {"line": 0, "character": 0},
+            "end": {"line": max(0, len(lines) - 1), "character": len(lines[-1])},
+        }
+
+    def _on_formatting(self, params) -> tuple:
+        """规范化整篇文档；无变化时不产生编辑。"""
+        uri = self._uri(params)
+        source = self.documents.get(uri, "")
+        formatted = features.format_document(source, params.get("options") or {})
+        if formatted == source:
+            return [], []
+        return (
+            [
+                {
+                    "range": self._whole_document_range(source),
+                    "newText": formatted,
+                }
+            ],
+            [],
+        )
+
+    def _on_prepare_rename(self, params) -> tuple:
+        uri = self._uri(params)
+        source = self.documents.get(uri, "")
+        line, character = self._position(params)
+        return features.prepare_rename(source, line, character), []
+
+    def _on_rename(self, params) -> tuple:
+        uri = self._uri(params)
+        source = self.documents.get(uri, "")
+        line, character = self._position(params)
+        return (
+            features.rename_edits(
+                source,
+                line,
+                character,
+                params.get("newName"),
+                uri,
+                self.workspace_roots,
+                self.documents,
+            ),
+            [],
+        )
+
     # ========================
     # 分派与主循环
     # ========================
@@ -337,6 +394,11 @@ class LanguageServer:
             return []
         try:
             result, notifications = handler(params)
+        except features.重命名错误 as error:
+            # 重命名相关的可预期错误直接回传中文消息，便于编辑器提示用户。
+            if is_request:
+                return [self._error(msg_id, _INVALID_PARAMS, str(error))]
+            return []
         # 有意宽泛捕获：错误源码时降级返回已有信息，绝不让 LSP 服务器崩溃
         except Exception as error:  # noqa: BLE001
             if is_request:

@@ -21,6 +21,7 @@ def _init_registry():
     """导入并登记全部标准库模块工厂函数。"""
     from . import asyncio as _asyncio_mod
     from . import (
+        archive as _archive_mod,
         collection,
         crypto,
         db,
@@ -30,6 +31,8 @@ def _init_registry():
         log,
         math,
         network,
+        path as _path_mod,
+        process as _process_mod,
         schedule,
         system,
         test,
@@ -52,6 +55,9 @@ def _init_registry():
     register_module("数据库", db.create_module_env)
     register_module("调度", schedule.create_module_env)
     register_module("大模型", llm.create_module_env)
+    register_module("路径", _path_mod.create_module_env)
+    register_module("进程", _process_mod.create_module_env)
+    register_module("归档", _archive_mod.create_module_env)
 
 
 _initialized = False

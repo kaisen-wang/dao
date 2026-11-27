@@ -266,6 +266,9 @@ class Test端到端:
                 return ["gemma4:e4b", "qwen2:7b"]
 
         monkeypatch.setitem(llm_factory._Providers, "假端", 端到端Provider)
+        # 先触发惰性初始化，确保 monkeypatch 记录到原有工厂并在 teardown 时恢复，
+        # 否则会误删「大模型」键，污染后续测试的标准库注册表。
+        registry_mod.ensure_initialized()
         monkeypatch.setitem(registry_mod._STDLIB_REGISTRY, "大模型", create_module_env)
         monkeypatch.setattr(StdlibLoader, "STDLIB_NAMES", None)
 

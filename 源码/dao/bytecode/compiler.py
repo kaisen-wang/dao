@@ -5,11 +5,15 @@ from ..ast_nodes import (
     BinaryOp,
     BooleanLiteral,
     BreakStmt,
+    ChannelExpr,
     ClassDecl,
     CompareOp,
+    ConditionalExpr,
     ContinueStmt,
     DictLiteral,
+    DictPattern,
     EnumDecl,
+    EnumVariantPattern,
     Expression,
     ExpressionStmt,
     ForInStmt,
@@ -22,15 +26,20 @@ from ..ast_nodes import (
     IndexAccess,
     LambdaExpr,
     ListLiteral,
+    ListPattern,
+    MatchStmt,
     MemberAccess,
     NullLiteral,
     NumberLiteral,
     Program,
+    ReceiveExpr,
     ReturnStmt,
+    SendStmt,
     SetLiteral,
     StringLiteral,
     TraitDecl,
     TupleLiteral,
+    TypeCheckPattern,
     UnaryOp,
     VariableDecl,
     WhileStmt,
@@ -51,6 +60,7 @@ class BytecodeCompiler:
         self._constant_cache: dict = {}
         self._scope_stack: list[CompileScope] = [CompileScope()]
         self._loop_stack: list[dict] = []  # 循环栈，存储 break/continue 跳转目标
+        self._temp_counter: int = 0
 
     def compile(self, program: Program) -> CodeObject:
         code = CodeObject(name="<module>")
@@ -68,8 +78,16 @@ class BytecodeCompiler:
     def _compile_statement(self, stmt, code: CodeObject):
         if isinstance(stmt, VariableDecl):
             self._compile_variable_decl(stmt, code)
+        elif isinstance(stmt, EnumDecl):
+            self._compile_enum_decl(stmt, code)
         elif isinstance(stmt, FunctionDecl):
             self._compile_function_decl(stmt, code)
+        elif isinstance(stmt, MatchStmt):
+            self._compile_match_stmt(stmt, code)
+        elif isinstance(stmt, SendStmt):
+            self._compile_expression(stmt.channel, code)
+            self._compile_expression(stmt.value, code)
+            code.emit(OpCode.SEND_VALUE, line=stmt.line)
         elif isinstance(stmt, IfStmt):
             self._compile_if_stmt(stmt, code)
         elif isinstance(stmt, WhileStmt):
@@ -106,6 +124,105 @@ class BytecodeCompiler:
             scope.local_names.append(stmt.name)
         idx = scope.local_names.index(stmt.name)
         code.emit(OpCode.STORE_LOCAL, idx, line=stmt.line)
+
+    def _compile_enum_decl(self, stmt: EnumDecl, code: CodeObject):
+        """编译枚举声明：在运行时构造 DaoEnum 对象并存入局部变量。"""
+        variants = [
+            (getattr(v, "name", ""), list(getattr(v, "params", [])))
+            for v in stmt.variants
+        ]
+        descriptor = (stmt.name, list(stmt.values), variants)
+        idx = self._add_constant(descriptor, code)
+        code.emit(OpCode.BUILD_ENUM, idx, line=stmt.line)
+        scope = self._scope_stack[-1]
+        if stmt.name not in scope.local_names:
+            scope.local_names.append(stmt.name)
+        local_idx = scope.local_names.index(stmt.name)
+        code.emit(OpCode.STORE_LOCAL, local_idx, line=stmt.line)
+
+    @staticmethod
+    def _pattern_bindings(pattern) -> list[str]:
+        """收集模式会绑定的变量名（排除通配符 '_'）。"""
+        names: list[str] = []
+
+        def add(expr):
+            if isinstance(expr, Identifier) and expr.name != "_":
+                names.append(expr.name)
+
+        if isinstance(pattern, Identifier):
+            add(pattern)
+        elif isinstance(pattern, ListPattern):
+            for elem in pattern.elements:
+                add(elem)
+        elif isinstance(pattern, DictPattern):
+            for _, value in pattern.pairs:
+                add(value)
+        elif isinstance(pattern, EnumVariantPattern):
+            if pattern.binding:
+                names.append(pattern.binding)
+        elif isinstance(pattern, FunctionCall) and isinstance(pattern.callee, MemberAccess):
+            for arg in pattern.arguments:
+                add(arg)
+        return names
+
+    def _compile_match_stmt(self, stmt: MatchStmt, code: CodeObject):
+        """编译匹配语句为顺序的模式检查 + 跳转链。"""
+        self._compile_expression(stmt.subject, code)
+        self._temp_counter += 1
+        temp_name = f"__匹配主体_{self._temp_counter}"
+        scope = self._scope_stack[-1]
+        if temp_name not in scope.local_names:
+            scope.local_names.append(temp_name)
+        subject_idx = scope.local_names.index(temp_name)
+        code.emit(OpCode.STORE_LOCAL, subject_idx, line=stmt.line)
+
+        # 预先把所有模式会绑定的名字加入当前作用域，供分支体读取
+        for case in stmt.cases:
+            for name in self._pattern_bindings(case.pattern):
+                if name not in scope.local_names:
+                    scope.local_names.append(name)
+
+        pending_skips: list[int] = []
+        end_jumps: list[int] = []
+
+        for case in stmt.cases:
+            for jump in pending_skips:
+                self._patch_jump(jump, code)
+            pending_skips = []
+
+            # 模式检查：压入布尔结果
+            code.emit(OpCode.LOAD_LOCAL, subject_idx, line=case.line)
+            pattern_data = (case.pattern, bool(case.is_wildcard))
+            const_idx = self._add_constant(pattern_data, code)
+            code.emit(OpCode.MATCH_PATTERN, const_idx, line=case.line)
+            pending_skips.append(
+                self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, case.line)
+            )
+
+            # 守卫条件
+            if case.guard is not None:
+                self._compile_expression(case.guard, code)
+                pending_skips.append(
+                    self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, case.line)
+                )
+
+            # 分支体（内联编译，使 return/break/continue 能正确传播）
+            for i, s in enumerate(case.body):
+                is_last = i == len(case.body) - 1
+                if is_last and isinstance(s, ExpressionStmt):
+                    # 保留最后一个表达式的值作为匹配语句结果
+                    self._compile_expression(s.expression, code)
+                else:
+                    self._compile_statement(s, code)
+            end_jumps.append(self._emit_jump(OpCode.JUMP, code, case.line))
+
+        # 所有分支都未命中时，压入 None 作为默认值
+        for jump in pending_skips:
+            self._patch_jump(jump, code)
+        code.emit(OpCode.LOAD_CONST, self._add_constant(None, code), line=stmt.line)
+        # 命中分支跳过默认值
+        for jump in end_jumps:
+            self._patch_jump(jump, code)
 
     def _compile_function_decl(self, stmt: FunctionDecl, code: CodeObject):
         func_code = CodeObject(name=stmt.name)
@@ -254,30 +371,63 @@ class BytecodeCompiler:
             else:
                 code.emit(OpCode.LOAD_NAME, self._add_constant(expr.name, code), line=expr.line)
         elif isinstance(expr, BinaryOp):
-            self._compile_expression(expr.left, code)
-            self._compile_expression(expr.right, code)
             op_map = {
                 "+": OpCode.BINARY_ADD, "-": OpCode.BINARY_SUB,
                 "*": OpCode.BINARY_MUL, "/": OpCode.BINARY_DIV,
                 "%": OpCode.BINARY_MOD, "**": OpCode.BINARY_POW,
                 "//": OpCode.BINARY_FLOOR_DIV,
-                "并且": OpCode.LOGICAL_AND, "或者": OpCode.LOGICAL_OR,
             }
-            if expr.operator in op_map:
-                code.emit(op_map[expr.operator], line=expr.line)
-            elif expr.operator in ("==", "!=", "<", ">", "<=", ">="):
-                cmp_map = {
-                    "==": OpCode.COMPARE_EQ, "!=": OpCode.COMPARE_NE,
-                    "<": OpCode.COMPARE_LT, "<=": OpCode.COMPARE_LE,
-                    ">": OpCode.COMPARE_GT, ">=": OpCode.COMPARE_GE,
-                }
-                code.emit(cmp_map[expr.operator], line=expr.line)
+            if expr.operator == "并且":
+                # 短路求值：左值为假时直接返回左值，不求值右侧
+                self._compile_expression(expr.left, code)
+                code.emit(OpCode.DUP_TOP, line=expr.line)
+                short_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, expr.line)
+                code.emit(OpCode.POP_TOP, line=expr.line)
+                self._compile_expression(expr.right, code)
+                self._patch_jump(short_jump, code)
+            elif expr.operator == "或者":
+                # 短路求值：左值为真时直接返回左值，不求值右侧
+                self._compile_expression(expr.left, code)
+                code.emit(OpCode.DUP_TOP, line=expr.line)
+                code.emit(OpCode.UNARY_NOT, line=expr.line)
+                short_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, expr.line)
+                code.emit(OpCode.POP_TOP, line=expr.line)
+                self._compile_expression(expr.right, code)
+                self._patch_jump(short_jump, code)
+            else:
+                # 算术与比较运算：先求值左右操作数
+                self._compile_expression(expr.left, code)
+                self._compile_expression(expr.right, code)
+                if expr.operator in op_map:
+                    code.emit(op_map[expr.operator], line=expr.line)
+                elif expr.operator in ("==", "!=", "<", ">", "<=", ">="):
+                    cmp_map = {
+                        "==": OpCode.COMPARE_EQ, "!=": OpCode.COMPARE_NE,
+                        "<": OpCode.COMPARE_LT, "<=": OpCode.COMPARE_LE,
+                        ">": OpCode.COMPARE_GT, ">=": OpCode.COMPARE_GE,
+                    }
+                    code.emit(cmp_map[expr.operator], line=expr.line)
         elif isinstance(expr, UnaryOp):
             self._compile_expression(expr.operand, code)
             if expr.operator == "-":
                 code.emit(OpCode.UNARY_NEGATIVE, line=expr.line)
             elif expr.operator in ("不是", "!"):
                 code.emit(OpCode.UNARY_NOT, line=expr.line)
+        elif isinstance(expr, ConditionalExpr):
+            # 条件表达式：先求值条件，再选择真/假分支
+            self._compile_expression(expr.condition, code)
+            else_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, expr.line)
+            self._compile_expression(expr.true_value, code)
+            end_jump = self._emit_jump(OpCode.JUMP, code, expr.line)
+            self._patch_jump(else_jump, code)
+            self._compile_expression(expr.false_value, code)
+            self._patch_jump(end_jump, code)
+        elif isinstance(expr, ChannelExpr):
+            capacity_idx = self._add_constant(expr.capacity, code)
+            code.emit(OpCode.BUILD_CHANNEL, capacity_idx, line=expr.line)
+        elif isinstance(expr, ReceiveExpr):
+            self._compile_expression(expr.channel, code)
+            code.emit(OpCode.RECEIVE_VALUE, line=expr.line)
         elif isinstance(expr, FunctionCall):
             self._compile_expression(expr.callee, code)
             for arg in expr.arguments:
@@ -328,7 +478,9 @@ class BytecodeCompiler:
 
     def _add_constant(self, value, code: CodeObject) -> int:
         for i, c in enumerate(code.constants):
-            if c == value:
+            # 类型必须一致：否则 True == 1、False == 0 会错误复用常量，
+            # 导致 VM 把布尔字面量求值为整数（AST 与 VM 语义不一致）。
+            if type(c) is type(value) and c == value:
                 return i
         idx = len(code.constants)
         code.constants.append(value)

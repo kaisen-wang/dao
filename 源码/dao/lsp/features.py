@@ -11,6 +11,8 @@ LSP 语言特性实现
 - :func:`document_symbols`     : 基于 AST 的文档符号（含嵌套与控制流内的子符号）
 - :func:`definition_locations` : 当前文档内 + 跨文件的定义跳转（解析 ``导入`` 语句）
 - :func:`reference_locations`  : 工作区内某符号的全部引用位置
+- :func:`prepare_rename` / :func:`rename_edits` : 重命名范围校验与工作区编辑
+- :func:`format_document`     : 基于缩进的源码规范化（复用 :mod:`dao.lsp.formatting`）
 - :func:`build_workspace_index` / :func:`resolve_import_target` : 工作区索引与模块路径解析
 - :func:`word_at` / :func:`word_prefix_at` : 取光标处的词 / 词前缀
 
@@ -49,6 +51,7 @@ from dao.lexer import Lexer
 from dao.parser import Parser
 from dao.stdlib.registry import STDLIB_REGISTRY
 from dao.tokens import KEYWORDS
+from .formatting import _is_protected, _protected_spans, format_source
 
 # 标识符 / 中文词：以「非数字、非下划线的单词字符」开头，后接单词字符。
 # Python 的 \w 默认包含中文，因此「我的变量」会被整体识别为一个词。
@@ -1017,3 +1020,178 @@ def reference_locations(
                 }
             )
     return locations
+
+
+# ========================
+# 格式化与重命名
+# ========================
+
+
+class 重命名错误(ValueError):
+    """重命名请求参数或目标不合法；服务器将其转成带中文消息的 JSON-RPC 错误。"""
+
+
+def format_document(source: str, options=None) -> str:
+    """按 LSP ``FormattingOptions`` 规范化源码；不改动字符串与注释内容。
+
+    仅采用 ``tabSize``（非法值由格式化核心回退到 4）；道语言不支持制表符，
+    因此 ``insertSpaces`` 不影响结果。
+    """
+    options = options if isinstance(options, dict) else {}
+    return format_source(source or "", options.get("tabSize", 4))
+
+
+def word_range_at(source: str, line: int, character: int) -> dict | None:
+    """返回光标所在词的 LSP ``Range``；空白或越界返回 ``None``。"""
+    lines = (source or "").splitlines()
+    if line < 0 or line >= len(lines):
+        return None
+    text = lines[line]
+    for match in _WORD_RE.finditer(text):
+        if match.start() <= character <= match.end():
+            return {
+                "start": {"line": line, "character": match.start()},
+                "end": {"line": line, "character": match.end()},
+            }
+    return None
+
+
+def _rename_rejection(word: str) -> str | None:
+    """返回不可重命名的原因；允许时返回 ``None``。"""
+    if word in KEYWORDS:
+        return f"「{word}」是关键字，不能重命名"
+    if word in _builtin_names():
+        return f"「{word}」是内置函数，不能重命名"
+    if word in _stdlib_names():
+        return f"「{word}」是标准库模块名，不能重命名"
+    return None
+
+
+def _validate_new_name(new_name) -> str:
+    """校验新名字；合法时返回它本身，否则抛出中文 :class:`重命名错误`。"""
+    if not isinstance(new_name, str) or not _WORD_RE.fullmatch(new_name):
+        raise 重命名错误("新名字必须是合法标识符（以中文或字母开头，仅含字母、数字、下划线）")
+    reason = _rename_rejection(new_name)
+    if reason is not None:
+        raise 重命名错误(f"新名字不可用：{reason}")
+    return new_name
+
+
+def prepare_rename(source: str, line: int, character: int) -> dict:
+    """``textDocument/prepareRename``：返回待重命名标识符的范围与占位文本。"""
+    word = word_at(source, line, character)
+    if not word:
+        raise 重命名错误("光标处没有可重命名的标识符")
+    reason = _rename_rejection(word)
+    if reason is not None:
+        raise 重命名错误(reason)
+    word_range = word_range_at(source, line, character)
+    if word_range is None:
+        raise 重命名错误("无法确定标识符的范围")
+    return {"range": word_range, "placeholder": word}
+
+
+def _offset_of(source: str, line: int, character: int) -> int:
+    """把 LSP 0-based 行列换算成源码下标（仅供过滤字符串 / 注释中的伪引用）。"""
+    offset = 0
+    for index, text_line in enumerate(source.split("\n")):
+        if index == line:
+            return offset + max(0, min(character, len(text_line.rstrip("\r"))))
+        offset += len(text_line) + 1
+    return len(source)
+
+
+def _word_locations_in_source(source: str, word: str, uri: str) -> list[dict]:
+    """在单份源码中按词边界收集出现位置（无工作区时的兜底范围）。"""
+    spans = _protected_spans(source)
+    locations: list[dict] = []
+    for match in _WORD_RE.finditer(source):
+        if match.group() != word or _is_protected(spans, match.start()):
+            continue
+        line_no = source.count("\n", 0, match.start())
+        last_newline = source.rfind("\n", 0, match.start())
+        char_no = match.start() - (last_newline + 1)
+        locations.append(
+            {
+                "uri": uri,
+                "range": {
+                    "start": {"line": line_no, "character": char_no},
+                    "end": {"line": line_no, "character": char_no + len(word)},
+                },
+            }
+        )
+    return locations
+
+
+def rename_edits(
+    source: str,
+    line: int,
+    character: int,
+    new_name: str,
+    uri: str,
+    workspace_roots=(),
+    documents=None,
+) -> dict:
+    """构造工作区重命名编辑（LSP ``WorkspaceEdit``）。
+
+    范围严格限于工作区的 ``.道`` 文件；未初始化工作区时只改当前文档。
+    字符串字面量与注释中的同名词会被过滤，避免误改非标识符出现。
+    """
+    word = word_at(source, line, character)
+    if not word:
+        raise 重命名错误("光标处没有可重命名的标识符")
+    reason = _rename_rejection(word)
+    if reason is not None:
+        raise 重命名错误(reason)
+    new_name = _validate_new_name(new_name)
+    if new_name == word:
+        return {"changes": {}}
+
+    roots = [os.path.abspath(root) for root in (workspace_roots or ()) if root]
+    if roots:
+        locations = reference_locations(source, line, character, uri, roots, documents)
+    else:
+        locations = _word_locations_in_source(source, word, uri)
+
+    current_path = os.path.abspath(uri_to_path(uri) or "") if uri else ""
+    changes: dict[str, list[dict]] = {}
+    seen: dict[str, set[tuple[int, int]]] = {}
+    for location in locations:
+        loc_uri = location.get("uri", "")
+        path = uri_to_path(loc_uri)
+        if not path:
+            continue
+        path = os.path.abspath(path)
+        if roots:
+            if not any(path == root or path.startswith(root + os.sep) for root in roots):
+                continue
+        elif path != current_path:
+            continue
+        text = (documents or {}).get(loc_uri)
+        if text is None:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    text = handle.read()
+            except (OSError, UnicodeError):
+                continue
+        word_range = location["range"]
+        start = word_range["start"]
+        if _is_protected(
+            _protected_spans(text), _offset_of(text, start["line"], start["character"])
+        ):
+            continue
+        key = (start["line"], start["character"])
+        bucket = seen.setdefault(loc_uri, set())
+        if key in bucket:
+            continue
+        bucket.add(key)
+        changes.setdefault(loc_uri, []).append({"range": word_range, "newText": new_name})
+
+    for edits in changes.values():
+        edits.sort(
+            key=lambda edit: (
+                edit["range"]["start"]["line"],
+                edit["range"]["start"]["character"],
+            )
+        )
+    return {"changes": changes}

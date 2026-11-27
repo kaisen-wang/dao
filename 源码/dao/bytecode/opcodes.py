@@ -45,3 +45,11 @@ class OpCode(Enum):
     UNARY_NOT = auto()
     LOGICAL_AND = auto()
     LOGICAL_OR = auto()
+    # 枚举声明：构造枚举类型对象
+    BUILD_ENUM = auto()
+    # 模式匹配：对主体执行模式检查（含绑定副作用），压入布尔结果
+    MATCH_PATTERN = auto()
+    # 通道原语
+    BUILD_CHANNEL = auto()
+    SEND_VALUE = auto()
+    RECEIVE_VALUE = auto()
