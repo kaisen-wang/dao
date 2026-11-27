@@ -61,6 +61,7 @@ main.onefile-build/
 
 ### 更夫本地测试临时数据库（运行脚本生成，勿入库） ###
 _测_*.db
+_测_*.db-*
 
 ### WorkBuddy ###
 .workbuddy/
