@@ -5,4 +5,5 @@
 augroup dao_ftdetect
   autocmd!
   autocmd BufRead,BufNewFile *.道,*.dao set filetype=dao
+  autocmd BufRead,BufNewFile 道.配置 set filetype=daoconfig
 augroup END

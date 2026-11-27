@@ -146,6 +146,9 @@ if not vim.g.dao_lsp_commands_loaded then
   vim.g.dao_lsp_commands_loaded = true
 end
 
+-- 注册打包 / 运行命令（与 道.配置 文件共用，只注册一次）
+require("dao_cli").setup(python_bin, source_dir, find_root_dir)
+
 -- 打开 .道 / .dao 文件时自动启动
 M.start()
 

@@ -51,6 +51,44 @@ function resolvePythonPath(configured, sourceDir) {
   return path.resolve(__dirname, configured);
 }
 
+function workspaceRoot() {
+  const folders = vscode.workspace.workspaceFolders || [];
+  return folders.length ? folders[0].uri.fsPath : undefined;
+}
+
+/** 在集成终端运行道语言 CLI 子命令。 */
+function runDaoCli(subcommand, args, sourceDir, pythonPath) {
+  const cwd = workspaceRoot();
+  if (!cwd) {
+    vscode.window.showErrorMessage('请先打开一个道语言项目目录');
+    return;
+  }
+  const mainPy = path.join(sourceDir, 'main.py');
+  if (!fs.existsSync(mainPy)) {
+    vscode.window.showErrorMessage(`找不到道语言入口：${mainPy}`);
+    return;
+  }
+  const quote = (value) => `"${String(value).replace(/"/g, '\\"')}"`;
+  const command = [pythonPath, mainPy, subcommand, ...args].map(quote).join(' ');
+  const terminal = vscode.window.createTerminal({ name: `道语言 ${subcommand}`, cwd });
+  terminal.show();
+  terminal.sendText(command);
+}
+
+/** 选择 .道包 / .道应用 文件；从资源管理器调用时直接使用传入的 uri。 */
+async function pickDaoFile(uri, extension, label) {
+  if (uri && uri.fsPath) {
+    return uri.fsPath;
+  }
+  const selected = await vscode.window.showOpenDialog({
+    canSelectFiles: true,
+    canSelectFolders: false,
+    canSelectMany: false,
+    filters: { [label]: [extension] },
+  });
+  return selected && selected.length ? selected[0].fsPath : undefined;
+}
+
 function activate(context) {
   const config = vscode.workspace.getConfiguration('dao');
   const sourceDir = resolveSourceDir();
@@ -75,6 +113,54 @@ function activate(context) {
 
   client = new LanguageClient('dao', '道语言服务', serverOptions, clientOptions);
   context.subscriptions.push(client.start());
+
+  // 道.配置 的字段补全：本地提供，不依赖 LSP 是否支持该语言。
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      { language: 'dao-config' },
+      {
+        provideCompletionItems() {
+          const fields = [
+            ['名称', '包名'],
+            ['版本', '包版本（语义化版本）'],
+            ['道版本', '所需道语言版本约束，如 >=1.2.0'],
+            ['作者', '作者'],
+            ['描述', '包描述'],
+            ['入口', '入口文件'],
+            ['依赖', '依赖分节'],
+            ['开发依赖', '开发依赖分节'],
+          ];
+          return fields.map(([label, detail]) => {
+            const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.Property);
+            item.detail = detail;
+            return item;
+          });
+        },
+      }
+    )
+  );
+
+  // 打包 / 运行命令：复用已有的源码目录与 Python 路径解析。
+  context.subscriptions.push(
+    vscode.commands.registerCommand('dao.pack', () => {
+      runDaoCli('pack', [workspaceRoot()], sourceDir, pythonPath);
+    }),
+    vscode.commands.registerCommand('dao.build', () => {
+      runDaoCli('build', [workspaceRoot()], sourceDir, pythonPath);
+    }),
+    vscode.commands.registerCommand('dao.install', async (uri) => {
+      const file = await pickDaoFile(uri, '道包', '道语言依赖包');
+      if (file) {
+        runDaoCli('install', [file, '-p', workspaceRoot()], sourceDir, pythonPath);
+      }
+    }),
+    vscode.commands.registerCommand('dao.runApp', async (uri) => {
+      const file = await pickDaoFile(uri, '道应用', '道语言应用包');
+      if (file) {
+        runDaoCli('run', [file], sourceDir, pythonPath);
+      }
+    })
+  );
 }
 
 function deactivate() {

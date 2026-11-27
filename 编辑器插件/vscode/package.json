@@ -23,7 +23,12 @@
     "lsp"
   ],
   "activationEvents": [
-    "onLanguage:dao"
+    "onLanguage:dao",
+    "onLanguage:dao-config",
+    "onCommand:dao.pack",
+    "onCommand:dao.install",
+    "onCommand:dao.build",
+    "onCommand:dao.runApp"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -33,6 +38,12 @@
         "aliases": ["道语言", "道", "Dao", "dao"],
         "extensions": [".道"],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "dao-config",
+        "aliases": ["道语言配置", "道配置", "Dao Config"],
+        "filenames": ["道.配置"],
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
@@ -40,6 +51,11 @@
         "language": "dao",
         "scopeName": "source.dao",
         "path": "./syntaxes/dao.tmLanguage.json"
+      },
+      {
+        "language": "dao-config",
+        "scopeName": "source.dao.config",
+        "path": "./syntaxes/dao-config.tmLanguage.json"
       }
     ],
     "configuration": {
@@ -57,6 +73,18 @@
           "description": "是否在「输出」面板记录与 LSP 服务器的通信，用于故障排查。"
         }
       }
+    },
+    "commands": [
+      { "command": "dao.pack", "title": "道语言：打包依赖包" },
+      { "command": "dao.install", "title": "道语言：安装依赖包" },
+      { "command": "dao.build", "title": "道语言：打包应用" },
+      { "command": "dao.runApp", "title": "道语言：运行应用包" }
+    ],
+    "menus": {
+      "explorer/context": [
+        { "command": "dao.install", "when": "resourceExtname == '.道包'", "group": "navigation" },
+        { "command": "dao.runApp", "when": "resourceExtname == '.道应用'", "group": "navigation" }
+      ]
     }
   },
   "dependencies": {

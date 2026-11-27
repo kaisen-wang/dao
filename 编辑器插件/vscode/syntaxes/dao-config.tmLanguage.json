@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "道语言配置",
+  "scopeName": "source.dao.config",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#section" },
+    { "include": "#field" },
+    { "include": "#version-operator" },
+    { "include": "#version" },
+    { "include": "#number" }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.double-slash.dao-config",
+      "match": "//.*$"
+    },
+    "section": {
+      "name": "entity.name.section.dao-config",
+      "match": "^\\s*(?:开发依赖|依赖)\\s*(?://.*)?$"
+    },
+    "field": {
+      "match": "^\\s*(道版本|名称|版本|作者|描述|入口)(?=\\s|$)",
+      "captures": {
+        "1": { "name": "support.type.property-name.dao-config" }
+      }
+    },
+    "version-operator": {
+      "name": "keyword.operator.version.dao-config",
+      "match": ">=|<=|==|\\^|~|>|<"
+    },
+    "version": {
+      "name": "constant.numeric.version.dao-config",
+      "match": "\\d+\\.\\d+\\.\\d+(?:[-+][A-Za-z0-9.]+)?"
+    },
+    "number": {
+      "name": "constant.numeric.dao-config",
+      "match": "\\b\\d+\\b"
+    }
+  }
+}

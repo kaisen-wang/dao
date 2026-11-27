@@ -8,7 +8,7 @@
 2. 文件模式：执行 .道 文件（传入文件路径）
 3. 项目模式：读取项目根目录的 道.配置，按「入口」字段运行项目
 
-另提供依赖包与应用打包子命令：pack / 打包、install / 安装、packages / 包列表、build / 构建应用、run-app / 运行应用。
+另提供依赖包与应用打包子命令：pack / 打包、install / 安装、packages / 包列表、build / 构建应用、run / 运行（运行项目或 .道应用 应用包）。
 
 使用方法：
     python main.py                      # 启动 REPL
@@ -16,10 +16,10 @@
     python main.py run                  # 运行当前项目（读取 道.配置）
     python main.py 运行                 # 同上（中文命令）
     python main.py run 路径/到/项目     # 运行指定目录下的项目
+    python main.py run 应用.道应用      # 解压并运行 .道应用 应用包
     python main.py pack                 # 把当前项目打成 .道包
     python main.py install 包.道包      # 把 .道包 安装到当前项目
     python main.py build               # 把当前项目打成 .道应用
-    python main.py run-app 应用.道应用  # 解压并运行应用包
 """
 
 import argparse
@@ -107,7 +107,6 @@ PACK_COMMANDS = ("pack", "打包")
 INSTALL_COMMANDS = ("install", "安装")
 LIST_COMMANDS = ("packages", "包列表")
 BUILD_COMMANDS = ("build", "构建应用", "打包应用")
-RUN_APP_COMMANDS = ("run-app", "运行应用")
 
 
 # 入口路径解析与包管理器共用 dao.package.config.resolve_entry_path，
@@ -483,16 +482,50 @@ def _add_execution_args(arg_parser: argparse.ArgumentParser):
     arg_parser.add_argument("--jit", action="store_true", help="启用 JIT 编译（仅 VM 模式）")
 
 
+def _run_app(archive: str, mode: str = "interpreter", type_check: bool = False,
+             disasm: bool = False, jit: bool = False):
+    """解压并运行一个 ``.道应用``（由 ``run`` 命令在参数为应用包时调用）。"""
+    from dao.package.app import check_app_dao_version, extract_app, inspect_app
+
+    try:
+        manifest = inspect_app(archive)
+        check_app_dao_version(manifest)
+        temp_dir = tempfile.mkdtemp(prefix="dao-app-")
+    except (OSError, ValueError) as e:
+        print(f"错误：运行应用失败：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    original_cwd = os.getcwd()
+    try:
+        app_dir = extract_app(archive, temp_dir)
+        os.chdir(app_dir)
+        run_project(app_dir, mode=mode, type_check=type_check,
+                    disasm=disasm, jit=jit)
+    finally:
+        os.chdir(original_cwd)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def _main_run(argv: list[str], command: str = "run"):
-    """解析 ``run`` / ``运行`` 子命令的参数。"""
+    """解析 ``run`` / ``运行`` 子命令的参数。
+
+    ``.道应用`` 文件按应用包运行，其余按项目目录运行（默认当前目录）。
+    """
     arg_parser = argparse.ArgumentParser(
         prog=f"dao {command}",
-        description="读取项目根目录的 道.配置，按「入口」字段运行项目",
+        description="运行项目或 .道应用 应用包（读取 道.配置，按「入口」字段运行）",
     )
     arg_parser.add_argument("path", nargs="?", default=".",
-                            help="项目目录（默认当前目录）")
+                            help="项目目录或 .道应用 应用包（默认当前目录）")
     _add_execution_args(arg_parser)
     args = arg_parser.parse_args(argv)
+
+    from dao.package.app import APP_SUFFIX
+
+    if args.path.endswith(APP_SUFFIX):
+        _run_app(args.path, mode=args.mode, type_check=args.type_check,
+                 disasm=args.disasm, jit=args.jit)
+        return
 
     run_project(args.path, mode=args.mode, type_check=args.type_check,
                 disasm=args.disasm, jit=args.jit)
@@ -604,37 +637,6 @@ def _main_build_app(argv: list[str], command: str = "build"):
     print(f"已生成应用包：{archive_path}")
 
 
-def _main_run_app(argv: list[str], command: str = "run-app"):
-    """解压并运行一个 ``.道应用``。"""
-    arg_parser = argparse.ArgumentParser(
-        prog=f"dao {command}",
-        description="解压 .道应用 到临时目录并运行其入口",
-    )
-    arg_parser.add_argument("archive", help="要运行的 .道应用 文件")
-    _add_execution_args(arg_parser)
-    args = arg_parser.parse_args(argv)
-
-    from dao.package.app import check_app_dao_version, extract_app, inspect_app
-
-    try:
-        manifest = inspect_app(args.archive)
-        check_app_dao_version(manifest)
-        temp_dir = tempfile.mkdtemp(prefix="dao-app-")
-    except (OSError, ValueError) as e:
-        print(f"错误：运行应用失败：{e}", file=sys.stderr)
-        sys.exit(1)
-
-    original_cwd = os.getcwd()
-    try:
-        app_dir = extract_app(args.archive, temp_dir)
-        os.chdir(app_dir)
-        run_project(app_dir, mode=args.mode, type_check=args.type_check,
-                    disasm=args.disasm, jit=args.jit)
-    finally:
-        os.chdir(original_cwd)
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
 def _main_default(argv: list[str]):
     """原有的 REPL / 单文件执行模式。"""
     arg_parser = argparse.ArgumentParser(description="道（Dao）编程语言")
@@ -663,8 +665,6 @@ def main():
         _main_list_packages(argv[1:], argv[0])
     elif argv and argv[0] in BUILD_COMMANDS:
         _main_build_app(argv[1:], argv[0])
-    elif argv and argv[0] in RUN_APP_COMMANDS:
-        _main_run_app(argv[1:], argv[0])
     else:
         _main_default(argv)
 

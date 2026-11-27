@@ -1,4 +1,4 @@
-"""CLI 应用打包测试（build / 构建应用、run-app / 运行应用）。"""
+"""CLI 应用打包测试（build / 构建应用、run / 运行应用包）。"""
 
 import os
 import subprocess
@@ -83,14 +83,30 @@ def test_build_缺少入口时报错(tmp_path):
     assert "入口" in result.stderr
 
 
-@pytest.mark.parametrize("command", ["run-app", "运行应用"])
-def test_run_app_命令运行应用(tmp_path, command):
+@pytest.mark.parametrize("command", ["run", "运行"])
+def test_run_命令运行应用包(tmp_path, command):
+    """run / 运行 后跟 .道应用 时运行应用包。"""
     archive = build_with_dependency(tmp_path)
 
     result = run_cli([command, str(archive)], tmp_path)
 
     assert result.returncode == 0, result.stderr
     assert "5" in result.stdout
+
+
+def test_run_无参数运行当前项目(tmp_path):
+    """dao run 无参数时运行当前工作目录的项目（与 .道应用 参数分流）。"""
+    project = tmp_path / "普通项目"
+    project.mkdir()
+    (project / "道.配置").write_text(
+        "名称 普通项目\n版本 1.0.0\n入口 主程序\n", encoding="utf-8"
+    )
+    (project / "主程序.道").write_text('打印("RUN_CURRENT_PROJECT")\n', encoding="utf-8")
+
+    result = run_cli(["run"], project)
+
+    assert result.returncode == 0, result.stderr
+    assert "RUN_CURRENT_PROJECT" in result.stdout
 
 
 def test_应用可脱离原项目运行(tmp_path):
@@ -103,24 +119,24 @@ def test_应用可脱离原项目运行(tmp_path):
     shutil.rmtree(app_dir / "道包")
     (app_dir / "主程序.道").unlink()
 
-    result = run_cli(["run-app", str(archive)], tmp_path)
+    result = run_cli(["run", str(archive)], tmp_path)
 
     assert result.returncode == 0, result.stderr
     assert "5" in result.stdout
 
 
-def test_run_app_道版本不满足时报错(tmp_path):
+def test_run_道版本不满足时报错(tmp_path):
     archive = build_with_dependency(tmp_path, dao_version=">=2.0.0")
-    result = run_cli(["run-app", str(archive)], tmp_path)
+    result = run_cli(["run", str(archive)], tmp_path)
     assert result.returncode != 0
     assert "需要道语言版本" in result.stderr
 
 
-def test_run_app_运行后清理临时目录(tmp_path):
+def test_run_运行应用后清理临时目录(tmp_path):
     archive = build_with_dependency(tmp_path)
     before = {p.name for p in Path("/tmp").glob("dao-app-*")}
 
-    result = run_cli(["run-app", str(archive)], tmp_path)
+    result = run_cli(["run", str(archive)], tmp_path)
 
     assert result.returncode == 0, result.stderr
     after = {p.name for p in Path("/tmp").glob("dao-app-*")}

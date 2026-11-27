@@ -8,10 +8,13 @@
 
 ```
 编辑器插件/neovim/
-├── ftdetect/dao.vim    # 识别 *.道 与 *.dao 文件
-├── ftplugin/dao.lua    # 启动内置 LSP、设置缩进、定义用户命令
-├── lsp/dao_ls.lua      # nvim-lspconfig server 配置（可贡献上游）
-├── syntax/dao.vim      # 传统正则语法高亮（无 tree-sitter）
+├── ftdetect/dao.vim       # 识别 *.道、*.dao 与 道.配置 文件
+├── ftplugin/dao.lua       # 启动内置 LSP、设置缩进、定义用户命令
+├── ftplugin/daoconfig.lua # 道.配置 字段补全（omnifunc）
+├── lua/dao_cli.lua        # 打包 / 运行命令的共享实现
+├── lsp/dao_ls.lua         # nvim-lspconfig server 配置（可贡献上游）
+├── syntax/dao.vim         # 传统正则语法高亮（无 tree-sitter）
+├── syntax/daoconfig.vim   # 道.配置 字段与版本约束高亮
 └── README.md
 ```
 
@@ -20,6 +23,8 @@
 - **文件类型识别**：打开 `.道` 或 `.dao` 文件自动设置 `filetype=dao`。
 - **LSP 智能功能**：诊断（实时报错）、补全、悬停文档、跳转定义、文档符号。
 - **语法高亮**：完整关键字表、四种注释、字符串与模板字符串、数值、逻辑变量、宏调用、管道等。
+- **`道.配置` 支持**：打开 `道.配置` 自动设为 `filetype=daoconfig`，字段与版本约束高亮；在插入模式用 `Ctrl-X Ctrl-O` 补全字段名。
+- **打包命令**：`:DaoPack` / `:DaoInstall` / `:DaoBuild` / `:DaoRunApp`，可直接在编辑器里打包依赖包或应用。
 - **缩进**：4 空格缩进（与道语言官方示例一致，词法分析器禁止 Tab 与空格混用）。
 
 ## 安装
@@ -50,14 +55,14 @@ ln -s "<项目根目录>/编辑器插件/neovim" ~/.config/nvim/pack/dao/start/d
 ```lua
 {
   dir = "<项目根目录>/编辑器插件/neovim",
-  ft = "dao",
+  ft = { "dao", "daoconfig" },
 }
 ```
 
 ### 方式四：packer.nvim
 
 ```lua
-use({ "<项目根目录>/编辑器插件/neovim", ft = "dao" })
+use({ "<项目根目录>/编辑器插件/neovim", ft = { "dao", "daoconfig" } })
 ```
 
 > 注意：请把 `<项目根目录>` 替换为实际路径。插件内部所有源码/解释器路径均相对插件目录动态推导，不含任何固定机器路径。
@@ -141,6 +146,10 @@ require('lspconfig').dao_ls.setup({})
 | --- | --- |
 | `:DaoLspStart` | 启动（或复用）道语言 LSP 服务器 |
 | `:DaoLspStop` | 停止道语言 LSP 服务器 |
+| `:DaoPack` | 把当前项目打包为 `.道包` 依赖包 |
+| `:DaoInstall [文件]` | 安装 `.道包` 到当前项目（省略文件时提示输入） |
+| `:DaoBuild` | 把当前项目打包为自带依赖的 `.道应用` |
+| `:DaoRunApp [文件]` | 运行 `.道应用`（省略文件时提示输入） |
 
 打开 `.道` / `.dao` 文件时会自动调用启动逻辑，通常无需手动执行。
 
