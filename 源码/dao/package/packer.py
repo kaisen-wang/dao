@@ -2,7 +2,7 @@
 
 一个「依赖包」是扩展名为 ``.道包`` 的 ZIP 归档，内部结构为：
 
-    道.配置          （包元数据，必须包含「名称」与「版本」）
+    道.配置          （包元数据，含「名称」「版本」，可选「道版本」约束）
     主程序.道        （包的源码，保持项目内的相对目录结构）
     子目录/工具.道
     README.md        （可选）
@@ -22,7 +22,9 @@ import shutil
 import zipfile
 from pathlib import Path
 
+from ..version import __version__
 from .config import PackageConfig
+from .version import Version
 
 CONFIG_FILENAME = "道.配置"
 PACKAGE_SUFFIX = ".道包"
@@ -47,6 +49,30 @@ def _validate_config(config: PackageConfig) -> None:
         raise ValueError(f"{CONFIG_FILENAME} 缺少「版本」配置")
     if re.search(r'[\\/:*?"<>|]', config.name):
         raise ValueError(f"包名称含有非法字符：{config.name}")
+
+
+def check_dao_version(
+    config: PackageConfig,
+    current_version: str | None = None,
+) -> None:
+    """校验包声明的「道版本」约束与当前解释器版本是否兼容。
+
+    包未声明「道版本」时直接通过，保持旧包可用。
+
+    :param config: 包元数据
+    :param current_version: 用于测试或外部指定的当前版本，默认取解释器版本
+    :raises ValueError: 当前版本不满足包的道版本约束
+    """
+    if config.dao_version is None:
+        return
+
+    current = Version.parse(current_version) if current_version else Version.parse(__version__)
+    if config.dao_version.matches(current):
+        return
+
+    raise ValueError(
+        f"包 '{config.name}' 需要道语言版本 {config.dao_version}，当前版本为 {current}"
+    )
 
 
 def _safe_arcname(name: str) -> str:
@@ -163,6 +189,7 @@ def install_package(
     project_dir: str | None = None,
     global_install: bool = False,
     force: bool = False,
+    check_version: bool = True,
 ) -> str:
     """把一个 ``.道包`` 安装为本地或全局依赖。
 
@@ -170,11 +197,14 @@ def install_package(
     :param project_dir: 本地安装的目标项目根目录，默认当前工作目录
     :param global_install: 为真时安装到 ``~/.道/包/``
     :param force: 已安装不同版本时是否强制覆盖
+    :param check_version: 是否校验包声明的「道版本」与当前解释器兼容
     :return: 安装后的包目录绝对路径
-    :raises ValueError: 归档无效、版本冲突或目标路径不是目录
+    :raises ValueError: 归档无效、道版本不兼容、版本冲突或目标路径不是目录
     """
     archive = Path(archive_path).expanduser().resolve()
     config = inspect_package(str(archive))
+    if check_version:
+        check_dao_version(config)
 
     if global_install:
         target_root = Path.home() / ".道" / "包"
@@ -214,8 +244,8 @@ def install_package(
 def list_installed_packages(
     project_dir: str | None = None,
     global_install: bool = False,
-) -> list[tuple[str, str]]:
-    """列出已安装的包，返回 ``(名称, 版本字符串)`` 列表。"""
+) -> list[tuple[str, str, str]]:
+    """列出已安装的包，返回 ``(名称, 版本, 道版本约束)`` 列表。"""
     if global_install:
         target_root = Path.home() / ".道" / "包"
     else:
@@ -224,12 +254,14 @@ def list_installed_packages(
     if not target_root.is_dir():
         return []
 
-    result: list[tuple[str, str]] = []
+    result: list[tuple[str, str, str]] = []
     for child in sorted(target_root.iterdir(), key=lambda p: p.name):
         if not child.is_dir():
             continue
         config = _config_from_dir(child)
         if config is None:
             continue
-        result.append((config.name or child.name, str(config.version) if config.version else "未知"))
+        dao_version = str(config.dao_version) if config.dao_version else ""
+        version = str(config.version) if config.version else "未知"
+        result.append((config.name or child.name, version, dao_version))
     return result

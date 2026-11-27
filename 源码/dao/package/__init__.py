@@ -3,6 +3,7 @@ from .manager import PackageManager
 from .packer import (
     CONFIG_FILENAME,
     PACKAGE_SUFFIX,
+    check_dao_version,
     inspect_package,
     install_package,
     list_installed_packages,
@@ -20,6 +21,7 @@ __all__ = [
     "PackageResolver",
     "Version",
     "VersionConstraint",
+    "check_dao_version",
     "inspect_package",
     "install_package",
     "list_installed_packages",

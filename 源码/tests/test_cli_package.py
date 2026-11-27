@@ -28,11 +28,17 @@ def run_cli(args: list[str], cwd: Path):
     )
 
 
-def make_library(root: Path, name: str = "数学库", version: str = "1.2.0") -> Path:
+def make_library(
+    root: Path,
+    name: str = "数学库",
+    version: str = "1.2.0",
+    dao_version: str | None = None,
+) -> Path:
     project = root / f"{name}-{version}-src"
     (project / "工具").mkdir(parents=True)
+    dao_line = f"道版本 {dao_version}\n" if dao_version else ""
     (project / "道.配置").write_text(
-        f"名称 {name}\n版本 {version}\n入口 主程序\n\n依赖\n\n开发依赖\n",
+        f"名称 {name}\n版本 {version}\n{dao_line}入口 主程序\n\n依赖\n\n开发依赖\n",
         encoding="utf-8",
     )
     (project / "主程序.道").write_text(
@@ -143,6 +149,35 @@ def test_版本冲突需强制覆盖(tmp_path):
     forced = run_cli(["install", str(new_archive), "-p", str(app), "--force"], tmp_path)
     assert forced.returncode == 0, forced.stderr
     assert "版本 2.0.0" in (app / "道包" / "数学库" / "道.配置").read_text(encoding="utf-8")
+
+
+def test_install_道版本不满足时报错且可跳过(tmp_path):
+    library = make_library(tmp_path, dao_version=">=2.0.0")
+    assert run_cli(["pack", str(library)], tmp_path).returncode == 0
+    app = make_app(tmp_path)
+    archive = library / "数学库-1.2.0.道包"
+
+    blocked = run_cli(["install", str(archive), "-p", str(app)], tmp_path)
+    assert blocked.returncode != 0
+    assert "需要道语言版本" in blocked.stderr
+    assert not (app / "道包" / "数学库").exists()
+
+    skipped = run_cli(
+        ["install", str(archive), "-p", str(app), "--skip-version-check"], tmp_path
+    )
+    assert skipped.returncode == 0, skipped.stderr
+    assert (app / "道包" / "数学库" / "主程序.道").is_file()
+
+
+def test_包列表显示道版本要求(tmp_path):
+    library = make_library(tmp_path, version="1.3.0", dao_version=">=1.2.0")
+    assert run_cli(["pack", str(library)], tmp_path).returncode == 0
+    app = make_app(tmp_path, version="1.3.0")
+    archive = library / "数学库-1.3.0.道包"
+    assert run_cli(["install", str(archive), "-p", str(app)], tmp_path).returncode == 0
+
+    result = run_cli(["packages", str(app)], tmp_path)
+    assert "数学库 1.3.0（道版本 >=1.2.0）" in result.stdout
 
 
 def test_入口解析函数仍从主入口导出(tmp_path):

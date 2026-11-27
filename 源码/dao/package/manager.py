@@ -78,6 +78,7 @@ class PackageManager:
         archive_path: str,
         global_install: bool = False,
         force: bool = False,
+        check_version: bool = True,
     ) -> str:
         """安装一个 ``.道包`` 归档，返回安装后的包目录。
 
@@ -88,6 +89,7 @@ class PackageManager:
             project_dir=self.project_dir,
             global_install=global_install,
             force=force,
+            check_version=check_version,
         )
         self.invalidate_cache()
         return target

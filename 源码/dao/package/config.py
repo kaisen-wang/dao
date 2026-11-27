@@ -69,6 +69,7 @@ class PackageConfig:
     author: str = ""
     description: str = ""
     entry: str = ""
+    dao_version: VersionConstraint | None = None
     dependencies: list[Dependency] = field(default_factory=list)
     dev_dependencies: list[Dependency] = field(default_factory=list)
 
@@ -102,6 +103,10 @@ class PackageConfig:
                     config.description = value
                 elif key == "入口":
                     config.entry = value
+                elif key == "道版本":
+                    if not value:
+                        raise ValueError("配置项「道版本」不能为空")
+                    config.dao_version = VersionConstraint.parse(value)
             elif current_section == "deps":
                 dep = Dependency.parse(line, is_dev=False)
                 config.dependencies.append(dep)
@@ -123,6 +128,8 @@ class PackageConfig:
             lines.append(f"名称 {self.name}")
         if self.version:
             lines.append(f"版本 {self.version}")
+        if self.dao_version:
+            lines.append(f"道版本 {self.dao_version}")
         if self.author:
             lines.append(f"作者 {self.author}")
         if self.description:

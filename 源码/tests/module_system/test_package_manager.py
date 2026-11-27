@@ -2,20 +2,22 @@
 包管理系统测试
 """
 
-import sys
 import os
-import tempfile
 import shutil
+import sys
+import tempfile
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from dao.package.version import Version, VersionConstraint
-from dao.package.config import PackageConfig, Dependency
-from dao.package.resolver import PackageResolver
-from dao.package.manager import PackageManager
-from dao.lexer import Lexer
-from dao.parser import Parser
 from dao.interpreter import Interpreter
+from dao.lexer import Lexer
+from dao.package.config import Dependency, PackageConfig
+from dao.package.manager import PackageManager
+from dao.package.resolver import PackageResolver
+from dao.package.version import Version, VersionConstraint
+from dao.parser import Parser
 
 
 class TestVersion:
@@ -251,6 +253,32 @@ class TestPackageConfig:
         assert "版本 1.0.0" in result
         assert "依赖" in result
         assert "网络框架 >=2.0.0" in result
+
+    def test_parse_dao_version(self):
+        config = PackageConfig.parse("名称 我的项目\n版本 1.0.0\n道版本 >=1.2.0\n")
+        assert config.dao_version is not None
+        assert config.dao_version.operator == ">="
+        assert str(config.dao_version) == ">=1.2.0"
+
+    def test_parse_dao_version_兼容幂等约束(self):
+        config = PackageConfig.parse("名称 我的项目\n版本 1.0.0\n道版本 ^1.2.0\n")
+        assert config.dao_version is not None
+        assert config.dao_version.operator == "^"
+        assert config.dao_version.matches(Version(1, 5, 0))
+        assert not config.dao_version.matches(Version(2, 0, 0))
+
+    def test_parse_dao_version_缺省与空值(self):
+        old = PackageConfig.parse("名称 旧项目\n版本 1.0.0\n")
+        assert old.dao_version is None
+        with pytest.raises(ValueError, match="道版本"):
+            PackageConfig.parse("名称 新项目\n版本 1.0.0\n道版本\n")
+
+    def test_str_roundtrip_with_dao_version(self):
+        content = "名称 我的项目\n版本 1.0.0\n道版本 >=1.2.0\n入口 主程序.道\n"
+        config = PackageConfig.parse(content)
+        result = str(config)
+        assert "道版本 >=1.2.0" in result
+        assert PackageConfig.parse(result).dao_version.operator == ">="
 
 
 class TestPackageResolver:

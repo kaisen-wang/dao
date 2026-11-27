@@ -528,6 +528,8 @@ def _main_install(argv: list[str], command: str = "install"):
                             help="安装到 ~/.道/包/ 全局目录")
     arg_parser.add_argument("-f", "--force", action="store_true",
                             help="已安装不同版本时强制覆盖")
+    arg_parser.add_argument("--skip-version-check", action="store_true",
+                            help="跳过包声明的「道版本」兼容性检查")
     args = arg_parser.parse_args(argv)
 
     from dao.package.packer import install_package
@@ -538,6 +540,7 @@ def _main_install(argv: list[str], command: str = "install"):
             project_dir=args.project,
             global_install=args.global_install,
             force=args.force,
+            check_version=not args.skip_version_check,
         )
     except (OSError, ValueError) as e:
         print(f"错误：安装失败：{e}", file=sys.stderr)
@@ -565,8 +568,9 @@ def _main_list_packages(argv: list[str], command: str = "包列表"):
         print("尚未安装任何依赖包")
     else:
         print("已安装依赖：")
-        for name, version in packages:
-            print(f"  {name} {version}")
+        for name, version, dao_version in packages:
+            suffix = f"（道版本 {dao_version}）" if dao_version else ""
+            print(f"  {name} {version}{suffix}")
 
 
 def _main_default(argv: list[str]):

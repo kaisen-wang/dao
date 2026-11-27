@@ -4,6 +4,7 @@
 - 打包生成 .道包 归档，并排除缓存/依赖/构建目录
 - 配置校验与归档安全性校验
 - 安装到本地 / 全局目录、幂等安装、版本冲突强制覆盖
+- 包声明的「道版本」约束随包携带，并在安装时校验兼容性
 - 安装后立即可被 PackageManager 解析并导入
 """
 
@@ -16,10 +17,12 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from dao.package.config import PackageConfig
 from dao.package.manager import PackageManager
 from dao.package.packer import (
     CONFIG_FILENAME,
     PACKAGE_SUFFIX,
+    check_dao_version,
     inspect_package,
     install_package,
     list_installed_packages,
@@ -27,12 +30,18 @@ from dao.package.packer import (
 )
 
 
-def make_package_project(root: Path, name: str = "数学库", version: str = "1.2.0") -> Path:
+def make_package_project(
+    root: Path,
+    name: str = "数学库",
+    version: str = "1.2.0",
+    dao_version: str | None = None,
+) -> Path:
     """构造一个最小可打包的道语言项目。"""
     project = root / name
     (project / "工具").mkdir(parents=True)
+    dao_line = f"道版本 {dao_version}\n" if dao_version else ""
     (project / CONFIG_FILENAME).write_text(
-        f"名称 {name}\n版本 {version}\n入口 主程序\n\n依赖\n\n开发依赖\n",
+        f"名称 {name}\n版本 {version}\n{dao_line}入口 主程序\n\n依赖\n\n开发依赖\n",
         encoding="utf-8",
     )
     (project / "主程序.道").write_text(
@@ -208,12 +217,12 @@ class TestInstallPackage:
         app.mkdir()
         install_package(archive_path, project_dir=str(app))
 
-        assert list_installed_packages(str(app)) == [("数学库", "1.2.0")]
+        assert list_installed_packages(str(app)) == [("数学库", "1.2.0", "")]
         assert list_installed_packages(str(tmp_path / "空白项目")) == []
 
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
         install_package(archive_path, global_install=True)
-        assert list_installed_packages(global_install=True) == [("数学库", "1.2.0")]
+        assert list_installed_packages(global_install=True) == [("数学库", "1.2.0", "")]
 
 
 class TestPackageManagerIntegration:
@@ -252,3 +261,62 @@ class TestPackageManagerIntegration:
         entry.write_text("导出 函数 测试()\n    返回 1\n", encoding="utf-8")
 
         assert PackageManager(project_dir=str(app)).resolve_module("数学库") == str(entry)
+
+
+class TestDaoVersion:
+    def test_校验兼容与不兼容(self):
+        config = PackageConfig.parse("名称 数学库\n版本 1.0.0\n道版本 >=1.2.0\n")
+        check_dao_version(config, "1.2.0")
+        check_dao_version(config, "1.5.0")
+        with pytest.raises(ValueError, match="需要道语言版本"):
+            check_dao_version(config, "1.1.1")
+
+    def test_未声明道版本的包直接通过(self):
+        config = PackageConfig.parse("名称 旧包\n版本 1.0.0\n")
+        check_dao_version(config, "0.1.0")
+
+    def test_打包后元数据携带道版本(self, tmp_path):
+        project = make_package_project(tmp_path, dao_version=">=1.2.0")
+        archive_path = pack_project(str(project))
+
+        config = inspect_package(archive_path)
+        assert str(config.dao_version) == ">=1.2.0"
+        with zipfile.ZipFile(archive_path) as zf:
+            assert "道版本 >=1.2.0" in zf.read(CONFIG_FILENAME).decode("utf-8")
+
+    def test_安装时校验道版本并可跳过(self, tmp_path):
+        project = make_package_project(tmp_path, dao_version=">=2.0.0")
+        archive_path = pack_project(str(project))
+        app = tmp_path / "应用"
+        app.mkdir()
+
+        with pytest.raises(ValueError, match="需要道语言版本"):
+            install_package(archive_path, project_dir=str(app))
+
+        target = install_package(
+            archive_path, project_dir=str(app), check_version=False
+        )
+        assert (Path(target) / CONFIG_FILENAME).is_file()
+
+    def test_包列表展示道版本要求(self, tmp_path):
+        project = make_package_project(tmp_path, dao_version="^1.2.0")
+        archive_path = pack_project(str(project))
+        app = tmp_path / "应用"
+        app.mkdir()
+        install_package(archive_path, project_dir=str(app))
+
+        assert list_installed_packages(str(app)) == [("数学库", "1.2.0", "^1.2.0")]
+
+    def test_包管理器install支持跳过版本检查(self, tmp_path):
+        project = make_package_project(tmp_path, dao_version=">=2.0.0")
+        archive_path = pack_project(str(project))
+        app = tmp_path / "应用"
+        app.mkdir()
+        (app / CONFIG_FILENAME).write_text(
+            "名称 应用\n版本 1.0.0\n依赖\n    数学库 >=1.0.0\n", encoding="utf-8"
+        )
+        manager = PackageManager(project_dir=str(app))
+
+        with pytest.raises(ValueError, match="需要道语言版本"):
+            manager.install(archive_path)
+        assert manager.install(archive_path, check_version=False).endswith("数学库")
