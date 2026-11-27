@@ -22,11 +22,13 @@ def _init_registry():
     from . import asyncio as _asyncio_mod
     from . import (
         archive as _archive_mod,
+        binary as _binary_mod,
         collection,
         crypto,
         db,
         encoding,
         file,
+        i18n as _i18n_mod,
         llm,
         log,
         math,
@@ -58,6 +60,8 @@ def _init_registry():
     register_module("路径", _path_mod.create_module_env)
     register_module("进程", _process_mod.create_module_env)
     register_module("归档", _archive_mod.create_module_env)
+    register_module("二进制", _binary_mod.create_module_env)
+    register_module("国际化", _i18n_mod.create_module_env)
 
 
 _initialized = False

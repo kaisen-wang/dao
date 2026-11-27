@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ SUPPORTED_COMMANDS = (
     "stackTrace",
     "scopes",
     "variables",
+    "setVariable",
     "continue",
     "next",
     "stepIn",
@@ -194,6 +196,9 @@ class DAP适配器:
         self.下一个序号 = 1
         self.异常退出 = False
         self._状态锁 = threading.RLock()
+        # (文件, 行号) -> {"条件": str, "命中条件": str, "命中次数": int}
+        self.断点条件: dict[tuple[str, int], dict] = {}
+        self.异常断点过滤器: set[str] = set()
 
     # ---------------- 消息收发 ----------------
     def _取序号(self) -> int:
@@ -253,16 +258,24 @@ class DAP适配器:
                 "supportsConfigurationDoneRequest": True,
                 "supportsEvaluateForHovers": True,
                 "supportsFunctionBreakpoints": False,
-                "supportsConditionalBreakpoints": False,
+                "supportsConditionalBreakpoints": True,
+                "supportsHitConditionalBreakpoints": True,
                 "supportsStepBack": False,
-                "supportsSetVariable": False,
+                "supportsSetVariable": True,
                 "supportsRestartRequest": False,
-                "exceptionBreakpointFilters": [],
+                "exceptionBreakpointFilters": [
+                    {"filter": "raised", "label": "所有异常", "default": False},
+                    {"filter": "uncaught", "label": "未捕获异常", "default": False},
+                ],
             },
         )
         self.发送事件("initialized")
 
     def _处理setExceptionBreakpoints(self, 请求: dict) -> None:
+        参数 = 请求.get("arguments") or {}
+        self.异常断点过滤器 = set(参数.get("filters") or [])
+        self.debugger.异常断点启用 = bool(self.异常断点过滤器)
+        self.debugger.异常过滤器 = set(self.异常断点过滤器)
         self.发送响应(请求, {"breakpoints": []})
 
     def _处理setBreakpoints(self, 请求: dict) -> None:
@@ -276,15 +289,48 @@ class DAP适配器:
         for 旧断点 in self.debugger.列出断点():
             if 旧断点.文件 == 路径:
                 self.debugger.删除断点(路径, 旧断点.行号)
+        for 键 in [键 for 键 in self.断点条件 if 键[0] == 路径]:
+            del self.断点条件[键]
 
+        行数 = self._源文件行数(路径)
         结果 = []
         for 序号, 断点参数 in enumerate(断点列表, start=1):
             行号 = 断点参数.get("line", 0)
-            if not isinstance(行号, int) or 行号 < 1:
+            验证, 原因 = self._验证断点行(路径, 行号, 行数)
+            条目: dict[str, Any] = {"id": 序号, "verified": 验证, "line": 行号}
+            if not 验证:
+                条目["reason"] = 原因
+                结果.append(条目)
                 continue
             self.debugger.设置断点(路径, 行号)
-            结果.append({"id": 序号, "verified": True, "line": 行号})
+            self.断点条件[(路径, 行号)] = {
+                "条件": str(断点参数.get("condition") or ""),
+                "命中条件": str(断点参数.get("hitCondition") or ""),
+                "命中次数": 0,
+            }
+            结果.append(条目)
         self.发送响应(请求, {"breakpoints": 结果})
+
+    def _源文件行数(self, 路径: str) -> int | None:
+        """返回源文件行数；空路径、文件不存在或不可读时返回 None。"""
+        if not 路径:
+            return None  # 空路径表示通配，交由调试器按 AST 匹配，不校验行数
+        try:
+            return len(Path(路径).read_text(encoding="utf-8").splitlines())
+        except (OSError, UnicodeError):
+            return None
+
+    @staticmethod
+    def _验证断点行(
+        路径: str, 行号: Any, 行数: int | None
+    ) -> tuple[bool, str]:
+        if not isinstance(行号, int) or isinstance(行号, bool) or 行号 < 1:
+            return False, "行号必须为正整数"
+        if 路径 and 行数 is None:
+            return False, f"源文件不存在或不可读: {路径}"
+        if 行数 is not None and 行号 > 行数:
+            return False, f"行号 {行号} 超出源文件范围（共 {行数} 行）"
+        return True, ""
 
     def _处理launch(self, 请求: dict) -> None:
         参数 = 请求.get("arguments") or {}
@@ -381,21 +427,89 @@ class DAP适配器:
             )
         self.发送响应(请求, {"variables": 变量})
 
+    def _处理setVariable(self, 请求: dict) -> None:
+        参数 = 请求.get("arguments") or {}
+        引用 = 参数.get("variablesReference", 0)
+        名称 = str(参数.get("name", ""))
+        文本值 = 参数.get("value", "")
+        if self.暂停事件 is None:
+            self.发送响应(请求, 成功=False, 消息="程序未在暂停状态，无法写入变量")
+            return
+        try:
+            新值 = self._求值表达式(str(文本值), self.暂停事件.环境)
+        except Exception as 异常:
+            self.发送响应(请求, 成功=False, 消息=f"写入值表达式解析失败: {异常}")
+            return
+
+        if 引用 == 1:
+            环境 = self.暂停事件.环境
+            if not 环境.has(名称):
+                self.发送响应(请求, 成功=False, 消息=f"变量 '{名称}' 不存在，无法写入")
+                return
+            try:
+                环境.set(名称, 新值)
+            except Exception as 异常:
+                self.发送响应(请求, 成功=False, 消息=f"变量 '{名称}' 不可写: {异常}")
+                return
+        else:
+            容器 = self.变量表.get(引用)
+            if 容器 is None:
+                self.发送响应(请求, 成功=False, 消息=f"未知的变量引用: {引用}")
+                return
+            if isinstance(容器, dict):
+                if 名称 not in 容器:
+                    self.发送响应(请求, 成功=False, 消息=f"键 '{名称}' 不存在，无法写入")
+                    return
+                容器[名称] = 新值
+            elif isinstance(容器, list):
+                try:
+                    索引 = int(名称)
+                except ValueError:
+                    self.发送响应(请求, 成功=False, 消息=f"列表下标必须是整数: {名称}")
+                    return
+                if 索引 < 0 or 索引 >= len(容器):
+                    self.发送响应(请求, 成功=False, 消息=f"下标 {索引} 超出列表范围")
+                    return
+                容器[索引] = 新值
+            else:
+                self.发送响应(
+                    请求,
+                    成功=False,
+                    消息=f"{type(容器).__name__} 类型只读，无法写入",
+                )
+                return
+        self.发送响应(
+            请求,
+            {
+                "value": _格式化值(新值),
+                "type": type(新值).__name__,
+                "variablesReference": self._容器引用(新值),
+            },
+        )
+
+    def _取求值环境(self) -> Any:
+        if self.暂停事件 is not None:
+            return self.暂停事件.环境
+        if self.执行器 is not None:
+            return self.执行器.global_env
+        return None
+
+    def _求值表达式(self, 表达式: str, 环境: Any = None) -> Any:
+        """用道语言的词法/语法/求值器计算表达式；失败时抛出异常。"""
+        词法 = Lexer(表达式)
+        语法 = Parser(词法.tokenize(), 表达式)
+        表达式节点 = 语法.parse_expression()
+        if 环境 is None:
+            环境 = self._取求值环境()
+        if 环境 is None or self.执行器 is None:
+            raise RuntimeError("程序尚未启动，无法求值")
+        return self.执行器.eval_expression(表达式节点, 环境)
+
     def _处理evaluate(self, 请求: dict) -> None:
         参数 = 请求.get("arguments") or {}
         表达式 = 参数.get("expression", "")
         try:
-            词法 = Lexer(表达式)
-            语法 = Parser(词法.tokenize(), 表达式)
-            表达式节点 = 语法.parse_expression()
-            环境 = (
-                self.暂停事件.环境
-                if self.暂停事件 is not None
-                else (self.执行器.global_env if self.执行器 else None)
-            )
-            if 环境 is None or self.执行器 is None:
-                raise RuntimeError("程序尚未启动，无法求值")
-            值 = self.执行器.eval_expression(表达式节点, 环境)
+            值 = self._求值表达式(表达式)
             self.发送响应(
                 请求,
                 {
@@ -476,16 +590,15 @@ class DAP适配器:
                 self.发送事件("exited", {"exitCode": 1 if self.异常退出 else 0})
 
     def _暂停回调(self, 事件: 暂停事件):
-        """由 DebugExecutor 在每条语句前调用；决定是否在此处停住并等待客户端。"""
+        """由 DebugExecutor 在语句前/异常穿过 尝试 处调用；决定是否停住等待客户端。"""
         if not self.已连接:
             return 调试指令.继续
 
-        命中断点 = any(
-            断点.启用
-            and 断点.行号 == 事件.行号
-            and 断点.文件 in ("", 事件.文件)
-            for 断点 in self.debugger.列出断点()
-        )
+        # 异常断点事件优先处理，不进入普通断点/单步判断
+        if 事件.异常 is not None:
+            return self._处理异常暂停(事件)
+
+        命中断点 = self._命中断点(事件)
         深度 = len(事件.调用栈)
         入口暂停 = self.停止于入口 and self.首语句
 
@@ -513,6 +626,10 @@ class DAP适配器:
             if 命中断点
             else ("entry" if 入口暂停 else "step")
         )
+        return self._暂停于(事件, 原因)
+
+    def _暂停于(self, 事件: 暂停事件, 原因: str, 描述: str | None = None):
+        """统一的暂停阻塞逻辑：记录上下文、发 stopped 事件并等待恢复。"""
         with self._状态锁:
             self.暂停事件 = 事件
             self.停止原因 = 原因
@@ -524,11 +641,94 @@ class DAP适配器:
                 "reason": 原因,
                 "threadId": self.线程编号,
                 "text": None,
-                "description": f"在第 {事件.行号} 行暂停（{原因}）",
+                "description": 描述 or f"在第 {事件.行号} 行暂停（{原因}）",
             },
         )
         self.恢复事件.wait()
         return 调试指令.继续
+
+    def _命中断点(self, 事件: 暂停事件) -> bool:
+        """判断当前位置是否真实命中断点：逐条累加命中次数并核对条件。"""
+        命中 = False
+        for 断点 in self.debugger.列出断点():
+            if not (
+                断点.启用
+                and 断点.行号 == 事件.行号
+                and 断点.文件 in ("", 事件.文件)
+            ):
+                continue
+            配置 = self.断点条件.get((断点.文件, 断点.行号))
+            if 配置 is not None:
+                配置["命中次数"] += 1
+                if not self._条件通过(配置, 事件):
+                    continue
+            命中 = True
+        return 命中
+
+    def _条件通过(self, 配置: dict, 事件: 暂停事件) -> bool:
+        条件 = 配置.get("条件", "")
+        命中条件 = 配置.get("命中条件", "")
+        if 命中条件 and not self._命中次数满足(命中条件, 配置["命中次数"]):
+            return False
+        if 条件:
+            try:
+                值 = self._求值表达式(条件, 事件.环境)
+            except Exception as 异常:
+                self.发送事件(
+                    "output",
+                    {
+                        "category": "stderr",
+                        "output": f"断点条件语法或求值错误: {异常}\n",
+                    },
+                )
+                return False
+            if not bool(值):
+                return False
+        return True
+
+    def _命中次数满足(self, 表达式: str, 次数: int) -> bool:
+        文本 = 表达式.strip()
+        try:
+            return 次数 == int(文本)
+        except ValueError:
+            pass
+        比较 = re.fullmatch(r"(>=|<=|==|=|>|<)\s*(\d+)", 文本)
+        if 比较:
+            符号, 数值 = 比较.group(1), int(比较.group(2))
+            return {
+                ">=": 次数 >= 数值,
+                "<=": 次数 <= 数值,
+                "==": 次数 == 数值,
+                "=": 次数 == 数值,
+                ">": 次数 > 数值,
+                "<": 次数 < 数值,
+            }[符号]
+        取模 = re.fullmatch(r"%\s*(\d+)\s*==\s*0", 文本)
+        if 取模:
+            步长 = int(取模.group(1))
+            return 步长 > 0 and 次数 % 步长 == 0
+        self.发送事件(
+            "output",
+            {
+                "category": "stderr",
+                "output": f"不支持的命中次数条件: {表达式}（支持数字、>=N、%N==0）\n",
+            },
+        )
+        return False
+
+    def _处理异常暂停(self, 事件: 暂停事件):
+        异常 = 事件.异常
+        名称 = type(异常).__name__
+        if "raised" in self.异常断点过滤器:
+            应停 = True
+        elif "uncaught" in self.异常断点过滤器 and not 事件.已捕获:
+            应停 = True
+        else:
+            应停 = False
+        if not 应停:
+            return 调试指令.继续
+        描述 = f"异常 {名称}: {异常}（第 {事件.行号} 行）"
+        return self._暂停于(事件, "exception", 描述)
 
     def _恢复(self, 命令: str) -> None:
         with self._状态锁:

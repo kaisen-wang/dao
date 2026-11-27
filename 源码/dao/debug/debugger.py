@@ -58,6 +58,9 @@ class 暂停事件:
     环境: Environment
     调用栈: list
     步数: int
+    # 异常断点专用：异常对象；已捕获表示异常会被某个 捕获 分支接住
+    异常: BaseException | None = None
+    已捕获: bool = False
 
     def 查看变量(self, 名称: str | None = None) -> Any:
         """名称为空：返回当前作用域变量字典；否则沿作用域链查找该变量。"""
@@ -85,6 +88,10 @@ class Debugger:
         self.事件列表: list[暂停事件] = []
         self.最后事件: 暂停事件 | None = None
         self.暂停回调: Callable[[暂停事件], 调试指令 | str | None] | None = None
+        # 异常断点开关由 DAP 适配器的 setExceptionBreakpoints 配置；
+        # 默认关闭以保证基础调试层的既有行为完全不变。
+        self.异常断点启用: bool = False
+        self.异常过滤器: set[str] = set()
 
     # ---------------- 断点管理 ----------------
     def 设置断点(self, 文件: str, 行号: int) -> 断点:
@@ -137,6 +144,44 @@ class Debugger:
             if 指令 in (调试指令.暂停, "暂停"):
                 raise 调试暂停(事件)
 
+    def 报告异常(
+        self,
+        异常对象: BaseException,
+        环境: Environment,
+        文件: str,
+        行号: int,
+        列号: int,
+        已捕获: bool,
+    ) -> None:
+        """
+        异常断点钩子：由 DebugExecutor 在异常穿过 尝试 语句时调用。
+
+        与 执行前回调 不同，这里不抛出 调试暂停——异常本来的传播路径必须保留，
+        只需让回调（如 DAP 适配器）有机会暂停并等待客户端继续。
+        """
+        if not self.异常断点启用 or self.暂停回调 is None:
+            return
+        if getattr(异常对象, "_道异常断点已报告", False):
+            return
+        try:
+            setattr(异常对象, "_道异常断点已报告", True)
+        except (AttributeError, TypeError):
+            pass
+        事件 = 暂停事件(
+            文件=文件,
+            行号=行号,
+            列号=列号,
+            语句类型=type(异常对象).__name__,
+            环境=环境,
+            调用栈=环境.get_stack(),
+            步数=self.执行计数,
+            异常=异常对象,
+            已捕获=已捕获,
+        )
+        self.最后事件 = 事件
+        self.事件列表.append(事件)
+        self.暂停回调(事件)
+
     def _命中断点(self, 文件: str, 行号: int) -> bool:
         return any(
             bp.启用 and bp.行号 == 行号 and bp.文件 in ("", 文件)
@@ -174,11 +219,84 @@ class DebugExecutor(Interpreter):
         super().__init__(*args, **kwargs)
         self.debugger = debugger
         self.文件名 = 文件名
+        # 当前生效的 尝试 语句栈，用于判断异常是否会被某个 捕获 分支接住
+        self._尝试上下文: list = []
+
+    # ---------------- 异常断点 ----------------
+    def execute(self, program, env: Environment | None = None, source: str = "") -> object:
+        """顶层兜底：报告未被任何 尝试 接住的异常（供 uncaught 过滤器使用）。"""
+        try:
+            return super().execute(program, env=env, source=source)
+        except Exception as e:
+            if self._是控制流信号(e):
+                raise
+            self._报告异常(e, env if env is not None else self.global_env, 已捕获=False)
+            raise
+
+    def _是控制流信号(self, 异常对象: BaseException) -> bool:
+        from ..errors import 产出信号, 跳出信号, 继续信号, 返回信号
+
+        return isinstance(
+            异常对象, (返回信号, 跳出信号, 继续信号, 产出信号, 调试暂停)
+        )
+
+    def _报告异常(self, 异常对象: BaseException, 环境: Environment, 已捕获: bool) -> None:
+        if not self.debugger.异常断点启用:
+            return
+        行号 = getattr(异常对象, "line", getattr(异常对象, "lineno", 0)) or 0
+        列号 = getattr(异常对象, "column", getattr(异常对象, "colno", 0)) or 0
+        try:
+            行号, 列号 = int(行号), int(列号)
+        except (TypeError, ValueError):
+            行号, 列号 = 0, 0
+        self.debugger.报告异常(异常对象, 环境, self.文件名, 行号, 列号, 已捕获)
+
+    def _异常会被捕获(self, stmt, 异常对象: BaseException, 环境: Environment) -> bool:
+        """判断异常是否会被当前 尝试 语句的某个 捕获 分支接住。"""
+        from ..builtins.oop_types import DaoError
+
+        for 捕获配置 in stmt.catches:
+            错误类型 = 捕获配置.get("error_type")
+            if not 错误类型 or 错误类型 == "异常":
+                return True
+            try:
+                类型对象 = 环境.get(错误类型)
+            except Exception:
+                continue
+            if isinstance(异常对象, DaoError) and getattr(异常对象, "类型", None) is not None:
+                if 异常对象.类型 == 类型对象:
+                    return True
+            elif isinstance(类型对象, type) and isinstance(异常对象, 类型对象):
+                return True
+        return False
+
+    def _报告异常e(self, 异常对象: BaseException, 环境: Environment) -> None:
+        """按当前生效的 尝试 上下文判断异常是否会被捕获，再交给调试器报告。"""
+        if not self.debugger.异常断点启用:
+            return
+        已捕获 = any(
+            self._异常会被捕获(尝试语句, 异常对象, 环境)
+            for 尝试语句 in self._尝试上下文
+        )
+        self._报告异常(异常对象, 环境, 已捕获)
+
+    def exec_try(self, stmt, env: Environment) -> object:
+        """尝试 语句执行入口：维护上下文栈，供语句级异常钩子判断捕获范围。"""
+        self._尝试上下文.append(stmt)
+        try:
+            return super().exec_try(stmt, env)
+        finally:
+            self._尝试上下文.pop()
 
     def exec_statement(self, stmt, env: Environment) -> object:
         """顶层与块内大多数语句的执行入口。"""
         self.debugger.执行前回调(stmt, env, self.文件名)
-        return super().exec_statement(stmt, env)
+        try:
+            return super().exec_statement(stmt, env)
+        except Exception as e:
+            if not self._是控制流信号(e):
+                self._报告异常e(e, env)
+            raise
 
     def _exec_block(self, stmts: list, env: Environment) -> object:
         """
@@ -189,9 +307,14 @@ class DebugExecutor(Interpreter):
 
         result = None
         for stmt in stmts:
-            if isinstance(stmt, ExpressionStmt):
-                self.debugger.执行前回调(stmt, env, self.文件名)
-                result = self.eval_expression(stmt.expression, env)
-            else:
-                result = self.exec_statement(stmt, env)
+            try:
+                if isinstance(stmt, ExpressionStmt):
+                    self.debugger.执行前回调(stmt, env, self.文件名)
+                    result = self.eval_expression(stmt.expression, env)
+                else:
+                    result = self.exec_statement(stmt, env)
+            except Exception as e:
+                if not self._是控制流信号(e):
+                    self._报告异常e(e, env)
+                raise
         return result

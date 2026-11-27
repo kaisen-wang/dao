@@ -25,6 +25,11 @@ from dao.debug.dap import (
 
 程序源码 = "定义 a = 1\n打印(a)\n定义 b = a + 2\n打印(b)\n"
 函数源码 = "函数 加一(x)\n    返回 x + 1\n定义 a = 2\n定义 b = 加一(a)\n打印(b)\n"
+循环源码 = "定义 i = 0\n当 i < 3\n    打印(i)\n    设 i = i + 1\n"
+捕获异常源码 = "尝试\n    抛出(\"出错了\")\n捕获 e\n    打印(\"已捕获\")\n"
+未捕获异常源码 = "定义 a = 1\n抛出(\"未捕获\")\n打印(a)\n"
+常量源码 = "常量 c = 7\n打印(c)\n"
+列表源码 = "定义 a = [1, 2, 3]\n打印(a)\n"
 
 
 def 写程序(tmp_path, 源码=程序源码, 名称="demo.道"):
@@ -167,28 +172,31 @@ def test_initialize响应能力并发送初始化事件(新建适配器):
     assert len(事件(适配器.输出, "initialized")) == 1
 
 
-def test_setBreakpoints同步到调试器(新建适配器):
+def test_setBreakpoints同步到调试器(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 程序源码 + "打印(1)\n", "断点.道")
     适配器 = 新建适配器()
     请求(
         适配器,
         "setBreakpoints",
         4,
-        source={"path": "/tmp/demo.道"},
+        source={"path": 路径},
         breakpoints=[{"line": 2}, {"line": 5}, {"line": 0}],
     )
     正文 = 响应(适配器.输出, "setBreakpoints", 4)["body"]
-    assert [bp["line"] for bp in 正文["breakpoints"]] == [2, 5]
-    assert all(bp["verified"] for bp in 正文["breakpoints"])
+    assert [bp["line"] for bp in 正文["breakpoints"]] == [2, 5, 0]
+    assert all(bp["verified"] for bp in 正文["breakpoints"][:2])
+    assert 正文["breakpoints"][2]["verified"] is False
+    assert 正文["breakpoints"][2]["reason"]
     assert {(bp.文件, bp.行号) for bp in 适配器.debugger.列出断点()} == {
-        ("/tmp/demo.道", 2),
-        ("/tmp/demo.道", 5),
+        (路径, 2),
+        (路径, 5),
     }
     # 再次设置为空列表应清除该文件的断点
     请求(
         适配器,
         "setBreakpoints",
         5,
-        source={"path": "/tmp/demo.道"},
+        source={"path": 路径},
         breakpoints=[],
     )
     assert 适配器.debugger.列出断点() == []
@@ -382,3 +390,276 @@ def test_noDebug模式不暂停直接结束(新建适配器, tmp_path):
     assert 适配器.暂停事件 is None
     assert 事件(适配器.输出, "stopped") == []
     assert 事件(适配器.输出, "terminated")
+
+
+# ---------------- 条件断点 ----------------
+def test_initialize声明条件断点与变量写入能力(新建适配器):
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    能力 = 响应(适配器.输出, "initialize")["body"]
+    assert 能力["supportsConditionalBreakpoints"] is True
+    assert 能力["supportsHitConditionalBreakpoints"] is True
+    assert 能力["supportsSetVariable"] is True
+    assert {f["filter"] for f in 能力["exceptionBreakpointFilters"]} == {
+        "raised",
+        "uncaught",
+    }
+
+
+def test_条件断点仅条件为真时暂停(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path)
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(
+        适配器,
+        "setBreakpoints",
+        2,
+        source={"path": 路径},
+        breakpoints=[
+            {"line": 3, "condition": "a == 2"},  # 为假：不应暂停
+            {"line": 4, "condition": "b == 3"},  # 为真：应暂停
+        ],
+    )
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    assert 适配器.暂停事件.行号 == 4
+    assert len(事件(适配器.输出, "stopped")) == 1
+    assert 事件(适配器.输出, "stopped")[0]["body"]["reason"] == "breakpoint"
+    请求(适配器, "continue", 5)
+    适配器.执行线程.join(timeout=3)
+
+
+def test_条件断点语法错误给出中文提示(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path)
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(
+        适配器,
+        "setBreakpoints",
+        2,
+        source={"path": 路径},
+        breakpoints=[{"line": 3, "condition": "a +"}],
+    )
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 适配器.执行线程.join(timeout=3) is None
+    assert 事件(适配器.输出, "stopped") == []
+    错误输出 = [e["body"]["output"] for e in 事件(适配器.输出, "output")]
+    assert any("断点条件语法或求值错误" in 文本 for 文本 in 错误输出)
+
+
+# ---------------- 命中次数条件 ----------------
+def test_hitCondition数字在第二次命中暂停(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 循环源码, "循环.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(
+        适配器,
+        "setBreakpoints",
+        2,
+        source={"path": 路径},
+        breakpoints=[{"line": 3, "hitCondition": "2"}],
+    )
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    请求(适配器, "evaluate", 5, expression="i")
+    assert 响应(适配器.输出, "evaluate", 5)["body"]["result"] == "1"
+    请求(适配器, "continue", 6)
+    适配器.执行线程.join(timeout=3)
+    assert len(事件(适配器.输出, "stopped")) == 1
+
+
+def test_hitCondition比较表达式(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 循环源码, "循环比较.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(
+        适配器,
+        "setBreakpoints",
+        2,
+        source={"path": 路径},
+        breakpoints=[{"line": 3, "hitCondition": ">= 3"}],
+    )
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    请求(适配器, "evaluate", 5, expression="i")
+    assert 响应(适配器.输出, "evaluate", 5)["body"]["result"] == "2"
+    请求(适配器, "continue", 6)
+    适配器.执行线程.join(timeout=3)
+
+
+def test_hitCondition不支持时给出中文提示(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 循环源码, "循环非法.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(
+        适配器,
+        "setBreakpoints",
+        2,
+        source={"path": 路径},
+        breakpoints=[{"line": 3, "hitCondition": "随便写"}],
+    )
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 适配器.执行线程.join(timeout=3) is None
+    assert 事件(适配器.输出, "stopped") == []
+    错误输出 = [e["body"]["output"] for e in 事件(适配器.输出, "output")]
+    assert any("不支持的命中次数条件" in 文本 for 文本 in 错误输出)
+
+
+# ---------------- 变量写入 ----------------
+def test_setVariable修改局部变量并影响执行(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path)
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(适配器, "setBreakpoints", 2, source={"path": 路径}, breakpoints=[{"line": 2}])
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    请求(适配器, "setVariable", 5, variablesReference=1, name="a", value="10")
+    结果 = 响应(适配器.输出, "setVariable", 5)
+    assert 结果["success"] is True
+    assert 结果["body"]["value"] == "10"
+    请求(适配器, "continue", 6)
+    适配器.执行线程.join(timeout=3)
+    assert any("10" in e["body"]["output"] for e in 事件(适配器.输出, "output"))
+
+
+def test_setVariable写入不存在的变量报中文错误(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path)
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(适配器, "setBreakpoints", 2, source={"path": 路径}, breakpoints=[{"line": 2}])
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    请求(适配器, "setVariable", 5, variablesReference=1, name="不存在", value="1")
+    结果 = 响应(适配器.输出, "setVariable", 5)
+    assert 结果["success"] is False
+    assert "不存在" in 结果["message"]
+    请求(适配器, "continue", 6)
+    适配器.执行线程.join(timeout=3)
+
+
+def test_setVariable写入常量报中文错误(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 常量源码, "常量.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(适配器, "setBreakpoints", 2, source={"path": 路径}, breakpoints=[{"line": 2}])
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    请求(适配器, "setVariable", 5, variablesReference=1, name="c", value="2")
+    结果 = 响应(适配器.输出, "setVariable", 5)
+    assert 结果["success"] is False
+    assert "不可写" in 结果["message"] and "常量" in 结果["message"]
+    请求(适配器, "continue", 6)
+    适配器.执行线程.join(timeout=3)
+
+
+def test_setVariable写入列表元素(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 列表源码, "列表.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(适配器, "setBreakpoints", 2, source={"path": 路径}, breakpoints=[{"line": 2}])
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    请求(适配器, "variables", 5, variablesReference=1)
+    变量 = 响应(适配器.输出, "variables", 5)["body"]["variables"]
+    引用 = next(v["variablesReference"] for v in 变量 if v["name"] == "a")
+    assert 引用 > 0
+    请求(适配器, "setVariable", 6, variablesReference=引用, name="0", value="9")
+    assert 响应(适配器.输出, "setVariable", 6)["success"] is True
+    请求(适配器, "evaluate", 7, expression="a[0]")
+    assert 响应(适配器.输出, "evaluate", 7)["body"]["result"] == "9"
+    请求(适配器, "continue", 8)
+    适配器.执行线程.join(timeout=3)
+
+
+# ---------------- 异常断点 ----------------
+def test_异常断点raised过滤器暂停(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 捕获异常源码, "异常.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(适配器, "setExceptionBreakpoints", 2, filters=["raised"])
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    assert 适配器.停止原因 == "exception"
+    assert 事件(适配器.输出, "stopped")[0]["body"]["reason"] == "exception"
+    请求(适配器, "continue", 5)
+    适配器.执行线程.join(timeout=3)
+    assert any("已捕获" in e["body"]["output"] for e in 事件(适配器.输出, "output"))
+
+
+def test_异常断点uncaught过滤器跳过已捕获异常(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 捕获异常源码, "异常跳过.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(适配器, "setExceptionBreakpoints", 2, filters=["uncaught"])
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 适配器.执行线程.join(timeout=3) is None
+    assert 事件(适配器.输出, "stopped") == []
+    assert any("已捕获" in e["body"]["output"] for e in 事件(适配器.输出, "output"))
+
+
+def test_异常断点uncaught过滤器命中未捕获异常(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 未捕获异常源码, "未捕获.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(适配器, "setExceptionBreakpoints", 2, filters=["uncaught"])
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 等待(lambda: 适配器.暂停事件 is not None)
+    assert 适配器.停止原因 == "exception"
+    assert 事件(适配器.输出, "stopped")[0]["body"]["reason"] == "exception"
+    请求(适配器, "continue", 5)
+    适配器.执行线程.join(timeout=3)
+    assert 适配器.异常退出 is True
+
+
+def test_异常断点无过滤器不暂停(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path, 捕获异常源码, "异常空.道")
+    适配器 = 新建适配器()
+    请求(适配器, "initialize", 1)
+    请求(适配器, "setExceptionBreakpoints", 2, filters=[])
+    请求(适配器, "launch", 3, program=路径)
+    请求(适配器, "configurationDone", 4)
+    assert 适配器.执行线程.join(timeout=3) is None
+    assert 事件(适配器.输出, "stopped") == []
+
+
+# ---------------- 断点源码映射 ----------------
+def test_setBreakpoints不存在文件返回未验证(新建适配器, tmp_path):
+    不存在 = str(tmp_path / "不存在.道")
+    适配器 = 新建适配器()
+    请求(适配器, "setBreakpoints", 1, source={"path": 不存在}, breakpoints=[{"line": 2}])
+    条目 = 响应(适配器.输出, "setBreakpoints", 1)["body"]["breakpoints"][0]
+    assert 条目["verified"] is False
+    assert "不存在" in 条目["reason"]
+    assert 适配器.debugger.列出断点() == []
+
+
+def test_setBreakpoints超出行数返回未验证(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path)  # 4 行
+    适配器 = 新建适配器()
+    请求(适配器, "setBreakpoints", 1, source={"path": 路径}, breakpoints=[{"line": 999}])
+    条目 = 响应(适配器.输出, "setBreakpoints", 1)["body"]["breakpoints"][0]
+    assert 条目["verified"] is False
+    assert "超出" in 条目["reason"]
+    assert 适配器.debugger.列出断点() == []
+
+
+def test_setBreakpoints合法行返回已验证(新建适配器, tmp_path):
+    路径 = 写程序(tmp_path)
+    适配器 = 新建适配器()
+    请求(适配器, "setBreakpoints", 1, source={"path": 路径}, breakpoints=[{"line": 2}])
+    条目 = 响应(适配器.输出, "setBreakpoints", 1)["body"]["breakpoints"][0]
+    assert 条目["verified"] is True
+    assert "reason" not in 条目
+    assert len(适配器.debugger.列出断点()) == 1

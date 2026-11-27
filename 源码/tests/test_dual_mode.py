@@ -549,3 +549,149 @@ class TestDualModeCollections:
         src = "定义 a = [1]\na.追加(2)\na"
         assert_dual_equal(src)
         assert run_interpreter(src) == [1, 2]
+
+
+class TestDualModeForRangeLoops:
+    """范围循环：边界、步长、空区间、break/continue、嵌套与作用域。"""
+
+    def test_basic_sum(self):
+        src = "定义 总数 = 0\n遍历 i 从 0 到 5\n  总数 = 总数 + i\n总数"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 15
+
+    def test_endpoint_is_inclusive(self):
+        src = "定义 总数 = 0\n遍历 i 从 1 到 3\n  总数 = 总数 + i\n总数"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 6
+
+    def test_positive_step(self):
+        src = "定义 总数 = 0\n遍历 i 从 1 到 5 步长 2\n  总数 = 总数 + i\n总数"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 9
+
+    def test_empty_interval(self):
+        src = "定义 总数 = 0\n遍历 i 从 5 到 1\n  总数 = 总数 + i\n总数"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 0
+
+    def test_negative_step(self):
+        src = "定义 总数 = 0\n遍历 i 从 5 到 1 步长 -1\n  总数 = 总数 + i\n总数"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 12
+
+    def test_break(self):
+        src = (
+            "定义 总数 = 0\n遍历 i 从 0 到 9\n"
+            "  如果 i == 4\n    跳出\n"
+            "  总数 = 总数 + i\n总数"
+        )
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 6
+
+    def test_continue(self):
+        src = (
+            "定义 总数 = 0\n遍历 i 从 0 到 5\n"
+            "  如果 i == 2\n    继续\n"
+            "  总数 = 总数 + i\n总数"
+        )
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 13
+
+    def test_nested_loops(self):
+        src = (
+            "定义 总数 = 0\n"
+            "遍历 i 从 1 到 2\n"
+            "  遍历 j 从 1 到 3\n"
+            "    总数 = 总数 + i * j\n"
+            "总数"
+        )
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 18
+
+    def test_expression_bounds(self):
+        src = (
+            "函数 上界()\n  返回 3\n"
+            "定义 起点 = 1\n定义 总数 = 0\n"
+            "遍历 i 从 起点 到 上界()\n  总数 = 总数 + i\n"
+            "总数"
+        )
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 6
+
+    def test_loop_variable_does_not_override_outer_binding(self):
+        src = "定义 i = 100\n遍历 i 从 0 到 2\n  i = i + 10\ni"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 100
+
+    def test_loop_variable_does_not_leak(self):
+        # 两种模式都不应让循环变量泄漏到循环之外
+        assert_dual_both_error("遍历 i 从 0 到 2\n  i = i + 10\ni")
+
+    def test_print_output(self):
+        src = "遍历 i 从 1 到 3\n  打印(i)"
+        ast_result, ast_out = run_with_output(run_interpreter, src)
+        vm_result, vm_out = run_with_output(run_vm, src)
+        assert ast_result == vm_result
+        assert ast_out == vm_out
+        assert ast_out.split() == ["1", "2", "3"]
+
+
+class TestDualModeForInLoops:
+    """遍历集合：单变量、双变量与 break。"""
+
+    def test_list_sum(self):
+        src = "定义 总数 = 0\n遍历 x 在 [1, 2, 3]\n  总数 = 总数 + x\n总数"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 6
+
+    def test_break(self):
+        src = (
+            "定义 总数 = 0\n遍历 x 在 [1, 2, 3, 4]\n"
+            "  如果 x == 3\n    跳出\n"
+            "  总数 = 总数 + x\n总数"
+        )
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 3
+
+    def test_dict_key_value_pairs(self):
+        src = '定义 总数 = 0\n遍历 k, v 在 {"a": 1, "b": 2}\n  总数 = 总数 + v\n总数'
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 3
+
+    def test_dict_iteration_order(self):
+        src = '定义 次 = ""\n遍历 k, v 在 {"a": 1, "b": 2}\n  次 = 次 + k\n次'
+        assert_dual_equal(src)
+        assert run_interpreter(src) == "ab"
+
+
+class TestDualModeFunctionCallsInStatements:
+    """函数调用位于声明/赋值/条件/循环中的双模式一致性。"""
+
+    def test_declaration_with_call_as_last_statement(self):
+        src = "函数 f()\n  返回 42\n定义 x = f()"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 42
+
+    def test_assignment_expression_with_call_as_last_statement(self):
+        src = "函数 f()\n  返回 42\n定义 x = 0\nx = x + f()"
+        assert_dual_equal(src)
+        assert run_interpreter(src) is None
+
+    def test_call_in_if_condition_as_last_statement(self):
+        src = "函数 f()\n  返回 真\n如果 f()\n  1\n否则\n  2"
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 1
+
+    def test_call_inside_range_body(self):
+        src = (
+            "函数 加一(x)\n  返回 x + 1\n"
+            "定义 总数 = 0\n遍历 i 从 0 到 3\n  总数 = 总数 + 加一(i)\n"
+            "总数"
+        )
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 10
+
+    def test_nested_builtin_calls(self):
+        src = '定义 x = 最大值(长度([1, 2]), 整数("5"))\nx'
+        assert_dual_equal(src)
+        assert run_interpreter(src) == 5

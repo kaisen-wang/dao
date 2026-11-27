@@ -439,3 +439,124 @@ def get_builtins() -> dict[str, BuiltinFunction]:
         }
     )
     return 内置表
+
+
+# ========================================================
+# 逻辑编程集成（追加，不改动上方既有函数）
+# ========================================================
+
+
+def _builtin_逻辑查询(知识库, 目标, **命名参数):
+    """便捷逻辑查询：支持嵌套结构、合取/析取、排序分页的字符串查询。
+
+    返回字典列表（键为 ``"?变量"``）；命名参数 ``结果对象`` 为真时返回
+    ``QueryResult`` 列表。
+    """
+    from ..logic.core import KnowledgeBase
+    from ..logic.solver import query as _query
+
+    if not isinstance(知识库, KnowledgeBase):
+        raise 类型错误("逻辑查询() 的第一个参数必须是知识库")
+    if not isinstance(目标, str):
+        raise 类型错误("逻辑查询() 的查询目标必须是文本")
+
+    支持参数 = {
+        "变量": "variables",
+        "排序": "排序",
+        "降序": "降序",
+        "偏移": "偏移",
+        "限制": "限制",
+        "结果对象": "结果对象",
+        "sort_by": "sort_by",
+        "descending": "descending",
+        "offset": "offset",
+        "limit": "limit",
+    }
+    参数 = {}
+    for 键, 值 in 命名参数.items():
+        if 键 not in 支持参数:
+            raise 类型错误(f"逻辑查询() 不支持命名参数 '{键}'")
+        参数[支持参数[键]] = 值
+    return _query(知识库, 目标, **参数)
+
+
+def _builtin_格式化结果(结果, 格式="表格"):
+    """把逻辑查询结果格式化为中文可读文本（表格 / 简洁）。"""
+    from ..logic.result_utils import 格式化结果 as _格式化结果
+
+    return _格式化结果(结果, 格式)
+
+
+def _builtin_结果转列表(结果, 含变量名=True):
+    """把查询结果导出为道语言二维列表。"""
+    from ..logic.result_utils import 结果转列表 as _结果转列表
+
+    return _结果转列表(结果, 含变量名=bool(含变量名))
+
+
+def _builtin_结果转字典(结果):
+    """把查询结果导出为道语言列表/字典。"""
+    from ..logic.result_utils import 结果转字典 as _结果转字典
+
+    return _结果转字典(结果)
+
+
+def _builtin_逻辑变量(名字):
+    """把文本（``x`` 或 ``?x``）转换为逻辑变量，实现逻辑变量与道语言变量互操作。"""
+    from ..logic.core import LogicVariable
+
+    if isinstance(名字, LogicVariable):
+        return 名字
+    if not isinstance(名字, str) or not 名字:
+        raise 类型错误("逻辑变量() 的参数必须是非空文本")
+    return LogicVariable(名字 if 名字.startswith("?") else "?" + 名字)
+
+
+def _builtin_转逻辑项(值):
+    """把道语言值（文本/数值/布尔/列表/字典）转换为逻辑项。"""
+    from ..logic.core import normalize_term
+
+    if isinstance(值, (list, tuple)):
+        return tuple(normalize_term(元素) for 元素 in 值)
+    return normalize_term(值)
+
+
+def _builtin_取绑定(结果, 变量名):
+    """从单个查询结果的指定绑定变量读取值（兼容有/无 ``?`` 前缀）。"""
+    from ..logic.core import LogicVariable
+
+    if isinstance(变量名, LogicVariable):
+        变量名 = 变量名.name
+    if not isinstance(变量名, str) or not 变量名:
+        raise 类型错误("取绑定() 的变量名必须是非空文本")
+    规范名 = 变量名 if 变量名.startswith("?") else "?" + 变量名
+
+    if hasattr(结果, "get_binding") and callable(结果.get_binding):
+        return 结果.get_binding(规范名)
+    if isinstance(结果, dict):
+        if 规范名 in 结果:
+            return 结果[规范名]
+        return 结果.get(变量名)
+    raise 类型错误("取绑定() 的结果必须是逻辑查询结果或字典")
+
+
+# 以包装方式再次扩展注册表，保持上方既有函数原样不动。
+_原_get_builtins_含互操作 = get_builtins
+
+
+def get_builtins() -> dict[str, BuiltinFunction]:
+    """返回所有基础内置函数（含逻辑编程集成）。"""
+    内置表 = _原_get_builtins_含互操作()
+    内置表.update(
+        {
+            "逻辑查询": BuiltinFunction("逻辑查询", _builtin_逻辑查询),
+            "格式化结果": BuiltinFunction("格式化结果", _builtin_格式化结果),
+            "结果转列表": BuiltinFunction("结果转列表", _builtin_结果转列表),
+            "结果转字典": BuiltinFunction("结果转字典", _builtin_结果转字典),
+            "逻辑变量": BuiltinFunction("逻辑变量", _builtin_逻辑变量, 1),
+            "转逻辑项": BuiltinFunction("转逻辑项", _builtin_转逻辑项, 1),
+            "取绑定": BuiltinFunction("取绑定", _builtin_取绑定, 2),
+        }
+    )
+    return 内置表
+    return 内置表

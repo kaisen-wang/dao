@@ -115,6 +115,9 @@ PACK_COMMANDS = ("pack", "打包")
 INSTALL_COMMANDS = ("install", "安装")
 LIST_COMMANDS = ("packages", "包列表")
 BUILD_COMMANDS = ("build", "构建应用", "打包应用")
+PUBLISH_COMMANDS = ("publish", "发布")
+LOCK_COMMANDS = ("lock", "更新锁")
+REPO_COMMANDS = ("repo", "仓库查询")
 
 
 # 入口路径解析与包管理器共用 dao.package.config.resolve_entry_path，
@@ -575,7 +578,7 @@ def _main_install(argv: list[str], command: str = "install"):
         prog=f"dao {command}",
         description="安装 .道包 到项目的 道包/ 目录（或全局目录）",
     )
-    arg_parser.add_argument("archive", help="要安装的 .道包 文件")
+    arg_parser.add_argument("archive", nargs="?", help="要安装的 .道包 文件")
     arg_parser.add_argument("-p", "--project", default=".",
                             help="目标项目目录（默认当前目录）")
     arg_parser.add_argument("-g", "--global", dest="global_install", action="store_true",
@@ -584,18 +587,38 @@ def _main_install(argv: list[str], command: str = "install"):
                             help="已安装不同版本时强制覆盖")
     arg_parser.add_argument("--skip-version-check", action="store_true",
                             help="跳过包声明的「道版本」兼容性检查")
+    arg_parser.add_argument("--update-lock", action="store_true",
+                            help="按最新约束更新锁文件（显式安装默认已记录精确版本）")
+    arg_parser.add_argument("--from-lock", metavar="包名",
+                            help="按 道.锁 记录的精确版本安装指定包")
     args = arg_parser.parse_args(argv)
 
-    from dao.package.packer import install_package
+    if not args.archive and not args.from_lock:
+        arg_parser.error("请提供 .道包 文件，或使用 --from-lock 指定包名")
+
+    from dao.package.manager import PackageManager
 
     try:
-        target = install_package(
-            args.archive,
-            project_dir=args.project,
-            global_install=args.global_install,
-            force=args.force,
-            check_version=not args.skip_version_check,
-        )
+        manager = PackageManager(project_dir=args.project)
+        if args.from_lock:
+            target = manager.install(
+                name=args.from_lock,
+                use_lock=True,
+                global_install=args.global_install,
+                force=args.force,
+                check_version=not args.skip_version_check,
+            )
+        else:
+            # 显式指定包路径时不做锁漂移校验（用户已明确版本）；
+            # 仅 --update-lock 时把该版本写入锁文件。
+            target = manager.install(
+                args.archive,
+                global_install=args.global_install,
+                force=args.force,
+                check_version=not args.skip_version_check,
+                use_lock=False,
+                update_lock=args.update_lock,
+            )
     except (OSError, ValueError) as e:
         print(f"错误：安装失败：{e}", file=sys.stderr)
         sys.exit(1)
@@ -668,6 +691,84 @@ def _main_default(argv: list[str]):
         run_repl()
 
 
+def _main_publish(argv: list[str], command: str = "publish"):
+    """把项目打成 .道包 并写入本地仓库索引。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="发布依赖包到本地仓库（需 道.配置）",
+    )
+    arg_parser.add_argument("path", nargs="?", default=".",
+                            help="项目目录（默认当前目录）")
+    arg_parser.add_argument("-o", "--output",
+                            help="输出文件路径或目录（默认写到项目根目录）")
+    arg_parser.add_argument("--skip-version-check", action="store_true",
+                            help="跳过包声明的「道版本」兼容性检查")
+    args = arg_parser.parse_args(argv)
+
+    from dao.package.publish import publish
+
+    try:
+        result = publish(args.path, args.output,
+                         check_version=not args.skip_version_check)
+    except (OSError, ValueError) as e:
+        print(f"错误：发布失败：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"已发布依赖包：{result.archive_path}")
+    print(f"已写入本地仓库：{result.entry.path}")
+
+
+def _main_lock(argv: list[str], command: str = "lock"):
+    """根据项目依赖约束更新锁文件。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="根据 道.配置 的依赖约束更新 道.锁",
+    )
+    arg_parser.add_argument("-p", "--project", default=".",
+                            help="项目目录（默认当前目录）")
+    args = arg_parser.parse_args(argv)
+
+    from dao.package.manager import PackageManager
+
+    try:
+        lock = PackageManager(project_dir=args.project).update_lock()
+    except (OSError, ValueError) as e:
+        print(f"错误：更新锁文件失败：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"已更新锁文件：{lock.path}")
+
+
+def _main_repo(argv: list[str], command: str = "repo"):
+    """查询本地仓库索引中的包。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="查询 ~/.道/仓库/ 本地包索引",
+    )
+    arg_parser.add_argument("name", nargs="?", help="包名（省略则列出全部）")
+    arg_parser.add_argument("--constraint", help="版本约束（如 ^1.2.0）")
+    arg_parser.add_argument("--sync", action="store_true",
+                            help="先把已安装包同步进索引再查询")
+    args = arg_parser.parse_args(argv)
+
+    from dao.package.repository import RepositoryIndex
+
+    try:
+        repo = RepositoryIndex()
+        if args.sync:
+            repo.sync_installed()
+        entries = repo.query(args.name, args.constraint)
+    except (OSError, ValueError) as e:
+        print(f"错误：查询仓库失败：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not entries:
+        print("仓库中没有匹配的包")
+    else:
+        for entry in entries:
+            print(f"{entry.name} {entry.version} ← {entry.path}")
+
+
 def main():
     """主函数"""
     argv = sys.argv[1:]
@@ -681,6 +782,12 @@ def main():
         _main_list_packages(argv[1:], argv[0])
     elif argv and argv[0] in BUILD_COMMANDS:
         _main_build_app(argv[1:], argv[0])
+    elif argv and argv[0] in PUBLISH_COMMANDS:
+        _main_publish(argv[1:], argv[0])
+    elif argv and argv[0] in LOCK_COMMANDS:
+        _main_lock(argv[1:], argv[0])
+    elif argv and argv[0] in REPO_COMMANDS:
+        _main_repo(argv[1:], argv[0])
     else:
         _main_default(argv)
 

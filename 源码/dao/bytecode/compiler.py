@@ -64,12 +64,26 @@ class BytecodeCompiler:
 
     def compile(self, program: Program) -> CodeObject:
         code = CodeObject(name="<module>")
+        leaves_value = False
         for i, stmt in enumerate(program.statements):
             is_last = (i == len(program.statements) - 1)
             if is_last and isinstance(stmt, ExpressionStmt):
+                # 模块最后一个表达式的值作为整个程序的求值结果
                 self._compile_expression(stmt.expression, code)
+                leaves_value = True
+            elif is_last and isinstance(stmt, VariableDecl):
+                # 解释器把变量声明语句的值作为结果返回；复制一份留在栈顶
+                self._compile_variable_decl(stmt, code, leave_value=True)
+                leaves_value = True
+            elif is_last and isinstance(stmt, IfStmt):
+                # 条件语句则是分支体的值
+                self._compile_if_stmt(stmt, code, leave_value=True)
+                leaves_value = True
             else:
                 self._compile_statement(stmt, code)
+        if not leaves_value:
+            # 语句本身不产生值（如赋值、循环、函数声明），RETURN_VALUE 仍需一个操作数
+            code.emit(OpCode.LOAD_CONST, self._add_constant(None, code), line=0)
         code.emit(OpCode.RETURN_VALUE, line=0)
         code.local_names = list(self._scope_stack[-1].local_names)
         code.stack_size = self._calculate_stack_size(code)
@@ -106,6 +120,10 @@ class BytecodeCompiler:
         elif isinstance(stmt, BreakStmt):
             if not self._loop_stack:
                 return  # 不在循环中，忽略
+            # 迭代器循环中，正常退出时 FOR_ITER 会弹出迭代器；break 路径
+            # 需要先手动弹出，保证汇合处栈深度一致。
+            for _ in range(self._loop_stack[-1].get("break_pops", 0)):
+                code.emit(OpCode.POP_TOP, line=stmt.line)
             # break 跳转到循环出口，但出口偏移量在编译循环体时还不知道
             # 先发出 JUMP 指令，稍后回填
             break_jump = self._emit_jump(OpCode.JUMP, code, stmt.line)
@@ -117,12 +135,16 @@ class BytecodeCompiler:
             loop_start = self._loop_stack[-1]["start"]
             code.emit(OpCode.LOOP, loop_start, line=stmt.line)
 
-    def _compile_variable_decl(self, stmt: VariableDecl, code: CodeObject):
+    def _compile_variable_decl(self, stmt: VariableDecl, code: CodeObject,
+                               leave_value: bool = False):
         self._compile_expression(stmt.value, code)
         scope = self._scope_stack[-1]
         if stmt.name not in scope.local_names:
             scope.local_names.append(stmt.name)
         idx = scope.local_names.index(stmt.name)
+        if leave_value:
+            # 与解释器一致：变量声明语句的结果是所赋的值
+            code.emit(OpCode.DUP_TOP, line=stmt.line)
         code.emit(OpCode.STORE_LOCAL, idx, line=stmt.line)
 
     def _compile_enum_decl(self, stmt: EnumDecl, code: CodeObject):
@@ -246,23 +268,45 @@ class BytecodeCompiler:
         idx = scope.local_names.index(stmt.name)
         code.emit(OpCode.STORE_LOCAL, idx, line=stmt.line)
 
-    def _compile_if_stmt(self, stmt: IfStmt, code: CodeObject):
+    def _compile_block(self, statements: list, code: CodeObject,
+                       leave_value: bool = False):
+        """编译语句块；leave_value 为真时保证块结束时栈顶恰好留下一个值。"""
+        if not statements:
+            if leave_value:
+                code.emit(OpCode.LOAD_CONST, self._add_constant(None, code),
+                          line=0)
+            return
+        if leave_value and isinstance(statements[-1], ExpressionStmt):
+            for s in statements[:-1]:
+                self._compile_statement(s, code)
+            self._compile_expression(statements[-1].expression, code)
+            return
+        if leave_value and isinstance(statements[-1], VariableDecl):
+            for s in statements[:-1]:
+                self._compile_statement(s, code)
+            self._compile_variable_decl(statements[-1], code, leave_value=True)
+            return
+        for s in statements:
+            self._compile_statement(s, code)
+        if leave_value:
+            code.emit(OpCode.LOAD_CONST, self._add_constant(None, code), line=0)
+
+    def _compile_if_stmt(self, stmt: IfStmt, code: CodeObject,
+                         leave_value: bool = False):
         self._compile_expression(stmt.condition, code)
         else_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, stmt.line)
-        for s in stmt.body:
-            self._compile_statement(s, code)
-        exit_jump = self._emit_jump(OpCode.JUMP, code, stmt.line)
+        self._compile_block(stmt.body, code, leave_value)
+        exit_jumps = [self._emit_jump(OpCode.JUMP, code, stmt.line)]
         self._patch_jump(else_jump, code)
         for cond, body in stmt.elif_clauses:
             self._compile_expression(cond, code)
             else_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, stmt.line)
-            for s in body:
-                self._compile_statement(s, code)
-            exit_jump = self._emit_jump(OpCode.JUMP, code, stmt.line)
+            self._compile_block(body, code, leave_value)
+            exit_jumps.append(self._emit_jump(OpCode.JUMP, code, stmt.line))
             self._patch_jump(else_jump, code)
-        for s in stmt.else_body:
-            self._compile_statement(s, code)
-        self._patch_jump(exit_jump, code)
+        self._compile_block(stmt.else_body, code, leave_value)
+        for jump in exit_jumps:
+            self._patch_jump(jump, code)
 
     def _compile_while_stmt(self, stmt: WhileStmt, code: CodeObject):
         loop_start = len(code.instructions)
@@ -281,57 +325,78 @@ class BytecodeCompiler:
             self._patch_jump(break_jump, code)
 
     def _compile_for_in_stmt(self, stmt: ForInStmt, code: CodeObject):
+        # 解释器为每轮迭代创建子环境，循环变量不会泄漏到循环外。
+        # CAPTURE_NAME 保存进入循环前的绑定，RESTORE_NAME 在循环结束后恢复。
+        second_var = getattr(stmt, "second_variable", None)
+        name_idx = self._add_constant(stmt.variable, code)
+        code.emit(OpCode.CAPTURE_NAME, name_idx, line=stmt.line)
+        second_idx = None
+        if second_var:
+            second_idx = self._add_constant(second_var, code)
+            code.emit(OpCode.CAPTURE_NAME, second_idx, line=stmt.line)
         self._compile_expression(stmt.iterable, code)
+        if second_var:
+            # 保留可迭代对象本身，以便按键取到对应的值
+            code.emit(OpCode.DUP_TOP, line=stmt.line)
         code.emit(OpCode.GET_ITERATOR, line=stmt.line)
-        scope = self._scope_stack[-1]
-        if stmt.variable not in scope.local_names:
-            scope.local_names.append(stmt.variable)
-        var_idx = scope.local_names.index(stmt.variable)
         loop_start = len(code.instructions)
-        code.emit(OpCode.FOR_ITER, var_idx, line=stmt.line)
-        exit_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, stmt.line)
-        # 记录循环信息用于 break/continue
-        loop_info = {"start": loop_start, "exit_jump": exit_jump, "breaks": []}
+        # 成功时压入下一个值（或键值对），耗尽时弹出迭代器并跳到出口
+        iter_op = OpCode.FOR_ITER_PAIR if second_var else OpCode.FOR_ITER
+        exit_jump = self._emit_jump(iter_op, code, stmt.line)
+        # 用按名存储写入当前栈帧，使循环变量遮蔽外层同名变量；
+        # 不加入 local_names，循环结束恢复后 LOAD_NAME 可继续找到外层变量。
+        if second_var:
+            code.emit(OpCode.STORE_SCOPE_LOCAL, second_idx, line=stmt.line)
+        code.emit(OpCode.STORE_SCOPE_LOCAL, name_idx, line=stmt.line)
+        loop_info = {
+            "start": loop_start,
+            "exit_jump": exit_jump,
+            "breaks": [],
+            "break_pops": 2 if second_var else 1,
+        }
         self._loop_stack.append(loop_info)
         for s in stmt.body:
             self._compile_statement(s, code)
         self._loop_stack.pop()
         code.emit(OpCode.LOOP, loop_start, line=stmt.line)
         self._patch_jump(exit_jump, code)
-        # 回填 break 跳转
         for break_jump in loop_info["breaks"]:
             self._patch_jump(break_jump, code)
+        if second_var:
+            code.emit(OpCode.RESTORE_NAME, second_idx, line=stmt.line)
+        code.emit(OpCode.RESTORE_NAME, name_idx, line=stmt.line)
 
     def _compile_for_range_stmt(self, stmt: ForRangeStmt, code: CodeObject):
+        # 与解释器完全一致：range(start, end + 1, step)，起止与步长只求值一次，
+        # 结束点包含在内，步长为负时也沿用 Python range 的语义。
+        name_idx = self._add_constant(stmt.variable, code)
+        code.emit(OpCode.CAPTURE_NAME, name_idx, line=stmt.line)
         self._compile_expression(stmt.start, code)
         self._compile_expression(stmt.end, code)
+        arg_count = 2
         if stmt.step:
             self._compile_expression(stmt.step, code)
-        scope = self._scope_stack[-1]
-        if stmt.variable not in scope.local_names:
-            scope.local_names.append(stmt.variable)
-        var_idx = scope.local_names.index(stmt.variable)
-        code.emit(OpCode.STORE_LOCAL, var_idx, line=stmt.line)
+            arg_count = 3
+        code.emit(OpCode.BUILD_RANGE, arg_count, line=stmt.line)
+        code.emit(OpCode.GET_ITERATOR, line=stmt.line)
         loop_start = len(code.instructions)
-        code.emit(OpCode.LOAD_LOCAL, var_idx, line=stmt.line)
-        self._compile_expression(stmt.end, code)
-        code.emit(OpCode.COMPARE_LT, line=stmt.line)
-        exit_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, stmt.line)
-        # 记录循环信息用于 break/continue
-        loop_info = {"start": loop_start, "exit_jump": exit_jump, "breaks": []}
+        exit_jump = self._emit_jump(OpCode.FOR_ITER, code, stmt.line)
+        code.emit(OpCode.STORE_SCOPE_LOCAL, name_idx, line=stmt.line)
+        loop_info = {
+            "start": loop_start,
+            "exit_jump": exit_jump,
+            "breaks": [],
+            "break_pops": 1,
+        }
         self._loop_stack.append(loop_info)
         for s in stmt.body:
             self._compile_statement(s, code)
         self._loop_stack.pop()
-        code.emit(OpCode.LOAD_LOCAL, var_idx, line=stmt.line)
-        code.emit(OpCode.LOAD_CONST, self._add_constant(1, code), line=stmt.line)
-        code.emit(OpCode.BINARY_ADD, line=stmt.line)
-        code.emit(OpCode.STORE_LOCAL, var_idx, line=stmt.line)
         code.emit(OpCode.LOOP, loop_start, line=stmt.line)
         self._patch_jump(exit_jump, code)
-        # 回填 break 跳转
         for break_jump in loop_info["breaks"]:
             self._patch_jump(break_jump, code)
+        code.emit(OpCode.RESTORE_NAME, name_idx, line=stmt.line)
 
     def _compile_return_stmt(self, stmt: ReturnStmt, code: CodeObject):
         if stmt.value:
@@ -504,7 +569,8 @@ class BytecodeCompiler:
                 current += 1
             elif op in (OpCode.STORE_LOCAL, OpCode.STORE_NAME, OpCode.STORE_UPVALUE,
                         OpCode.STORE_ATTR, OpCode.STORE_INDEX, OpCode.POP_TOP,
-                        OpCode.RETURN_VALUE):
+                        OpCode.RETURN_VALUE, OpCode.STORE_SCOPE_LOCAL,
+                        OpCode.RESTORE_NAME):
                 current = max(0, current - 1)
             elif op in (OpCode.BINARY_ADD, OpCode.BINARY_SUB, OpCode.BINARY_MUL,
                         OpCode.BINARY_DIV, OpCode.BINARY_MOD, OpCode.BINARY_POW,
@@ -525,6 +591,13 @@ class BytecodeCompiler:
             elif op == OpCode.DUP_TOP:
                 current += 1
             elif op == OpCode.FOR_ITER:
+                # 成功迭代时压入一个值；耗尽时指令直接跳出，不计入峰值
                 current += 1
+            elif op == OpCode.FOR_ITER_PAIR:
+                current += 2
+            elif op == OpCode.CAPTURE_NAME:
+                current += 1
+            elif op == OpCode.BUILD_RANGE:
+                current = max(0, current - (inst.operand or 0)) + 1
             max_size = max(max_size, current)
         return max_size

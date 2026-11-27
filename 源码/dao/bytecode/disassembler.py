@@ -28,21 +28,19 @@ class Disassembler:
             if 0 <= operand < len(code.local_names):
                 return f"({operand}) {code.local_names[operand]}"
             return f"({operand})"
-        if opcode in (OpCode.LOAD_NAME, OpCode.STORE_NAME, OpCode.LOAD_ATTR):
+        if opcode in (OpCode.LOAD_NAME, OpCode.STORE_NAME, OpCode.LOAD_ATTR,
+                      OpCode.CAPTURE_NAME, OpCode.RESTORE_NAME, OpCode.STORE_SCOPE_LOCAL):
             if 0 <= operand < len(code.constants):
                 return f"({operand}) {code.constants[operand]!r}"
             return f"({operand})"
         if opcode in (OpCode.CALL_FUNCTION, OpCode.BUILD_LIST, OpCode.BUILD_DICT,
                       OpCode.BUILD_SET, OpCode.BUILD_TUPLE):
             return f"({operand})"
-        if opcode in (OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.POP_JUMP_IF_FALSE, OpCode.LOOP):
+        if opcode in (OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.POP_JUMP_IF_FALSE,
+                      OpCode.LOOP, OpCode.FOR_ITER, OpCode.FOR_ITER_PAIR):
             return f"-> {operand}"
         if opcode == OpCode.MAKE_CLOSURE:
             if 0 <= operand < len(code.constants) and isinstance(code.constants[operand], CodeObject):
                 return f"({operand}) {code.constants[operand].name}"
-            return f"({operand})"
-        if opcode == OpCode.FOR_ITER:
-            if 0 <= operand < len(code.local_names):
-                return f"({operand}) {code.local_names[operand]}"
             return f"({operand})"
         return f"({operand})" if operand is not None else ""

@@ -28,7 +28,7 @@ def test_collect_builtins():
     """基础内置函数：数量、类型与中文描述。"""
     module = collect_builtins()
     assert module.title == "基础内置函数"
-    assert len(module.functions) == 36
+    assert len(module.functions) == 43
     assert all(isinstance(func, FunctionDoc) for func in module.functions)
 
     by_name = {func.name: func for func in module.functions}
@@ -120,9 +120,9 @@ def test_markdown_format():
 
 
 def test_generate_docs_all_modules():
-    """所有模块（20 个）都能生成非空 Markdown 文档。"""
+    """所有模块（22 个）都能生成非空 Markdown 文档。"""
     docs = generate_docs()
-    assert len(docs) == 20
+    assert len(docs) == 22
     assert "基础内置函数" in docs and "高阶内置函数" in docs
     for title, text in docs.items():
         assert text.startswith(f"# {title}\n")
@@ -172,7 +172,7 @@ def test_cli_output_dir(tmp_path, capsys):
     assert docgen.main(["--output", str(out_dir)]) == 0
     capsys.readouterr()
     files = list(out_dir.glob("*.md"))
-    assert len(files) == 20
+    assert len(files) == 22
     assert (out_dir / "数学.md").read_text(encoding="utf-8").startswith("# 数学\n")
     assert (out_dir / "基础内置函数.md").exists()
 

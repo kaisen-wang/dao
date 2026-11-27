@@ -39,6 +39,8 @@ class OpCode(Enum):
     STORE_INDEX = auto()
     GET_ITERATOR = auto()
     FOR_ITER = auto()
+    # 双变量字典遍历：弹出一对 (键, 值)
+    FOR_ITER_PAIR = auto()
     POP_TOP = auto()
     DUP_TOP = auto()
     UNARY_NEGATIVE = auto()
@@ -53,3 +55,9 @@ class OpCode(Enum):
     BUILD_CHANNEL = auto()
     SEND_VALUE = auto()
     RECEIVE_VALUE = auto()
+    # 范围循环：一次性构造 range(start, end + 1, step) 的列表（含端点）
+    BUILD_RANGE = auto()
+    # 循环变量作用域：保存/恢复循环变量在栈帧中的绑定
+    CAPTURE_NAME = auto()
+    RESTORE_NAME = auto()
+    STORE_SCOPE_LOCAL = auto()

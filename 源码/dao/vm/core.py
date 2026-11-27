@@ -156,7 +156,9 @@ class VirtualMachine:
             result = self._call(callee, args)
             frame.push(result)
         elif op == OpCode.RETURN_VALUE:
-            return frame.pop()
+            # 防御：语句型模块（如末行为赋值/循环）不产生值时返回 None，
+            # 避免栈顶为空导致解释器崩溃。
+            return frame.pop() if frame.stack else None
         elif op == OpCode.MAKE_CLOSURE:
             func_code = frame.code.constants[operand]
             # 闭包携带定义时所在的帧，变量通过父帧链按引用共享，
@@ -173,7 +175,8 @@ class VirtualMachine:
                 v = frame.pop()
                 k = frame.pop()
                 items.append((k, v))
-            frame.push(dict(items))
+            # 栈是后进先出，逆序还原源码中的键顺序
+            frame.push(dict(reversed(items)))
         elif op == OpCode.BUILD_TUPLE:
             count = operand
             elements = [frame.pop() for _ in range(count)][::-1]
@@ -236,15 +239,29 @@ class VirtualMachine:
             obj = frame.pop()
             frame.push(iter(obj))
         elif op == OpCode.FOR_ITER:
-            var_idx = operand
+            # 成功：迭代器保留在栈上并压入下一个值；
+            # 耗尽：弹出迭代器并跳到循环出口（operand 由编译器回填）。
             iterator = frame.peek()
             try:
                 value = next(iterator)
-                name = frame.code.local_names[var_idx]
-                frame.locals[name] = value
             except StopIteration:
                 frame.pop()
-                frame.ip = frame.code.instructions[frame.ip - 1].operand
+                frame.ip = operand
+            else:
+                frame.push(value)
+        elif op == OpCode.FOR_ITER_PAIR:
+            # 栈上依次为可迭代对象、迭代器；成功时压入 (键, 值)
+            iterator = frame.peek()
+            try:
+                item = next(iterator)
+            except StopIteration:
+                frame.pop()
+                frame.pop()
+                frame.ip = operand
+            else:
+                source = frame.peek(1)
+                frame.push(item)
+                frame.push(source[item] if isinstance(source, dict) else None)
         elif op == OpCode.POP_TOP:
             frame.pop()
         elif op == OpCode.DUP_TOP:
@@ -286,6 +303,31 @@ class VirtualMachine:
         elif op == OpCode.RECEIVE_VALUE:
             channel = frame.pop()
             frame.push(channel.receive())
+        elif op == OpCode.BUILD_RANGE:
+            # 与解释器 exec_for_range 一致：range(start, end + 1, step)
+            if operand == 3:
+                step = int(frame.pop())
+                end = int(frame.pop())
+                start = int(frame.pop())
+            else:
+                end = int(frame.pop())
+                start = int(frame.pop())
+                step = 1
+            frame.push(list(range(start, end + 1, step)))
+        elif op == OpCode.CAPTURE_NAME:
+            name = frame.code.constants[operand]
+            # 只关心当前栈帧的绑定：循环结束后恢复它，使外层同名变量重新可见
+            frame.push((name in frame.locals, frame.locals.get(name)))
+        elif op == OpCode.STORE_SCOPE_LOCAL:
+            name = frame.code.constants[operand]
+            frame.locals[name] = frame.pop()
+        elif op == OpCode.RESTORE_NAME:
+            name = frame.code.constants[operand]
+            existed, old_value = frame.pop()
+            if existed:
+                frame.locals[name] = old_value
+            else:
+                frame.locals.pop(name, None)
         return None
 
     # ========================
