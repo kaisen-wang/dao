@@ -8,7 +8,7 @@
 2. 文件模式：执行 .道 文件（传入文件路径）
 3. 项目模式：读取项目根目录的 道.配置，按「入口」字段运行项目
 
-另提供依赖包子命令：pack / 打包、install / 安装、packages / 包列表。
+另提供依赖包与应用打包子命令：pack / 打包、install / 安装、packages / 包列表、build / 构建应用、run-app / 运行应用。
 
 使用方法：
     python main.py                      # 启动 REPL
@@ -18,11 +18,15 @@
     python main.py run 路径/到/项目     # 运行指定目录下的项目
     python main.py pack                 # 把当前项目打成 .道包
     python main.py install 包.道包      # 把 .道包 安装到当前项目
+    python main.py build               # 把当前项目打成 .道应用
+    python main.py run-app 应用.道应用  # 解压并运行应用包
 """
 
 import argparse
 import os
+import shutil
 import sys
+import tempfile
 
 # 确保能导入 dao 包
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -102,6 +106,8 @@ RUN_COMMANDS = ("run", "运行")
 PACK_COMMANDS = ("pack", "打包")
 INSTALL_COMMANDS = ("install", "安装")
 LIST_COMMANDS = ("packages", "包列表")
+BUILD_COMMANDS = ("build", "构建应用", "打包应用")
+RUN_APP_COMMANDS = ("run-app", "运行应用")
 
 
 # 入口路径解析与包管理器共用 dao.package.config.resolve_entry_path，
@@ -573,6 +579,62 @@ def _main_list_packages(argv: list[str], command: str = "包列表"):
             print(f"  {name} {version}{suffix}")
 
 
+def _main_build_app(argv: list[str], command: str = "build"):
+    """把项目打成 ``.道应用`` 可运行应用包。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="把道语言项目打成 .道应用（含已安装依赖，可直接运行）",
+    )
+    arg_parser.add_argument("path", nargs="?", default=".",
+                            help="项目目录（默认当前目录）")
+    arg_parser.add_argument("-o", "--output",
+                            help="输出文件路径或目录（默认写到项目根目录）")
+    arg_parser.add_argument("--no-deps", action="store_true",
+                            help="不把 道包/ 下已安装的依赖打进应用包")
+    args = arg_parser.parse_args(argv)
+
+    from dao.package.app import build_app
+
+    try:
+        archive_path = build_app(args.path, args.output, include_deps=not args.no_deps)
+    except (OSError, ValueError) as e:
+        print(f"错误：打包应用失败：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"已生成应用包：{archive_path}")
+
+
+def _main_run_app(argv: list[str], command: str = "run-app"):
+    """解压并运行一个 ``.道应用``。"""
+    arg_parser = argparse.ArgumentParser(
+        prog=f"dao {command}",
+        description="解压 .道应用 到临时目录并运行其入口",
+    )
+    arg_parser.add_argument("archive", help="要运行的 .道应用 文件")
+    _add_execution_args(arg_parser)
+    args = arg_parser.parse_args(argv)
+
+    from dao.package.app import check_app_dao_version, extract_app, inspect_app
+
+    try:
+        manifest = inspect_app(args.archive)
+        check_app_dao_version(manifest)
+        temp_dir = tempfile.mkdtemp(prefix="dao-app-")
+    except (OSError, ValueError) as e:
+        print(f"错误：运行应用失败：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    original_cwd = os.getcwd()
+    try:
+        app_dir = extract_app(args.archive, temp_dir)
+        os.chdir(app_dir)
+        run_project(app_dir, mode=args.mode, type_check=args.type_check,
+                    disasm=args.disasm, jit=args.jit)
+    finally:
+        os.chdir(original_cwd)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def _main_default(argv: list[str]):
     """原有的 REPL / 单文件执行模式。"""
     arg_parser = argparse.ArgumentParser(description="道（Dao）编程语言")
@@ -599,6 +661,10 @@ def main():
         _main_install(argv[1:], argv[0])
     elif argv and argv[0] in LIST_COMMANDS:
         _main_list_packages(argv[1:], argv[0])
+    elif argv and argv[0] in BUILD_COMMANDS:
+        _main_build_app(argv[1:], argv[0])
+    elif argv and argv[0] in RUN_APP_COMMANDS:
+        _main_run_app(argv[1:], argv[0])
     else:
         _main_default(argv)
 
