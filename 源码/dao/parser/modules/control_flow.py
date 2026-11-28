@@ -73,7 +73,7 @@ class ControlFlowParser:
     def parse_for_stmt(self) -> ForInStmt | ForRangeStmt:
         """解析遍历循环（遍历...在... 或 遍历...从...到... 或 对于...）"""
         token = self.advance()  # 消费 遍历 或 对于
-        var_token = self.expect(TokenType.标识符, "遍历需要一个循环变量名")
+        var_token = self.expect_identifier_or_keyword("遍历需要一个循环变量名")
 
         if self.match(TokenType.在):
             # 遍历 x 在 集合
@@ -89,7 +89,7 @@ class ControlFlowParser:
             )
         elif self.match(TokenType.逗号):
             # 遍历 键, 值 在 字典
-            second_var = self.expect(TokenType.标识符, "遍历需要第二个变量名")
+            second_var = self.expect_identifier_or_keyword("遍历需要第二个变量名")
             self.expect(TokenType.在, "遍历双变量需要 '在'")
             iterable = self.parse_expression()
             self.expect(TokenType.换行, "遍历语句后需要换行")

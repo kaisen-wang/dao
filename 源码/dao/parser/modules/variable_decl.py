@@ -1,8 +1,13 @@
 """变量/常量声明解析混入"""
 
-from ...ast_nodes import Assignment, DestructureAssign, DestructureTarget, Identifier, ListLiteral, VariableDecl
-from ...errors import 语法错误
-from ...tokens import Token, TokenType
+from ...ast_nodes import (
+    Assignment,
+    DestructureAssign,
+    DestructureTarget,
+    Identifier,
+    VariableDecl,
+)
+from ...tokens import TokenType
 
 
 class VariableDeclParser:
@@ -23,7 +28,7 @@ class VariableDeclParser:
         if self.current.type == TokenType.左括号:
             return self._parse_tuple_destructure_decl(token, is_constant)
 
-        name_token = self.expect(TokenType.标识符, "变量声明需要一个变量名")
+        name_token = self.expect_identifier_or_keyword("变量声明需要一个变量名")
 
         type_annotation = None
         if self.current.type == TokenType.冒号:
@@ -45,7 +50,7 @@ class VariableDeclParser:
     def parse_set_stmt(self) -> Assignment:
         """解析设语句：设 x = 值（重新赋值）"""
         token = self.advance()  # 消费 设
-        name_token = self.expect(TokenType.标识符, "赋值需要一个变量名")
+        name_token = self.expect_identifier_or_keyword("赋值需要一个变量名")
         self.expect(TokenType.赋值, "赋值需要 '='")
         value = self.parse_expression()
         self.match(TokenType.换行)
@@ -87,7 +92,7 @@ class VariableDeclParser:
             elif self.current.type == TokenType.左花括号:
                 targets.append(self._parse_dict_destructure_target())
             else:
-                name = self.expect(TokenType.标识符, "元组解构需要变量名")
+                name = self.expect_identifier_or_keyword("元组解构需要变量名")
                 targets.append(DestructureTarget(name=name.value))
             if not self.match(TokenType.逗号):
                 break
@@ -102,7 +107,7 @@ class VariableDeclParser:
         while self.current.type != TokenType.右方括号:
             if self.current.type == TokenType.展开:
                 self.advance()
-                rest_name = self.expect(TokenType.标识符, "展开操作符后需要变量名")
+                rest_name = self.expect_identifier_or_keyword("展开操作符后需要变量名")
                 rest = rest_name.value
                 break
             if self.current.type == TokenType.左方括号:
@@ -110,7 +115,7 @@ class VariableDeclParser:
             elif self.current.type == TokenType.左花括号:
                 targets.append(self._parse_dict_destructure_target())
             else:
-                name = self.expect(TokenType.标识符, "解构赋值需要变量名")
+                name = self.expect_identifier_or_keyword("解构赋值需要变量名")
                 targets.append(DestructureTarget(name=name.value))
             if not self.match(TokenType.逗号):
                 break
@@ -122,7 +127,7 @@ class VariableDeclParser:
         self.advance()  # 消费 {
         dict_targets = {}
         while self.current.type != TokenType.右花括号:
-            key_token = self.expect(TokenType.标识符, "字典解构需要键名")
+            key_token = self.expect_identifier_or_keyword("字典解构需要键名")
             key = key_token.value
             if self.match(TokenType.冒号):
                 if self.current.type == TokenType.左方括号:
@@ -130,7 +135,7 @@ class VariableDeclParser:
                 elif self.current.type == TokenType.左花括号:
                     dict_targets[key] = self._parse_dict_destructure_target()
                 else:
-                    value_token = self.expect(TokenType.标识符, "字典解构需要变量名")
+                    value_token = self.expect_identifier_or_keyword("字典解构需要变量名")
                     dict_targets[key] = DestructureTarget(name=value_token.value)
             else:
                 dict_targets[key] = DestructureTarget(name=key)

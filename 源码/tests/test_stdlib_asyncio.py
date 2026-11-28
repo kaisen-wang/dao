@@ -422,7 +422,9 @@ class TestUtilityFunctions(unittest.TestCase):
         async def coro():
             pass
 
-        self.assertTrue(_stdlib_是否协程(coro()))
+        obj = coro()
+        self.assertTrue(_stdlib_是否协程(obj))
+        obj.close()
         self.assertFalse(_stdlib_是否协程(42))
         self.assertFalse(_stdlib_是否协程("hello"))
 
@@ -490,6 +492,7 @@ class TestAsyncSubprocess(unittest.TestCase):
         """创建子进程应返回协程"""
         coro = _stdlib_创建子进程("echo hello")
         self.assertTrue(asyncio.iscoroutine(coro))
+        coro.close()
 
     def test_执行简单命令(self):
         """执行简单命令应返回正确结果"""
@@ -509,6 +512,7 @@ class TestAsyncNetwork(unittest.TestCase):
         """打开连接应返回协程"""
         coro = _stdlib_打开连接("example.com", 80)
         self.assertTrue(asyncio.iscoroutine(coro))
+        coro.close()
 
 
 class TestAsyncWaitHelpers(unittest.TestCase):

@@ -1115,9 +1115,35 @@ class StatementExecutor(LogicExecutor):
 
         self._bind_import(stmt, module_env, env)
 
+    def _bind_wildcard_import(self, module_env: Environment, env: Environment) -> None:
+        """通配符导入：把模块的全部可导出名称绑定到当前作用域。"""
+        if module_env.exports:
+            # 有显式导出列表时严格按列表绑定（列表中的名字应以 values 为准）。
+            names = [name for name in module_env.exports if name in module_env.values]
+        else:
+            # 无导出列表时取模块环境中的用户定义，排除内部名与注入的内置函数。
+            builtin_names = set(get_builtins()) | set(get_interpreter_builtins())
+            names = [
+                name
+                for name, value in module_env.values.items()
+                if not name.startswith("_")
+                and name not in builtin_names
+                and not isinstance(value, (BuiltinFunction, InterpreterBuiltin))
+            ]
+
+        for name in names:
+            # 当前作用域已有同名定义时保留原值（例如全局内建的“睡眠”），
+            # 避免通配符意外覆盖；父作用域的同名定义则照常遮蔽。
+            if name in env.values:
+                continue
+            env.define(name, module_env.values[name])
+
     def _bind_import(self, stmt, module_env: Environment, env: Environment) -> None:
         if stmt.is_from_import:
             for name, alias in stmt.names:
+                if name == "*":
+                    self._bind_wildcard_import(module_env, env)
+                    continue
                 # 检查名称是否在导出列表中（如果没有导出列表则所有定义名都可导入）
                 if module_env.exports and name not in module_env.exports:
                     raise 运行时错误(

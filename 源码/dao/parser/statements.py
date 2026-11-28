@@ -7,7 +7,19 @@
 
 import logging
 
-from ..ast_nodes import Assignment, Identifier, LogicBlock, MacroDefinition, Statement, VariableDecl, FunctionDecl, AsyncFunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl
+from ..ast_nodes import (
+    AbstractDecl,
+    Assignment,
+    AsyncFunctionDecl,
+    ClassDecl,
+    EnumDecl,
+    FunctionDecl,
+    LogicBlock,
+    MacroDefinition,
+    Statement,
+    TraitDecl,
+    VariableDecl,
+)
 from ..errors import 语法错误
 from ..tokens import TokenType
 
@@ -25,9 +37,9 @@ from .modules import (
     ModuleSystemParser,
     OOPDeclParser,
     PatternMatchingParser,
-    VariableDeclParser,
-    TypeAnnotationParser,
     TypeAliasParser,
+    TypeAnnotationParser,
+    VariableDeclParser,
 )
 
 
@@ -140,8 +152,11 @@ class StatementParser(
                     and self.peek(2).type == TokenType.赋值
                 ):
                     # 不应该解析为 while 循环
-                    raise Exception(
-                        "在选择语句中使用 '当' 关键字需要由选择语句解析器处理"
+                    raise 语法错误(
+                        "在选择语句中使用 '当' 关键字需要由选择语句解析器处理",
+                        token.line,
+                        token.column,
+                        self.source,
                     )
                 else:
                     return self.parse_while_stmt()
@@ -186,9 +201,10 @@ class StatementParser(
                 else:
                     return self.parse_export_stmt()
             case TokenType.从:
-                # 只有在特定上下文中才是导入语句的 "从"，否则是 for 循环的 "从"
-                # 检查前面是否有导入或导出关键字，或者后面是否紧跟模块名
-                if self.peek().type == TokenType.标识符:
+                # 语句开头的 "从" 是导入语句（从 模块 导入 名称）；for 循环的
+                # "从" 由 parse_for_stmt 在消费"遍历/对于"后处理。模块名允许是
+                # 上下文关键字，例如：从 异步 导入 创建任务
+                if self._is_identifier_like(self.peek()):
                     self.advance()  # 消费 "从"
                     return self.parse_import_stmt(is_from_import=True)
                 else:

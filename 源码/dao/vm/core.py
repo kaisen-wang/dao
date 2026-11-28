@@ -32,6 +32,7 @@ class VirtualMachine:
         self._hotspot_detector = None
         self._type_feedback = {}
         self._jit_compiler = None
+        self._root_compiled = set()
 
     def enable_jit(self, threshold: int = 100):
         from ..jit.hotspot import HotspotDetector
@@ -40,8 +41,29 @@ class VirtualMachine:
         self._hotspot_detector = HotspotDetector(threshold=threshold)
         self._jit_compiler = JitCompiler(self._hotspot_detector)
 
+    @staticmethod
+    def _invoke_native(native, vm, frame, code):
+        """调用生成的专用函数；守卫失败抛出 ``_Deopt`` 交由调用方回退。"""
+        return native[0](vm, frame, code.constants, code.local_names,
+                         code.instructions, native[1])
+
     def run(self, code: CodeObject) -> object:
         frame = Frame(code=code)
+        if self._jit_enabled and self._jit_compiler:
+            from ..jit.native import _Deopt
+            key = id(code)
+            native = self._jit_compiler.get_native(key)
+            if native is None and key not in self._root_compiled:
+                self._root_compiled.add(key)
+                if not self._jit_compiler.is_disabled(key):
+                    self._jit_compiler.compile_hotspot(key, code, {})
+                    native = self._jit_compiler.get_native(key)
+            if native is not None:
+                try:
+                    return self._invoke_native(native, self, frame, code)
+                except _Deopt:
+                    self._jit_compiler.handle_deoptimization(key)
+                    frame = Frame(code=code)
         return self._execute_frame(frame)
 
     def _execute_frame(self, frame: Frame) -> object:
@@ -591,26 +613,48 @@ class VirtualMachine:
                     and isinstance(callee[0], CodeObject)):
                 func_code = callee[0]
                 defining_frame = callee[2] if len(callee) == 3 else None
-                if self._jit_enabled and self._hotspot_detector:
-                    self._hotspot_detector.record_execution(func_code.name)
-                    if self._hotspot_detector.is_hot(func_code.name):
-                        specialized = self._jit_compiler.get_specialized(func_code.name)
-                        if specialized is None:
-                            self._jit_compiler.compile_hotspot(func_code.name, func_code, self._type_feedback)
-                            specialized = self._jit_compiler.get_specialized(func_code.name)
-                        if specialized is not None:
-                            func_code = specialized
+                # 以 CodeObject 身份而非函数名为键，避免同名函数互相污染。
+                key = id(func_code)
+                native = None
+                if self._jit_enabled and self._jit_compiler:
+                    native = self._jit_compiler.get_native(key)
+
                 # 不把捕获的变量复制为新帧的局部变量：它们通过 defining_frame 作用域链
                 # 按引用访问，才能与 AST 解释器保持一致（捕获变量可被闭包内外共同修改）。
+                if native is not None:
+                    from ..jit.native import _Deopt
+                    frame = Frame(code=func_code, parent=defining_frame)
+                    for i, param in enumerate(func_code.local_names[:len(args)]):
+                        frame.locals[param] = args[i] if i < len(args) else None
+                    try:
+                        return self._invoke_native(native, self, frame, func_code)
+                    except _Deopt:
+                        self._jit_compiler.handle_deoptimization(key)
+                        frame = Frame(code=func_code, parent=defining_frame)
+                        for i, param in enumerate(func_code.local_names[:len(args)]):
+                            frame.locals[param] = args[i] if i < len(args) else None
+                        return self._execute_frame(frame)
+
+                if self._jit_enabled and self._hotspot_detector:
+                    self._hotspot_detector.record_execution(key)
+                    if (self._hotspot_detector.is_hot(key)
+                            and not self._jit_compiler.is_disabled(key)):
+                        specialized = self._jit_compiler.get_specialized(key)
+                        if specialized is None:
+                            self._jit_compiler.compile_hotspot(key, func_code, self._type_feedback)
+                            specialized = self._jit_compiler.get_specialized(key)
+                        if specialized is not None:
+                            func_code = specialized
+
                 frame = Frame(code=func_code, parent=defining_frame)
                 for i, param in enumerate(func_code.local_names[:len(args)]):
                     frame.locals[param] = args[i] if i < len(args) else None
                     if self._jit_enabled:
                         from ..jit.type_feedback import TypeFeedbackEntry
-                        key = f"{func_code.name}.{param}"
-                        if key not in self._type_feedback:
-                            self._type_feedback[key] = TypeFeedbackEntry(code_id=key)
-                        self._type_feedback[key].record_type(args[i] if i < len(args) else None)
+                        feedback_key = f"{key}.{param}"
+                        if feedback_key not in self._type_feedback:
+                            self._type_feedback[feedback_key] = TypeFeedbackEntry(code_id=feedback_key)
+                        self._type_feedback[feedback_key].record_type(args[i] if i < len(args) else None)
                 return self._execute_frame(frame)
             elif isinstance(callee, BuiltinFunction):
                 # 内置函数包装器只实现 .call()，不可直接 __call__
