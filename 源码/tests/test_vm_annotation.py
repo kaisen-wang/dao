@@ -113,12 +113,8 @@ f(5)
     assert run_vm(src) == run_ast(src)
 
 
-def test_vm_kwargs_annotation_degrades_but_declaration_works():
-    """降级断言：关键字参数无法用现有 CALL_FUNCTION 表达。
-
-    VM 忽略该注解（值为原值 10），但声明本身正常执行、VM 不崩溃。
-    AST 模式则正确应用注解得到 15，两种模式的此处差异是已知限制。
-    """
+def test_vm_kwargs_annotation_delegates_to_ast_interpreter():
+    """带关键字参数的注解委托内嵌 AST 解释器执行，语义与 AST 模式一致。"""
     src = """\
 函数 增加(v, n)
   返回 v + n
@@ -127,7 +123,7 @@ def test_vm_kwargs_annotation_degrades_but_declaration_works():
 定义 x = 10
 x
 """
-    assert run_vm(src) == 10
+    assert run_vm(src) == 15
     assert run_ast(src) == 15
 
 

@@ -67,3 +67,22 @@ class OpCode(Enum):
     # 成员运算：在 / 不在
     CONTAINS = auto()
     NOT_CONTAINS = auto()
+    # 宏与类型声明：操作数 = 原始 AST 节点在常量池中的索引，
+    # 由 VM 委托内嵌 AST 解释器执行（与 IMPORT_STMT 同一模式）。
+    MACRO_DEF = auto()
+    MACRO_CALL = auto()
+    AST_DECL = auto()
+    # 带关键字参数的注解：委托 AST 解释器应用（操作数 = (stmt, local_idx) 常量索引）
+    APPLY_ANNOTATIONS = auto()
+    # VM 未直译的表达式（如管道宏）委托内嵌 AST 解释器求值
+    DELEGATE_EXPR = auto()
+    # 异常控制流：SETUP_* 操作数 = 处理器入口 ip
+    SETUP_TRY = auto()
+    SETUP_FINALLY = auto()
+    POP_BLOCK = auto()
+    LOAD_EXC = auto()
+    MATCH_EXC = auto()
+    CLEAR_EXC = auto()
+    RAISE = auto()
+    END_FINALLY = auto()
+    JUMP_FINALLY = auto()

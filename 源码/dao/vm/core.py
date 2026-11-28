@@ -1,7 +1,10 @@
 import operator
+from types import SimpleNamespace
 
 from ..ast_nodes import (
+    AbstractDecl,
     BooleanLiteral,
+    ClassDecl,
     DictPattern,
     EnumVariantPattern,
     FunctionCall,
@@ -11,13 +14,21 @@ from ..ast_nodes import (
     NullLiteral,
     NumberLiteral,
     StringLiteral,
+    TraitDecl,
     TypeCheckPattern,
 )
 from ..bytecode.code_object import CodeObject
-from ..bytecode.frame import Frame
+from ..bytecode.frame import MISSING, Frame
 from ..bytecode.opcodes import OpCode
 from ..builtins import BuiltinFunction, DaoCallable, get_builtins
-from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误
+from ..errors import (
+    错误信息,
+    道错误,
+    名称错误,
+    类型错误,
+    索引错误,
+    运行时错误,
+)
 
 
 class VirtualMachine:
@@ -74,11 +85,74 @@ class VirtualMachine:
     def _execute_frame(self, frame: Frame) -> object:
         while frame.ip < len(frame.code.instructions):
             inst = frame.code.instructions[frame.ip]
+            current_ip = frame.ip
             frame.ip += 1
-            result = self._dispatch(inst, frame)
+            try:
+                result = self._dispatch(inst, frame)
+            except Exception as exc:
+                if not self._dispatch_exception(exc, frame, current_ip):
+                    raise
+                continue
+            if frame.pending_return is not MISSING and frame.finally_return_ready:
+                value = frame.pending_return
+                frame.pending_return = MISSING
+                frame.finally_return_ready = False
+                return value
             if result is not None:
                 return result
         return frame.pop() if frame.stack else None
+
+    def _active_handler(self, frame: Frame, ip: int, kind: str | None = None):
+        """当前 ip 覆盖范围内的最内层处理器。"""
+        for handler in reversed(frame.handlers):
+            if handler["consumed"]:
+                continue
+            if kind is not None and handler["kind"] != kind:
+                continue
+            if handler["start"] <= ip < handler["end"]:
+                return handler
+        return None
+
+    def _dispatch_exception(self, exc, frame: Frame, ip: int) -> bool:
+        """把异常交给最内层处理器；返回 False 表示应继续向外抛出。"""
+        from .exceptions import is_control_signal, wrap_python_exception
+
+        if is_control_signal(exc):
+            return False
+        handler = self._active_handler(frame, ip)
+        if handler is None:
+            return False
+        del frame.stack[handler["depth"]:]
+        handler["consumed"] = True
+        frame.pending_raw_exc = exc
+        from ..builtins.oop_types import DaoError
+
+        frame.pending_exc = (
+            exc if isinstance(exc, 道错误)
+            else wrap_python_exception(
+                exc, self._bridge_environment(frame), source=""
+            )
+        )
+        if isinstance(exc, DaoError):
+            # 用户自定义错误对象直接绑定，保留 .信息/.类型 等属性
+            frame.pending_catch_value = exc
+        else:
+            wrapped = frame.pending_exc
+            # 与 AST exec_try 一致：其它异常（含道错误）绑定 错误信息 包装对象
+            frame.pending_catch_value = 错误信息(
+                信息=getattr(
+                    wrapped, "信息",
+                    f"{type(exc).__name__} {str(wrapped)}",
+                ),
+                类型=getattr(wrapped, "类型", type(exc).__name__),
+                行=getattr(wrapped, "行", getattr(exc, "line", 0)),
+                列=getattr(wrapped, "列", getattr(exc, "column", 0)),
+                文件名=getattr(wrapped, "文件名", getattr(exc, "filename", "")),
+                来源=getattr(wrapped, "来源", getattr(exc, "source", "")),
+                堆栈=getattr(wrapped, "堆栈", ""),
+            )
+        frame.ip = handler["handler"]
+        return True
 
     def _dispatch(self, inst, frame: Frame):
         op = inst.opcode
@@ -125,7 +199,11 @@ class VirtualMachine:
                 self.globals[name] = value
         elif op == OpCode.BINARY_ADD:
             right, left = frame.pop(), frame.pop()
-            frame.push(left + right)
+            # 与 AST 解释器一致：任一侧为文本时用 str() 转换后拼接
+            if isinstance(left, str) or isinstance(right, str):
+                frame.push(str(left) + str(right))
+            else:
+                frame.push(left + right)
         elif op == OpCode.BINARY_SUB:
             right, left = frame.pop(), frame.pop()
             frame.push(left - right)
@@ -174,7 +252,18 @@ class VirtualMachine:
         elif op == OpCode.COMPARE_GE:
             right, left = frame.pop(), frame.pop()
             frame.push(left >= right)
-        elif op == OpCode.JUMP:
+        elif op in (OpCode.JUMP, OpCode.LOOP):
+            # 离开 finally 保护区时先执行 finally，再恢复原跳转目标
+            current = frame.ip - 1
+            handler = self._active_handler(frame, current, kind="finally")
+            if handler is not None and not (handler["start"] <= operand < handler["end"]):
+                handler["consumed"] = True
+                del frame.stack[handler["depth"]:]
+                frame.pending_jump = operand
+                frame.ip = handler["handler"]
+            else:
+                frame.ip = operand
+        elif op == OpCode.JUMP_FINALLY:
             frame.ip = operand
         elif op == OpCode.JUMP_IF_FALSE:
             cond = frame.pop()
@@ -184,8 +273,6 @@ class VirtualMachine:
             cond = frame.pop()
             if not cond:
                 frame.ip = operand
-        elif op == OpCode.LOOP:
-            frame.ip = operand
         elif op == OpCode.CALL_FUNCTION:
             arg_count = operand
             args = [frame.pop() for _ in range(arg_count)][::-1]
@@ -195,7 +282,15 @@ class VirtualMachine:
         elif op == OpCode.RETURN_VALUE:
             # 防御：语句型模块（如末行为赋值/循环）不产生值时返回 None，
             # 避免栈顶为空导致解释器崩溃。
-            return frame.pop() if frame.stack else None
+            value = frame.pop() if frame.stack else None
+            handler = self._active_handler(frame, frame.ip - 1, kind="finally")
+            if handler is not None:
+                handler["consumed"] = True
+                del frame.stack[handler["depth"]:]
+                frame.pending_return = value
+                frame.ip = handler["handler"]
+                return None
+            return value
         elif op == OpCode.MAKE_CLOSURE:
             func_code = frame.code.constants[operand]
             # 闭包携带定义时所在的帧，变量通过父帧链按引用共享，
@@ -238,6 +333,8 @@ class VirtualMachine:
                 frame.push(self._eval_enum_member(obj, name))
             elif self._is_enum_variant(obj):
                 frame.push(self._eval_enum_variant_member(obj, name, frame))
+            elif self._is_delegated_member(obj):
+                frame.push(self._eval_delegated_member(obj, name, frame, inst.line))
             elif hasattr(obj, name):
                 frame.push(getattr(obj, name))
             else:
@@ -248,6 +345,8 @@ class VirtualMachine:
             name = frame.code.constants[operand]
             if isinstance(obj, dict):
                 obj[name] = value
+            elif hasattr(obj, "set_field"):
+                obj.set_field(name, value)
             else:
                 setattr(obj, name, value)
         elif op == OpCode.LOAD_INDEX:
@@ -367,7 +466,112 @@ class VirtualMachine:
                 frame.locals.pop(name, None)
         elif op in (OpCode.IMPORT_STMT, OpCode.EXPORT_STMT):
             self._exec_import_export(inst, frame)
+        elif op in (OpCode.MACRO_DEF, OpCode.MACRO_CALL, OpCode.AST_DECL):
+            self._exec_delegated_node(op, inst, frame)
+        elif op == OpCode.APPLY_ANNOTATIONS:
+            stmt, name_idx = frame.code.constants[inst.operand]
+            name = frame.code.local_names[name_idx]
+            target = frame.locals.get(name)
+            annotations = getattr(stmt, "annotations", None) or []
+            interpreter = self._get_import_interpreter()
+            env = self._bridge_environment(frame)
+            saved = self._wrap_vm_closures(frame)
+            try:
+                replacement = interpreter._apply_annotations(target, annotations, env)
+            finally:
+                self._restore_vm_closures(saved)
+            frame.locals[name] = replacement
+        elif op == OpCode.DELEGATE_EXPR:
+            expr = frame.code.constants[inst.operand]
+            interpreter = self._get_import_interpreter()
+            saved = self._wrap_vm_closures(frame)
+            try:
+                value = interpreter.eval_expression(
+                    expr, self._bridge_environment(frame)
+                )
+            finally:
+                self._restore_vm_closures(saved)
+            frame.push(value)
+        elif op in (OpCode.SETUP_TRY, OpCode.SETUP_FINALLY):
+            frame.handlers.append({
+                "kind": "try" if op == OpCode.SETUP_TRY else "finally",
+                "start": frame.ip,
+                "end": operand,
+                "handler": operand,
+                "depth": len(frame.stack),
+                "base": len(frame.handlers),
+                "consumed": False,
+            })
+        elif op == OpCode.POP_BLOCK:
+            if frame.handlers:
+                frame.handlers.pop()
+        elif op == OpCode.LOAD_EXC:
+            value = frame.pending_catch_value
+            frame.push(
+                value if value is not MISSING else (
+                    frame.pending_exc if frame.pending_exc is not MISSING else None
+                )
+            )
+        elif op == OpCode.MATCH_EXC:
+            from .exceptions import matches_catch
+
+            exc = frame.pop()
+            raw = frame.pending_raw_exc
+            frame.push(matches_catch(
+                raw if raw is not MISSING else exc,
+                frame.code.constants[operand],
+                self._bridge_environment(frame),
+            ))
+        elif op == OpCode.CLEAR_EXC:
+            frame.pending_exc = MISSING
+            frame.pending_raw_exc = MISSING
+            frame.pending_catch_value = MISSING
+        elif op == OpCode.RAISE:
+            from .exceptions import normalize_raise
+
+            raise normalize_raise(frame.pop(), line=inst.line)
+        elif op == OpCode.END_FINALLY:
+            indices = [
+                i for i, h in enumerate(frame.handlers)
+                if h["kind"] == "finally"
+            ]
+            if indices:
+                del frame.handlers[indices[-1]:]
+            if frame.pending_exc is not MISSING:
+                exc = frame.pending_exc
+                frame.pending_exc = MISSING
+                frame.pending_raw_exc = MISSING
+                frame.pending_catch_value = MISSING
+                raise exc
+            if frame.pending_jump is not MISSING:
+                frame.ip = frame.pending_jump
+                frame.pending_jump = MISSING
+            if frame.pending_return is not MISSING:
+                frame.finally_return_ready = True
         return None
+
+    def _exec_delegated_node(self, op: OpCode, inst, frame: Frame) -> None:
+        """宏与类型声明复用内嵌 AST 解释器，保留其完整语义。"""
+        from .bridge import sync_environment
+
+        node = frame.code.constants[inst.operand]
+        interpreter = self._get_import_interpreter()
+        env = self._bridge_environment(frame)
+        saved = self._wrap_vm_closures(frame)
+        try:
+            if op == OpCode.MACRO_DEF:
+                interpreter.exec_macro_definition(node, env)
+            elif op == OpCode.MACRO_CALL:
+                frame.push(interpreter.eval_macro_call(node, env))
+            elif isinstance(node, ClassDecl):
+                interpreter.exec_class_decl(node, env)
+            elif isinstance(node, TraitDecl):
+                interpreter.exec_trait_decl(node, env)
+            elif isinstance(node, AbstractDecl):
+                interpreter.exec_abstract_decl(node, env)
+        finally:
+            self._restore_vm_closures(saved)
+        sync_environment(env, frame)
 
     def _get_import_interpreter(self):
         """惰性构造并复用一个 AST 解释器，用于执行导入/导出语句。
@@ -381,9 +585,67 @@ class VirtualMachine:
             self._import_interpreter = Interpreter()
             # 错误报告会读取 source；AST 模式由 execute() 设置，这里补一个默认值。
             self._import_interpreter.source = ""
+            # AST 模式在 execute() 中注册内置宏；VM 委托执行不经过 execute()，
+            # 这里只注册一次，避免清空后续通过 MACRO_DEF 注册的用户宏。
+            from ..macros.builtins import register_builtin_macros
+
+            register_builtin_macros(self._import_interpreter.macro_registry)
+            # AST 解释器的内置函数（折叠/映射等）默认不在 VM globals 中，
+            # 委托执行的类方法需要通过桥接环境查到它们。
+            from ..builtins import get_interpreter_builtins
+
+            for name, func in get_interpreter_builtins().items():
+                if name not in self.globals:
+                    func.interpreter = self._import_interpreter
+
+                    def _adapt(*args, _fn=func, **kwargs):
+                        adapted = [self._as_ast_callable(a) for a in args]
+                        return _fn.call(adapted, kwargs)
+
+                    self.globals[name] = BuiltinFunction(name, _adapt)
         # 搜索路径可能在 VM 构造后才被修改，每次同步同一列表引用。
         self._import_interpreter.module_search_paths = self.module_search_paths
         return self._import_interpreter
+
+    def _as_ast_callable(self, fn, name: str = "<闭包>"):
+        """把 VM 闭包元组包装成 AST 解释器可调用的 BuiltinFunction。"""
+        if not (isinstance(fn, tuple) and len(fn) in (2, 3)
+                and isinstance(fn[0], CodeObject)):
+            return fn
+
+        def _call_vm_closure(*args, _fn=fn, **kwargs):
+            positional = list(args)
+            for param in _fn[0].local_names:
+                if param in kwargs:
+                    positional.append(kwargs[param])
+            return self._call(_fn, positional)
+
+        return BuiltinFunction(name, _call_vm_closure)
+
+    def _wrap_vm_closures(self, frame: Frame) -> list:
+        """临时把 VM 闭包包装成 AST 解释器可调用的 BuiltinFunction。"""
+        saved: list = []
+        for mapping in (frame.locals, self.globals):
+            for name, fn in list(mapping.items()):
+                wrapped = self._as_ast_callable(fn, name)
+                if wrapped is fn:
+                    continue
+                saved.append((mapping, name, fn))
+                mapping[name] = wrapped
+        return saved
+
+    @staticmethod
+    def _restore_vm_closures(saved: list) -> None:
+        for mapping, name, fn in saved:
+            mapping[name] = fn
+
+    def _bridge_environment(self, frame: Frame):
+        """把当前栈帧链包装成 AST Environment，供委托执行与异常包装复用。"""
+        from .bridge import frame_to_environment
+
+        return frame_to_environment(
+            frame, self.globals, source=self._get_import_interpreter().source or ""
+        )
 
     def _exec_import_export(self, inst, frame: Frame) -> None:
         """执行导入/导出语句，把 AST 解释器绑定的名称写入当前栈帧。"""
@@ -404,6 +666,29 @@ class VirtualMachine:
     # ========================
     # 枚举与模式匹配辅助
     # ========================
+
+    @staticmethod
+    def _is_delegated_member(obj) -> bool:
+        from ..builtins.oop_types import DaoClass, DaoError, DaoInstance, SuperProxy
+
+        return isinstance(obj, (DaoInstance, DaoClass, DaoError, SuperProxy, 道错误))
+
+    def _eval_delegated_member(self, obj, name: str, frame: Frame, line: int):
+        """OOP 对象的成员访问委托给持有其闭包环境的 AST 解释器。"""
+        from ..builtins.oop_types import DaoClass, DaoError, SuperProxy
+
+        node = SimpleNamespace(member=name, line=line, column=0)
+        interpreter = self._get_import_interpreter()
+        env = self._bridge_environment(frame)
+        if isinstance(obj, SuperProxy):
+            return interpreter._eval_super_member(obj, node, env)
+        if isinstance(obj, (DaoError, 道错误)):
+            return interpreter._eval_error_member(obj, node)
+        if isinstance(obj, DaoClass):
+            method = obj.find_method(name)
+            if method is not None:
+                return method
+        return interpreter._eval_instance_member(obj, node, env)
 
     @staticmethod
     def _is_enum(obj) -> bool:

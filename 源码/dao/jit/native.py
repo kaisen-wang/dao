@@ -13,6 +13,16 @@ from ..errors import 运行时错误
 
 _MISSING = object()
 
+# 这些指令依赖帧上处理器栈/内嵌 AST 解释器，生成式 JIT 直接回退解释执行
+_DELEGATED_OPS = {
+    OpCode.IMPORT_STMT, OpCode.EXPORT_STMT, OpCode.MACRO_DEF,
+    OpCode.MACRO_CALL, OpCode.AST_DECL, OpCode.APPLY_ANNOTATIONS,
+    OpCode.DELEGATE_EXPR, OpCode.SETUP_TRY,
+    OpCode.SETUP_FINALLY, OpCode.POP_BLOCK, OpCode.LOAD_EXC,
+    OpCode.MATCH_EXC, OpCode.CLEAR_EXC, OpCode.RAISE,
+    OpCode.END_FINALLY, OpCode.JUMP_FINALLY,
+}
+
 
 class _Deopt(Exception):
     """内部信号：专用代码不再适用于当前运行时状态，需要去优化。"""
@@ -93,6 +103,10 @@ class NativeCodegen:
         n = len(insts)
         if not insts:
             return self._build_guards_only()
+        # 异常控制流、宏与类型声明需要依赖 VM 的帧状态与内嵌解释器，
+        # 生成式特化无法安全复刻，整段回退到 VM 解释执行。
+        if any(inst.opcode in _DELEGATED_OPS for inst in insts):
+            return None
 
         leaders = {0}
         for i, inst in enumerate(insts):

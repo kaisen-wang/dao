@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from ..ast_nodes import (
+    AbstractDecl,
     Assignment,
     BinaryOp,
     BooleanLiteral,
@@ -28,6 +29,8 @@ from ..ast_nodes import (
     LambdaExpr,
     ListLiteral,
     ListPattern,
+    MacroCall,
+    MacroDefinition,
     MatchStmt,
     MemberAccess,
     NullLiteral,
@@ -38,7 +41,9 @@ from ..ast_nodes import (
     SendStmt,
     SetLiteral,
     StringLiteral,
+    ThrowStmt,
     TraitDecl,
+    TryStmt,
     TupleLiteral,
     TypeCheckPattern,
     UnaryOp,
@@ -107,6 +112,18 @@ class BytecodeCompiler:
         elif isinstance(stmt, ExportStmt):
             idx = self._add_constant(stmt, code)
             code.emit(OpCode.EXPORT_STMT, idx, line=stmt.line)
+        elif isinstance(stmt, MacroDefinition):
+            idx = self._add_constant(stmt, code)
+            code.emit(OpCode.MACRO_DEF, idx, line=stmt.line)
+        elif isinstance(stmt, (ClassDecl, TraitDecl, AbstractDecl)):
+            # 类型声明交由 VM 内嵌的 AST 解释器执行，保留继承、特征与闭包语义。
+            idx = self._add_constant(stmt, code)
+            code.emit(OpCode.AST_DECL, idx, line=stmt.line)
+        elif isinstance(stmt, TryStmt):
+            self._compile_try_stmt(stmt, code)
+        elif isinstance(stmt, ThrowStmt):
+            self._compile_expression(stmt.expression, code)
+            code.emit(OpCode.RAISE, line=stmt.line)
         elif isinstance(stmt, SendStmt):
             self._compile_expression(stmt.channel, code)
             self._compile_expression(stmt.value, code)
@@ -161,7 +178,9 @@ class BytecodeCompiler:
         if not annotations:
             return
         if any(getattr(a, "kwargs", None) for a in annotations):
-            # 降级：关键字参数无法用现有指令表达，忽略注解但保持声明可用
+            # 关键字参数无法用现有指令表达，委托内嵌 AST 解释器应用
+            idx = self._add_constant((stmt, name_idx), code)
+            code.emit(OpCode.APPLY_ANNOTATIONS, idx, line=stmt.line)
             return
 
         for ann in reversed(annotations):
@@ -306,6 +325,69 @@ class BytecodeCompiler:
         # 命中分支跳过默认值
         for jump in end_jumps:
             self._patch_jump(jump, code)
+
+    def _local_index(self, name: str, code: CodeObject) -> int:
+        """取得（必要时新增）当前作用域的局部变量槽位。"""
+        scope = self._scope_stack[-1]
+        if name not in scope.local_names:
+            scope.local_names.append(name)
+        return scope.local_names.index(name)
+
+    def _compile_try_stmt(self, stmt: TryStmt, code: CodeObject):
+        """编译 try/catch/finally 为帧上处理器栈布局。
+
+        SETUP_FINALLY 保护 try 与 catch 体；SETUP_TRY 只保护 try 体。
+        JUMP_FINALLY 是编译器专用的「正常进入 finally」跳转，不会被 VM
+        误判为离开保护区而重复执行 finally。
+        """
+        line = stmt.line
+        setup_finally = self._emit_jump(OpCode.SETUP_FINALLY, code, line)
+        setup_try = self._emit_jump(OpCode.SETUP_TRY, code, line)
+        for s in stmt.try_body:
+            self._compile_statement(s, code)
+        code.emit(OpCode.POP_BLOCK, line=line)
+        normal_jump = self._emit_jump(OpCode.JUMP_FINALLY, code, line)
+
+        handler_ip = len(code.instructions)
+        code.instructions[setup_try].operand = handler_ip
+        finally_jumps: list[int] = []
+        for catch in stmt.catches:
+            code.emit(OpCode.LOAD_EXC, line=line)
+            error_type = catch.get("error_type") or "异常"
+            if error_type != "异常":
+                type_idx = self._add_constant(error_type, code)
+                code.emit(OpCode.MATCH_EXC, type_idx, line=line)
+                next_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, line)
+            else:
+                code.emit(OpCode.POP_TOP, line=line)
+                next_jump = None
+
+            catch_var = catch.get("catch_var")
+            if catch_var:
+                code.emit(OpCode.LOAD_EXC, line=line)
+                code.emit(OpCode.STORE_LOCAL, self._local_index(catch_var, code), line=line)
+            else:
+                code.emit(OpCode.POP_TOP, line=line)
+            # 匹配成功后异常视为已处理，finally 不应再重新抛出
+            code.emit(OpCode.CLEAR_EXC, line=line)
+            for s in catch.get("catch_body", []):
+                self._compile_statement(s, code)
+            finally_jumps.append(self._emit_jump(OpCode.JUMP_FINALLY, code, line))
+            if next_jump is not None:
+                code.instructions[next_jump].operand = len(code.instructions)
+
+        # 没有任何捕获匹配：重新抛出，交给 finally 与外层处理器
+        code.emit(OpCode.LOAD_EXC, line=line)
+        code.emit(OpCode.RAISE, line=line)
+
+        finally_ip = len(code.instructions)
+        code.instructions[setup_finally].operand = finally_ip
+        code.instructions[normal_jump].operand = finally_ip
+        for jump in finally_jumps:
+            code.instructions[jump].operand = finally_ip
+        for s in stmt.finally_body:
+            self._compile_statement(s, code)
+        code.emit(OpCode.END_FINALLY, line=line)
 
     def _compile_function_decl(self, stmt: FunctionDecl, code: CodeObject):
         func_code = CodeObject(name=stmt.name)
@@ -498,6 +580,10 @@ class BytecodeCompiler:
                 code.emit(OpCode.LOAD_LOCAL, idx, line=expr.line)
             else:
                 code.emit(OpCode.LOAD_NAME, self._add_constant(expr.name, code), line=expr.line)
+        elif isinstance(expr, MacroCall):
+            # 宏调用在执行期展开：VM 委托内嵌 AST 解释器求值。
+            idx = self._add_constant(expr, code)
+            code.emit(OpCode.MACRO_CALL, idx, line=expr.line)
         elif isinstance(expr, BinaryOp):
             op_map = {
                 "+": OpCode.BINARY_ADD, "-": OpCode.BINARY_SUB,
@@ -607,6 +693,10 @@ class BytecodeCompiler:
             code.child_codes.append(lambda_code)
             const_idx = self._add_constant(lambda_code, code)
             code.emit(OpCode.MAKE_CLOSURE, const_idx, line=expr.line)
+        else:
+            # 管道宏等动态表达式节点交由内嵌 AST 解释器求值
+            idx = self._add_constant(expr, code)
+            code.emit(OpCode.DELEGATE_EXPR, idx, line=expr.line)
 
     def _add_constant(self, value, code: CodeObject) -> int:
         for i, c in enumerate(code.constants):
