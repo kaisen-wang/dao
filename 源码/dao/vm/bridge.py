@@ -40,6 +40,7 @@ def frame_to_environment(
     globals_map: dict[str, object],
     *,
     source: str = "",
+    global_constants: set[str] | None = None,
 ) -> Environment:
     """把 VM 栈帧（及其父帧、全局变量）包装成 AST 解释器的 Environment。
 
@@ -47,6 +48,11 @@ def frame_to_environment(
     ``frame.parent`` 链生成的每个父 Environment 的 ``values`` 也分别是
     对应父帧的 ``locals``；最外层父 Environment 的 ``values`` 则是
     ``globals_map``。所有 Environment 的 ``source`` 都设为 source。
+
+    每层的 ``constants`` 与对应栈帧的 ``constants`` 是同一个集合对象，
+    全局层的 ``constants`` 则别名为 ``global_constants``（未提供时新建），
+    使 AST 的 ``env.define(is_constant=True)`` / ``env.set()`` 常量检查
+    直接写到 VM 帧或 VM 持久全局集合上。
 
     各层 Environment 共享同一个 ``call_stack``（由 VM 帧链按最外层到最
     内层转换而成，形如 ``{"function", "file", "line"}`` 的列表），与 AST
@@ -57,6 +63,9 @@ def frame_to_environment(
     """
     global_env = Environment()
     global_env.values = globals_map
+    global_env.constants = (
+        global_constants if global_constants is not None else set()
+    )
     global_env.source = source
 
     frames: list[Frame] = []
@@ -74,6 +83,12 @@ def frame_to_environment(
     for current in reversed(frames):
         wrapped = Environment(parent=env)
         wrapped.values = current.locals
+        # 别名帧的常量集合：AST 侧定义常量/赋值检查都直接作用于 VM 帧。
+        frame_constants = getattr(current, "constants", None)
+        if frame_constants is None:
+            frame_constants = set()
+            current.constants = frame_constants
+        wrapped.constants = frame_constants
         wrapped.source = source
         wrapped.call_stack = call_stack
         wrapped.current_frame = current_frame

@@ -160,7 +160,8 @@ def test_export_list_filters_named_import(local_module):
 
 
 def test_export_list_filters_wildcard_import(local_module):
-    with pytest.raises(道错误, match="未定义的变量"):
+    # VM 未定义变量错误文案已与 AST 解释器对齐（名称错误: 变量 'X' 未定义）
+    with pytest.raises(道错误, match="变量 '隐藏' 未定义"):
         vm_output("从 工具 导入 *\n打印(隐藏)")
 
 

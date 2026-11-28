@@ -86,3 +86,7 @@ class OpCode(Enum):
     RAISE = auto()
     END_FINALLY = auto()
     JUMP_FINALLY = auto()
+    # VM 未原生实现、但 AST 解释器已完整实现的语句（如默认参数/生成器/异步/
+    # 解构/断言/成员赋值等）委托内嵌 AST 解释器执行。
+    # 操作数 = AST 语句节点在常量池中的索引；无栈效应。
+    DELEGATE_STMT = auto()

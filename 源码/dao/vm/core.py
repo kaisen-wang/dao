@@ -30,11 +30,33 @@ from ..errors import (
     运行时错误,
 )
 
+# 二元运算 opcode → 道语言运算符文本（用于 AST 侧运算符重载方法名）
+_BINARY_OP_SYMBOLS = {
+    OpCode.BINARY_ADD: "+",
+    OpCode.BINARY_SUB: "-",
+    OpCode.BINARY_MUL: "*",
+    OpCode.BINARY_DIV: "/",
+    OpCode.BINARY_MOD: "%",
+    OpCode.BINARY_POW: "**",
+    OpCode.BINARY_FLOOR_DIV: "//",
+    OpCode.COMPARE_EQ: "==",
+    OpCode.COMPARE_NE: "!=",
+    OpCode.COMPARE_LT: "<",
+    OpCode.COMPARE_LE: "<=",
+    OpCode.COMPARE_GT: ">",
+    OpCode.COMPARE_GE: ">=",
+    OpCode.CONTAINS: "在",
+    OpCode.NOT_CONTAINS: "不在",
+}
+
 
 class VirtualMachine:
     def __init__(self):
         # 与 AST 解释器保持一致：注入基础内置函数（打印/长度/范围等）
         self.globals: dict[str, object] = {}
+        # 全局常量名持久集合：桥接环境的 global 层别名到它，
+        # 避免把全局常量误写到某个栈帧上。
+        self._global_constants: set[str] = set()
         for name, func in get_builtins().items():
             self.globals[name] = func
         self._call_depth = 0
@@ -49,6 +71,10 @@ class VirtualMachine:
         self._import_interpreter = None
         # 与 AST 解释器一致的模块搜索路径（运行前可按需追加）
         self.module_search_paths: list[str] = []
+        # 函数式内置（映射/筛选/折叠/排序等）由解释器包提供。此处提前建立
+        # 桥接解释器并注入包装后的内置函数，避免纯 VM 程序在没有任何委托
+        # 语句时出现「变量 '映射' 未定义」的语义差异。
+        self._get_import_interpreter()
 
     def enable_jit(self, threshold: int = 100):
         from ..jit.hotspot import HotspotDetector
@@ -62,6 +88,24 @@ class VirtualMachine:
         """调用生成的专用函数；守卫失败抛出 ``_Deopt`` 交由调用方回退。"""
         return native[0](vm, frame, code.constants, code.local_names,
                          code.instructions, native[1])
+
+    @staticmethod
+    def _is_truthy(value) -> bool:
+        """复用 AST 解释器的真值判断规则，避免 Python ``not`` 语义偏差。"""
+        from ..interpreter.core import Interpreter
+
+        return Interpreter._is_truthy(value)
+
+    # JIT 原生代码生成的辅助调用（保持与解释执行同一套语义）。
+    def _truthy(self, value) -> bool:
+        return self._is_truthy(value)
+
+    def _unary_not(self, value) -> bool:
+        return not self._is_truthy(value)
+
+    def _binary_op(self, symbol: str, left, right, line: int = 0):
+        inst = SimpleNamespace(line=line, column=0)
+        return self._binary_operation(symbol, left, right, inst, None)
 
     def run(self, code: CodeObject) -> object:
         frame = Frame(code=code)
@@ -165,9 +209,11 @@ class VirtualMachine:
             if name in frame.locals:
                 frame.push(frame.locals[name])
             else:
-                raise 运行时错误(f"未定义的变量 '{name}'")
+                raise 名称错误(f"变量 '{name}' 未定义")
         elif op == OpCode.STORE_LOCAL:
             name = frame.code.local_names[operand]
+            if name in frame.constants:
+                raise 运行时错误(f"常量 '{name}' 不能被重新赋值")
             frame.locals[name] = frame.pop()
         elif op == OpCode.LOAD_NAME:
             name = frame.code.constants[operand]
@@ -183,75 +229,30 @@ class VirtualMachine:
                 if name in self.globals:
                     frame.push(self.globals[name])
                 else:
-                    raise 运行时错误(f"未定义的变量 '{name}'")
+                    raise 名称错误(f"变量 '{name}' 未定义")
         elif op == OpCode.STORE_NAME:
             name = frame.code.constants[operand]
             value = frame.pop()
             # 赋值应更新变量所在的实际作用域（可能在外层帧），而不是一律写入全局。
-            # 与 AST 解释器的 Environment.set 保持一致。
+            # 与 AST 解释器的 Environment.set 保持一致：命中作用域若把该名字
+            # 声明为常量，则拒绝重新赋值。
             scope = frame
             while scope is not None:
                 if name in scope.locals:
+                    if name in scope.constants:
+                        raise 运行时错误(f"常量 '{name}' 不能被重新赋值")
                     scope.locals[name] = value
                     break
                 scope = scope.parent
             else:
+                if name in self._global_constants:
+                    raise 运行时错误(f"常量 '{name}' 不能被重新赋值")
                 self.globals[name] = value
-        elif op == OpCode.BINARY_ADD:
+        elif op in _BINARY_OP_SYMBOLS:
             right, left = frame.pop(), frame.pop()
-            # 与 AST 解释器一致：任一侧为文本时用 str() 转换后拼接
-            if isinstance(left, str) or isinstance(right, str):
-                frame.push(str(left) + str(right))
-            else:
-                frame.push(left + right)
-        elif op == OpCode.BINARY_SUB:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left - right)
-        elif op == OpCode.BINARY_MUL:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left * right)
-        elif op == OpCode.BINARY_DIV:
-            right, left = frame.pop(), frame.pop()
-            if right == 0:
-                raise 运行时错误("除零错误")
-            frame.push(left / right)
-        elif op == OpCode.BINARY_MOD:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left % right)
-        elif op == OpCode.BINARY_POW:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left ** right)
-        elif op == OpCode.BINARY_FLOOR_DIV:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left // right)
-        elif op in (OpCode.CONTAINS, OpCode.NOT_CONTAINS):
-            # 成员运算：与 AST 解释器一致，语义为 left in right
-            right, left = frame.pop(), frame.pop()
-            try:
-                result = left in right
-            except TypeError:
-                raise 类型错误(
-                    f"类型 '{type(right).__name__}' 不支持成员检查"
-                )
-            frame.push(result if op == OpCode.CONTAINS else not result)
-        elif op == OpCode.COMPARE_EQ:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left == right)
-        elif op == OpCode.COMPARE_NE:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left != right)
-        elif op == OpCode.COMPARE_LT:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left < right)
-        elif op == OpCode.COMPARE_LE:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left <= right)
-        elif op == OpCode.COMPARE_GT:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left > right)
-        elif op == OpCode.COMPARE_GE:
-            right, left = frame.pop(), frame.pop()
-            frame.push(left >= right)
+            frame.push(self._binary_operation(
+                _BINARY_OP_SYMBOLS[op], left, right, inst, frame
+            ))
         elif op in (OpCode.JUMP, OpCode.LOOP):
             # 离开 finally 保护区时先执行 finally，再恢复原跳转目标
             current = frame.ip - 1
@@ -267,11 +268,11 @@ class VirtualMachine:
             frame.ip = operand
         elif op == OpCode.JUMP_IF_FALSE:
             cond = frame.pop()
-            if not cond:
+            if not self._is_truthy(cond):
                 frame.ip = operand
         elif op == OpCode.POP_JUMP_IF_FALSE:
             cond = frame.pop()
-            if not cond:
+            if not self._is_truthy(cond):
                 frame.ip = operand
         elif op == OpCode.CALL_FUNCTION:
             arg_count = operand
@@ -358,12 +359,16 @@ class VirtualMachine:
                 raise 类型错误(
                     f"类型 '{type(obj).__name__}' 不支持索引访问"
                 )
-            if isinstance(obj, dict) and index not in obj:
-                raise 名称错误(f"字典中不存在键 '{index}'")
-            if isinstance(obj, (list, str)) and isinstance(index, int):
+            if isinstance(obj, dict):
+                if index not in obj:
+                    raise 名称错误(f"字典中不存在键 '{index}'")
+            else:
+                # 与 AST eval_index_access 一致：列表/文本下标先 int()。
+                index = int(index)
+                kind = "列表" if isinstance(obj, list) else "字符串"
                 if index < -len(obj) or index >= len(obj):
                     raise 索引错误(
-                        f"索引 {index} 超出范围 (长度 {len(obj)})"
+                        f"{kind}索引 {index} 超出范围 (长度 {len(obj)})"
                     )
             frame.push(obj[index])
         elif op == OpCode.STORE_INDEX:
@@ -405,7 +410,7 @@ class VirtualMachine:
         elif op == OpCode.UNARY_NEGATIVE:
             frame.push(-frame.pop())
         elif op == OpCode.UNARY_NOT:
-            frame.push(not frame.pop())
+            frame.push(not self._is_truthy(frame.pop()))
         elif op == OpCode.LOGICAL_AND:
             right, left = frame.pop(), frame.pop()
             frame.push(left and right)
@@ -420,9 +425,17 @@ class VirtualMachine:
             variants = [EnumVariant(name=v, params=list(p)) for v, p in variant_tuples]
             frame.push(DaoEnum(name, values, variants))
         elif op == OpCode.MATCH_PATTERN:
-            pattern, is_wildcard = frame.code.constants[operand]
+            pattern_data = frame.code.constants[operand]
+            # 兼容旧二元组常量格式；新格式携带 force_bind 标志。
+            if isinstance(pattern_data, tuple) and len(pattern_data) == 3:
+                pattern, is_wildcard, force_bind = pattern_data
+            else:
+                pattern, is_wildcard = pattern_data
+                force_bind = False
             subject = frame.pop()
-            frame.push(self._match_pattern(pattern, subject, frame, is_wildcard))
+            frame.push(
+                self._match_pattern(pattern, subject, frame, is_wildcard, force_bind)
+            )
         elif op == OpCode.BUILD_CHANNEL:
             from ..concurrency.channels import BufferedChannel, Channel
 
@@ -456,6 +469,8 @@ class VirtualMachine:
             frame.push((name in frame.locals, frame.locals.get(name)))
         elif op == OpCode.STORE_SCOPE_LOCAL:
             name = frame.code.constants[operand]
+            if name in frame.constants:
+                raise 运行时错误(f"常量 '{name}' 不能被重新赋值")
             frame.locals[name] = frame.pop()
         elif op == OpCode.RESTORE_NAME:
             name = frame.code.constants[operand]
@@ -481,6 +496,20 @@ class VirtualMachine:
             finally:
                 self._restore_vm_closures(saved)
             frame.locals[name] = replacement
+        elif op == OpCode.DELEGATE_STMT:
+            # VM 未原生实现、但 AST 解释器已完整实现的语句：整条语句
+            # 委托执行，操作数 = 常量池中的 AST 节点，无栈效应。
+            from .bridge import sync_environment
+
+            node = frame.code.constants[operand]
+            interpreter = self._get_import_interpreter()
+            env = self._bridge_environment(frame)
+            saved = self._wrap_vm_closures(frame)
+            try:
+                interpreter.exec_statement(node, env)
+            finally:
+                self._restore_vm_closures(saved)
+                sync_environment(env, frame)
         elif op == OpCode.DELEGATE_EXPR:
             expr = frame.code.constants[inst.operand]
             interpreter = self._get_import_interpreter()
@@ -549,6 +578,79 @@ class VirtualMachine:
             if frame.pending_return is not MISSING:
                 frame.finally_return_ready = True
         return None
+
+    def _binary_operation(self, symbol: str, left, right, inst, frame: Frame):
+        """按 AST ``ExpressionEvaluator.eval_binary_op`` 的语义完成一次二元运算。
+
+        左右操作数已由字节码各求值一次，这里只做运算（含运算符重载），
+        不会重复求值右操作数。
+        """
+        from ..builtins import DaoInstance
+
+        if isinstance(left, DaoInstance):
+            method = left.klass.find_method(f"运算符{symbol}")
+            if method is not None:
+                interpreter = self._get_import_interpreter()
+                call_expr = SimpleNamespace(
+                    line=getattr(inst, "line", 0),
+                    column=getattr(inst, "column", 0),
+                    file=getattr(frame.code, "filename", "") if frame is not None else "",
+                )
+                saved = self._wrap_vm_closures(frame) if frame is not None else []
+                try:
+                    return interpreter._call_method(
+                        left, method, [right], {}, call_expr
+                    )
+                finally:
+                    self._restore_vm_closures(saved)
+
+        if symbol == "+":
+            if isinstance(left, str) or isinstance(right, str):
+                return str(left) + str(right)
+            return left + right
+        if symbol == "-":
+            return left - right
+        if symbol == "*":
+            # 与 AST 一致：文本乘数值时先取整，避免 "道" * 2.0 抛类型错误。
+            if isinstance(left, str) and isinstance(right, (int, float)):
+                return left * int(right)
+            if isinstance(right, str) and isinstance(left, (int, float)):
+                return right * int(left)
+            return left * right
+        if symbol in ("/", "//"):
+            if right == 0:
+                raise 运行时错误("除零错误")
+            return left / right if symbol == "/" else left // right
+        if symbol == "%":
+            return left % right
+        if symbol == "**":
+            return left**right
+        if symbol == "==":
+            return left == right
+        if symbol == "!=":
+            return left != right
+        if symbol == "<":
+            return left < right
+        if symbol == "<=":
+            return left <= right
+        if symbol == ">":
+            return left > right
+        if symbol == ">=":
+            return left >= right
+        if symbol in ("在", "不在"):
+            try:
+                result = left in right
+            except TypeError:
+                raise 类型错误(
+                    f"类型 '{type(right).__name__}' 不支持成员检查"
+                ) from None
+            return result if symbol == "在" else not result
+        # JIT 原生代码用符号直译 并且/或者；对齐 AST 的真值语义。
+        if symbol == "and":
+            return right if self._is_truthy(left) else left
+        if symbol == "or":
+            return left if self._is_truthy(left) else right
+        raise 运行时错误(f"未知的运算符: '{symbol}'")
 
     def _exec_delegated_node(self, op: OpCode, inst, frame: Frame) -> None:
         """宏与类型声明复用内嵌 AST 解释器，保留其完整语义。"""
@@ -644,7 +746,10 @@ class VirtualMachine:
         from .bridge import frame_to_environment
 
         return frame_to_environment(
-            frame, self.globals, source=self._get_import_interpreter().source or ""
+            frame,
+            self.globals,
+            source=self._get_import_interpreter().source or "",
+            global_constants=self._global_constants,
         )
 
     def _exec_import_export(self, inst, frame: Frame) -> None:
@@ -685,9 +790,9 @@ class VirtualMachine:
         if isinstance(obj, (DaoError, 道错误)):
             return interpreter._eval_error_member(obj, node)
         if isinstance(obj, DaoClass):
-            method = obj.find_method(name)
-            if method is not None:
-                return method
+            # 与 AST 解释器一致：先查静态方法（find_method 不覆盖 static_methods），
+            # 再查普通方法；缺失时抛中文「类型没有方法或静态方法」错误。
+            return interpreter._eval_class_member(obj, node)
         return interpreter._eval_instance_member(obj, node, env)
 
     @staticmethod
@@ -773,7 +878,14 @@ class VirtualMachine:
             return True, expr.value
         return False, None
 
-    def _match_pattern(self, pattern, subject, frame: Frame, is_wildcard: bool) -> bool:
+    def _match_pattern(
+        self,
+        pattern,
+        subject,
+        frame: Frame,
+        is_wildcard: bool,
+        force_bind: bool = False,
+    ) -> bool:
         """模式匹配核心：与 AST 解释器 ``StatementExecutor._match_pattern`` 对齐。
 
         绑定变量直接写入 ``frame.locals``，供内联编译的分支体读取。
@@ -785,6 +897,10 @@ class VirtualMachine:
 
         if isinstance(pattern, Identifier):
             if pattern.name == "_":
+                return True
+            # 带守卫的裸标识符模式强制绑定，使守卫能引用刚绑定的变量。
+            if force_bind:
+                frame.locals[pattern.name] = subject
                 return True
             if self._name_defined(pattern.name, frame):
                 return self._load_name_value(pattern.name, frame) == subject
@@ -888,19 +1004,25 @@ class VirtualMachine:
         if isinstance(pattern, DictPattern):
             if not isinstance(subject, dict):
                 return False
-            for key_expr, value_expr in pattern.pairs:
-                ok, key = self._literal_value(key_expr)
-                if not ok or key not in subject:
-                    return False
-                if isinstance(value_expr, Identifier):
-                    if value_expr.name == "_":
-                        continue
-                    frame.locals[value_expr.name] = subject[key]
-                else:
-                    ok, val = self._literal_value(value_expr)
-                    if not ok or val != subject[key]:
+            interpreter = self._get_import_interpreter()
+            env = self._bridge_environment(frame)
+            saved = self._wrap_vm_closures(frame)
+            try:
+                for key_expr, value_expr in pattern.pairs:
+                    # 与 AST 一致：字典模式的键是表达式，经桥接环境求值。
+                    key = interpreter.eval_expression(key_expr, env)
+                    if key not in subject:
                         return False
-            return True
+                    if isinstance(value_expr, Identifier):
+                        if value_expr.name != "_":
+                            frame.locals[value_expr.name] = subject[key]
+                    else:
+                        ok, val = self._literal_value(value_expr)
+                        if not ok or val != subject[key]:
+                            return False
+                return True
+            finally:
+                self._restore_vm_closures(saved)
 
         return False
 

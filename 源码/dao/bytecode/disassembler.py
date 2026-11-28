@@ -33,7 +33,7 @@ class Disassembler:
             if 0 <= operand < len(code.constants):
                 return f"({operand}) {code.constants[operand]!r}"
             return f"({operand})"
-        if opcode in (OpCode.IMPORT_STMT, OpCode.EXPORT_STMT):
+        if opcode in (OpCode.IMPORT_STMT, OpCode.EXPORT_STMT, OpCode.DELEGATE_STMT):
             if 0 <= operand < len(code.constants):
                 node = code.constants[operand]
                 detail = getattr(node, "module_path", None)

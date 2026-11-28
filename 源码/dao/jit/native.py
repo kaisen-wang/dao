@@ -17,7 +17,7 @@ _MISSING = object()
 _DELEGATED_OPS = {
     OpCode.IMPORT_STMT, OpCode.EXPORT_STMT, OpCode.MACRO_DEF,
     OpCode.MACRO_CALL, OpCode.AST_DECL, OpCode.APPLY_ANNOTATIONS,
-    OpCode.DELEGATE_EXPR, OpCode.SETUP_TRY,
+    OpCode.DELEGATE_EXPR, OpCode.DELEGATE_STMT, OpCode.SETUP_TRY,
     OpCode.SETUP_FINALLY, OpCode.POP_BLOCK, OpCode.LOAD_EXC,
     OpCode.MATCH_EXC, OpCode.CLEAR_EXC, OpCode.RAISE,
     OpCode.END_FINALLY, OpCode.JUMP_FINALLY,
@@ -228,21 +228,21 @@ class NativeCodegen:
             ], False
         if op in _BINARY:
             symbol = _BINARY[op]
-            lines = ["_b = st.pop()", "_a = st.pop()"]
-            if op == OpCode.BINARY_DIV:
-                lines.append("if _b == 0: raise 运行时错误('除零错误')")
-            lines.append(f"st.append(_a {symbol} _b)")
-            return lines, False
+            return [
+                "_b = st.pop()",
+                "_a = st.pop()",
+                f"st.append(vm._binary_op({symbol!r}, _a, _b, {inst.line}))",
+            ], False
         if op == OpCode.UNARY_NEGATIVE:
             return ["st.append(-st.pop())"], False
         if op == OpCode.UNARY_NOT:
-            return ["st.append(not st.pop())"], False
+            return ["st.append(vm._unary_not(st.pop()))"], False
         if op in (OpCode.JUMP, OpCode.LOOP):
             return [f"_ip = {ip_to_block[operand]}", "continue"], True
         if op in (OpCode.JUMP_IF_FALSE, OpCode.POP_JUMP_IF_FALSE):
             return [
                 "_c = st.pop()",
-                f"if not _c: _ip = {ip_to_block[operand]}; continue",
+                f"if not vm._truthy(_c): _ip = {ip_to_block[operand]}; continue",
             ], False
         if op == OpCode.CALL_FUNCTION:
             argc = operand or 0

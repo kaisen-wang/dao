@@ -12,6 +12,9 @@ class Frame:
         self.parent = parent
         self.stack: list = []
         self.locals: dict[str, object] = {}
+        # 常量名集合：桥接环境把它别名到 Environment.constants，
+        # VM 原生存储指令写入前也据此拒绝重新赋值。
+        self.constants: set[str] = set()
         self.ip = 0
         # 异常控制流：活跃处理器栈与待处理的返回值/跳转/异常
         self.handlers: list[dict] = []

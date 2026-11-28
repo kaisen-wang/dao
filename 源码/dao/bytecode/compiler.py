@@ -2,7 +2,9 @@ from dataclasses import dataclass, field
 
 from ..ast_nodes import (
     AbstractDecl,
+    AssertStmt,
     Assignment,
+    AsyncFunctionDecl,
     BinaryOp,
     BooleanLiteral,
     BreakStmt,
@@ -11,6 +13,7 @@ from ..ast_nodes import (
     CompareOp,
     ConditionalExpr,
     ContinueStmt,
+    DestructureAssign,
     DictLiteral,
     DictPattern,
     EnumDecl,
@@ -29,26 +32,33 @@ from ..ast_nodes import (
     LambdaExpr,
     ListLiteral,
     ListPattern,
+    LogicBlock,
     MacroCall,
     MacroDefinition,
     MatchStmt,
     MemberAccess,
     NullLiteral,
     NumberLiteral,
+    ParallelStmt,
     Program,
     ReceiveExpr,
     ReturnStmt,
+    SelectStmt,
     SendStmt,
     SetLiteral,
+    SpreadExpr,
     StringLiteral,
+    SyncStmt,
     ThrowStmt,
     TraitDecl,
     TryStmt,
     TupleLiteral,
+    TypeAliasDecl,
     TypeCheckPattern,
     UnaryOp,
     VariableDecl,
     WhileStmt,
+    YieldStmt,
 )
 from .code_object import CodeObject
 from .opcodes import OpCode
@@ -67,6 +77,47 @@ class BytecodeCompiler:
         self._scope_stack: list[CompileScope] = [CompileScope()]
         self._loop_stack: list[dict] = []  # 循环栈，存储 break/continue 跳转目标
         self._temp_counter: int = 0
+
+    def _emit_delegate_stmt(self, stmt, code: CodeObject):
+        """发射语句委托指令：节点入常量池，由 VM 复用 AST 解释器执行，无栈效应。"""
+        idx = self._add_constant(stmt, code)
+        code.emit(OpCode.DELEGATE_STMT, idx, line=stmt.line)
+
+    def _delegate_expr(self, expr, code: CodeObject):
+        """发射表达式委托指令：节点入常量池，由 VM 复用 AST 解释器求值，压一个值。"""
+        idx = self._add_constant(expr, code)
+        code.emit(OpCode.DELEGATE_EXPR, idx, line=expr.line)
+
+    @staticmethod
+    def _has_yield(statements: list) -> bool:
+        """检测语句列表是否含产出语句，规则与 AST 解释器 ``_has_yield`` 一致。"""
+        for stmt in statements:
+            if isinstance(stmt, YieldStmt):
+                return True
+            if isinstance(stmt, (ForInStmt, ForRangeStmt, WhileStmt)):
+                if BytecodeCompiler._has_yield(stmt.body):
+                    return True
+            elif isinstance(stmt, IfStmt):
+                if (BytecodeCompiler._has_yield(stmt.body)
+                        or any(BytecodeCompiler._has_yield(body)
+                               for _, body in stmt.elif_clauses)
+                        or (stmt.else_body and BytecodeCompiler._has_yield(stmt.else_body))):
+                    return True
+            elif isinstance(stmt, TryStmt):
+                if (BytecodeCompiler._has_yield(stmt.try_body)
+                        or any(BytecodeCompiler._has_yield(c.get("catch_body", []))
+                               for c in stmt.catches)
+                        or (stmt.finally_body and BytecodeCompiler._has_yield(stmt.finally_body))):
+                    return True
+        return False
+
+    def _should_delegate_function(self, stmt: FunctionDecl) -> bool:
+        """判断函数声明是否需整体委托 AST 解释器（VM 原生快路径无法覆盖的语义）。"""
+        if stmt.default_values or stmt.rest_param or stmt.is_exported:
+            return True
+        if self._has_yield(stmt.body):
+            return True
+        return any(getattr(a, "kwargs", None) for a in (stmt.annotations or []))
 
     def compile(self, program: Program) -> CodeObject:
         code = CodeObject(name="<module>")
@@ -96,6 +147,21 @@ class BytecodeCompiler:
         return code
 
     def _compile_statement(self, stmt, code: CodeObject):
+        # 以下语句在 VM 中没有完整原生等价（setter/可见性、常量、生成器、
+        # 异步/并行/同步、逻辑块、类型别名等），统一委托 AST 解释器执行。
+        if isinstance(stmt, (AssertStmt, DestructureAssign, YieldStmt,
+                             TypeAliasDecl, AsyncFunctionDecl, ParallelStmt,
+                             SelectStmt, SyncStmt, LogicBlock)):
+            self._emit_delegate_stmt(stmt, code)
+            return
+        if isinstance(stmt, Assignment) and not isinstance(stmt.target, Identifier):
+            # 成员/下标写入需要 setter、可见性、int(index) 等 AST 语义
+            self._emit_delegate_stmt(stmt, code)
+            return
+        if isinstance(stmt, FunctionDecl) and self._should_delegate_function(stmt):
+            # 委托时注解也由 AST 解释器统一应用，不再发射 APPLY_ANNOTATIONS
+            self._emit_delegate_stmt(stmt, code)
+            return
         if isinstance(stmt, VariableDecl):
             self._compile_variable_decl(stmt, code)
         elif isinstance(stmt, EnumDecl):
@@ -215,6 +281,14 @@ class BytecodeCompiler:
 
     def _compile_variable_decl(self, stmt: VariableDecl, code: CodeObject,
                                leave_value: bool = False):
+        if stmt.is_constant or stmt.is_exported:
+            # 常量检查与导出登记由 AST 侧 exec_variable_decl 统一处理，
+            # 委托执行无栈效应；作为末语句时按名读回声明值作为结果。
+            self._emit_delegate_stmt(stmt, code)
+            if leave_value:
+                code.emit(OpCode.LOAD_NAME,
+                          self._add_constant(stmt.name, code), line=stmt.line)
+            return
         self._compile_expression(stmt.value, code)
         scope = self._scope_stack[-1]
         if stmt.name not in scope.local_names:
@@ -241,6 +315,10 @@ class BytecodeCompiler:
             scope.local_names.append(stmt.name)
         local_idx = scope.local_names.index(stmt.name)
         code.emit(OpCode.STORE_LOCAL, local_idx, line=stmt.line)
+        # 枚举注解统一委托 AST 解释器应用，操作数约定为 (stmt, name_idx)
+        if stmt.annotations:
+            idx = self._add_constant((stmt, local_idx), code)
+            code.emit(OpCode.APPLY_ANNOTATIONS, idx, line=stmt.line)
 
     @staticmethod
     def _pattern_bindings(pattern) -> list[str]:
@@ -294,7 +372,12 @@ class BytecodeCompiler:
 
             # 模式检查：压入布尔结果
             code.emit(OpCode.LOAD_LOCAL, subject_idx, line=case.line)
-            pattern_data = (case.pattern, bool(case.is_wildcard))
+            # force_bind：带守卫的 Identifier 分支须无条件绑定主体值，
+            # 避免外层同名变量遮蔽导致守卫读取到错误的值。
+            force_bind = (case.guard is not None
+                          and isinstance(case.pattern, Identifier)
+                          and not case.is_wildcard)
+            pattern_data = (case.pattern, bool(case.is_wildcard), force_bind)
             const_idx = self._add_constant(pattern_data, code)
             code.emit(OpCode.MATCH_PATTERN, const_idx, line=case.line)
             pending_skips.append(
@@ -647,27 +730,45 @@ class BytecodeCompiler:
             self._compile_expression(expr.channel, code)
             code.emit(OpCode.RECEIVE_VALUE, line=expr.line)
         elif isinstance(expr, FunctionCall):
-            self._compile_expression(expr.callee, code)
-            for arg in expr.arguments:
-                self._compile_expression(arg, code)
-            code.emit(OpCode.CALL_FUNCTION, len(expr.arguments), line=expr.line)
+            if expr.keyword_args or any(isinstance(a, SpreadExpr)
+                                        for a in expr.arguments):
+                # 关键字参数与展开位置参数都需 AST 侧词义，整个调用节点统一委托求值
+                self._delegate_expr(expr, code)
+            else:
+                self._compile_expression(expr.callee, code)
+                for arg in expr.arguments:
+                    self._compile_expression(arg, code)
+                code.emit(OpCode.CALL_FUNCTION, len(expr.arguments), line=expr.line)
         elif isinstance(expr, ListLiteral):
-            for elem in expr.elements:
-                self._compile_expression(elem, code)
-            code.emit(OpCode.BUILD_LIST, len(expr.elements), line=expr.line)
+            if any(isinstance(e, SpreadExpr) for e in expr.elements):
+                self._delegate_expr(expr, code)
+            else:
+                for elem in expr.elements:
+                    self._compile_expression(elem, code)
+                code.emit(OpCode.BUILD_LIST, len(expr.elements), line=expr.line)
         elif isinstance(expr, DictLiteral):
-            for k, v in expr.pairs:
-                self._compile_expression(k, code)
-                self._compile_expression(v, code)
-            code.emit(OpCode.BUILD_DICT, len(expr.pairs), line=expr.line)
+            if any(isinstance(k, SpreadExpr) or isinstance(v, SpreadExpr)
+                   for k, v in expr.pairs):
+                self._delegate_expr(expr, code)
+            else:
+                for k, v in expr.pairs:
+                    self._compile_expression(k, code)
+                    self._compile_expression(v, code)
+                code.emit(OpCode.BUILD_DICT, len(expr.pairs), line=expr.line)
         elif isinstance(expr, TupleLiteral):
-            for elem in expr.elements:
-                self._compile_expression(elem, code)
-            code.emit(OpCode.BUILD_TUPLE, len(expr.elements), line=expr.line)
+            if any(isinstance(e, SpreadExpr) for e in expr.elements):
+                self._delegate_expr(expr, code)
+            else:
+                for elem in expr.elements:
+                    self._compile_expression(elem, code)
+                code.emit(OpCode.BUILD_TUPLE, len(expr.elements), line=expr.line)
         elif isinstance(expr, SetLiteral):
-            for elem in expr.elements:
-                self._compile_expression(elem, code)
-            code.emit(OpCode.BUILD_SET, len(expr.elements), line=expr.line)
+            if any(isinstance(e, SpreadExpr) for e in expr.elements):
+                self._delegate_expr(expr, code)
+            else:
+                for elem in expr.elements:
+                    self._compile_expression(elem, code)
+                code.emit(OpCode.BUILD_SET, len(expr.elements), line=expr.line)
         elif isinstance(expr, MemberAccess):
             self._compile_expression(expr.object, code)
             idx = self._add_constant(expr.member, code)
@@ -722,7 +823,9 @@ class BytecodeCompiler:
         for inst in code.instructions:
             op = inst.opcode
             if op in (OpCode.LOAD_CONST, OpCode.LOAD_LOCAL, OpCode.LOAD_NAME,
-                      OpCode.LOAD_UPVALUE, OpCode.LOAD_ATTR, OpCode.LOAD_INDEX):
+                      OpCode.LOAD_UPVALUE, OpCode.LOAD_ATTR, OpCode.LOAD_INDEX,
+                      OpCode.DELEGATE_EXPR):
+                # DELEGATE_EXPR 委托求值后压入一个结果值
                 current += 1
             elif op in (OpCode.STORE_LOCAL, OpCode.STORE_NAME, OpCode.STORE_UPVALUE,
                         OpCode.STORE_ATTR, OpCode.STORE_INDEX, OpCode.POP_TOP,
@@ -745,8 +848,9 @@ class BytecodeCompiler:
                 current += 1
             elif op in (OpCode.GET_ITERATOR, OpCode.UNARY_NEGATIVE, OpCode.UNARY_NOT):
                 pass
-            elif op in (OpCode.IMPORT_STMT, OpCode.EXPORT_STMT):
-                # 语句级副作用，不改变栈深度
+            elif op in (OpCode.IMPORT_STMT, OpCode.EXPORT_STMT,
+                        OpCode.DELEGATE_STMT):
+                # 语句级副作用，不改变栈深度；DELEGATE_STMT 亦无栈效应
                 pass
             elif op == OpCode.DUP_TOP:
                 current += 1
