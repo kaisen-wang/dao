@@ -9,6 +9,7 @@
     { "include": "#literals" },
     { "include": "#builtin-function" },
     { "include": "#macro-call" },
+    { "include": "#annotation" },
     { "include": "#logic-var" },
     { "include": "#pipe" },
     { "include": "#keywords" },
@@ -102,6 +103,13 @@
       "captures": {
         "1": { "name": "punctuation.definition.macro.dao" },
         "2": { "name": "support.function.macro.dao" }
+      }
+    },
+    "annotation": {
+      "match": "^(\\s*)(@)([\\p{L}_][\\p{L}\\p{N}_]*)",
+      "captures": {
+        "2": { "name": "punctuation.definition.annotation.dao" },
+        "3": { "name": "entity.name.tag.annotation.dao" }
       }
     },
     "logic-var": {

@@ -162,8 +162,11 @@ def test_正确源码零诊断():
 
 
 def test_词法错误诊断行列():
-    """非法字符 @ 在 1-based(1,8)，转成 0-based(0,7)。"""
-    diags = features.compute_diagnostics("定义 甲 = @\n")
+    """非法字符 # 在 1-based(1,8)，转成 0-based(0,7)。
+
+    注：@ 已作为注解前缀成为合法 token，故改用 # 作为非法字符样本。
+    """
+    diags = features.compute_diagnostics("定义 甲 = #\n")
     assert len(diags) == 1
     diagnostic = diags[0]
     assert diagnostic["range"]["start"] == {"line": 0, "character": 7}

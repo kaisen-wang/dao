@@ -319,6 +319,11 @@ class Lexer(LexerReaders):
                 self.tokens.append(self._read_macro_injection())
                 continue
 
+            # 注解前缀 @
+            if char == "@":
+                self.tokens.append(self._read_annotation())
+                continue
+
             # 运算符和标点
             token = self._read_operator_or_punctuation()
             if token:

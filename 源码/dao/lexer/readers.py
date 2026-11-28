@@ -512,3 +512,27 @@ class LexerReaders:
 
         var_name = "".join(result)
         return self._make_token(TokenType.美元注入, var_name, start_line, start_col)
+
+    def _read_annotation(self) -> Token:
+        """读取注解 (@名称)，@ 后必须紧跟标识符。
+
+        参数括号及参数内容由解析器按现有表达式机制处理，词法器只负责 @名称。
+        """
+        start_line = self.line
+        start_col = self.column
+        self.advance()  # 跳过 @
+
+        # @ 后必须紧跟标识符起始字符；错误位置指向 @ 本身（start_col）
+        if self.current_char is None or not self._is_identifier_start(
+            self.current_char
+        ):
+            raise 词法错误("'@' 后需要一个注解名", start_line, start_col, self.source)
+
+        result = []
+        while self.current_char is not None and self._is_identifier_char(
+            self.current_char
+        ):
+            result.append(self.advance())
+
+        name = "".join(result)
+        return self._make_token(TokenType.注解, name, start_line, start_col)

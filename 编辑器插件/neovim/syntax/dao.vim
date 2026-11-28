@@ -65,6 +65,11 @@ syn match daoMacroInjection /\$[一-龥A-Za-z_][一-龥A-Za-z_0-9]*/
 syn match daoMacroCall /![一-龥A-Za-z_][一-龥A-Za-z_0-9]*/
 
 " ------------------------------------------------------------------
+" 注解 @名称（运行时装饰器，锚定行首可缩进，支持中文注解名）
+" ------------------------------------------------------------------
+syn match daoAnnotation /^\s*\zs@[一-龥A-Za-z_][一-龥A-Za-z_0-9]*/
+
+" ------------------------------------------------------------------
 " 运算符与管道（较宽泛的单字符在前，较具体的多字符在后）
 " 注：除法 / 不单独高亮，以免与 // 注释、/* 块注释冲突。
 " ------------------------------------------------------------------
@@ -98,7 +103,7 @@ syn region daoString start=/'''/ end=/'''/ contains=daoEscape
 " ------------------------------------------------------------------
 " 模板字符串 `文本 {表达式}`，表达式内复用顶层高亮
 " ------------------------------------------------------------------
-syn cluster daoInterp contains=daoString,daoNumber,daoLogicVar,daoMacroInjection,daoMacroCall,daoOperator,daoDeclaration,daoFlow,daoConditional,daoRepeat,daoModule,daoFunction,daoType,daoBoolean,daoOperatorKeyword,daoException,daoOopModifier,daoOop,daoConcurrencyType,daoConcurrency,daoLogic,daoMacro,daoLineComment,daoDocComment,daoNoteComment,daoBlockComment
+syn cluster daoInterp contains=daoString,daoNumber,daoLogicVar,daoMacroInjection,daoMacroCall,daoAnnotation,daoOperator,daoDeclaration,daoFlow,daoConditional,daoRepeat,daoModule,daoFunction,daoType,daoBoolean,daoOperatorKeyword,daoException,daoOopModifier,daoOop,daoConcurrencyType,daoConcurrency,daoLogic,daoMacro,daoLineComment,daoDocComment,daoNoteComment,daoBlockComment
 syn region daoInterpExpr start=/{/ end=/}/ contained contains=@daoInterp,daoInterpExpr
 syn region daoTemplate start=/`/ skip=/\\`/ end=/`/ contains=daoEscape,daoInterpExpr
 
@@ -135,6 +140,7 @@ hi def link daoNumber           Number
 hi def link daoLogicVar         Identifier
 hi def link daoMacroInjection   Special
 hi def link daoMacroCall        Special
+hi def link daoAnnotation       PreProc
 hi def link daoOperator         Operator
 hi def link daoString           String
 hi def link daoEscape           SpecialChar

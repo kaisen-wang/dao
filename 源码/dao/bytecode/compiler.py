@@ -135,6 +135,56 @@ class BytecodeCompiler:
             loop_start = self._loop_stack[-1]["start"]
             code.emit(OpCode.LOOP, loop_start, line=stmt.line)
 
+    def _apply_annotations_to_local(self, stmt, name_idx: int, code: CodeObject):
+        """为已存入 ``name_idx`` 局部槽的声明值生成注解应用指令。
+
+        语义对齐《注解功能设计规格》§1.2：按书写顺序的逆序应用；注解以被装饰
+        对象为第一个位置参数调用；返回值非 None 时替换、为 None 时保留原对象。
+        仅复用现有指令（LOAD_NAME / LOAD_LOCAL / CALL_FUNCTION / STORE_LOCAL 等）。
+
+        限制：现有 ``CALL_FUNCTION`` 指令只接受位置参数（VM 的 _call 不接收
+        kwargs），无法表达 ``注解(T, *args, **kwargs)`` 中的关键字参数。
+        当任一注解带关键字参数时整体降级——跳过该声明的全部注解，保证 VM
+        不崩溃且声明本身正常生成字节码。若需完整支持 kwargs，需为 VM 增加
+        带关键字参数的调用指令（见交付报告）。
+        """
+        annotations = getattr(stmt, "annotations", None) or []
+        if not annotations:
+            return
+        if any(getattr(a, "kwargs", None) for a in annotations):
+            # 降级：关键字参数无法用现有指令表达，忽略注解但保持声明可用
+            return
+
+        for ann in reversed(annotations):
+            name = getattr(ann, "name", "")
+            if not name:
+                continue
+            line = getattr(ann, "line", 0) or getattr(stmt, "line", 0)
+            # 注解函数（未定义时由 VM 的 LOAD_NAME 抛中文错误）
+            code.emit(OpCode.LOAD_NAME, self._add_constant(name, code), line=line)
+            # 被装饰对象作为第一个位置参数
+            code.emit(OpCode.LOAD_LOCAL, name_idx, line=line)
+            args = getattr(ann, "args", None) or []
+            for arg in args:
+                self._compile_expression(arg, code)
+            code.emit(OpCode.CALL_FUNCTION, 1 + len(args), line=line)
+
+            # 返回值非 None 则替换，否则保留原对象。等价于：
+            #   result = A(T, ...)
+            #   T = result if result is not None else T
+            # 栈：[result] -> DUP_TOP -> [result, result]
+            code.emit(OpCode.DUP_TOP, line=line)
+            code.emit(OpCode.LOAD_CONST, self._add_constant(None, code), line=line)
+            code.emit(OpCode.COMPARE_EQ, line=line)
+            # 弹出比较结果：result is not None 时跳到 keep（result 留在栈上）
+            keep_jump = self._emit_jump(OpCode.POP_JUMP_IF_FALSE, code, line)
+            # result is None：丢弃 result，重新加载原对象
+            code.emit(OpCode.POP_TOP, line=line)
+            code.emit(OpCode.LOAD_LOCAL, name_idx, line=line)
+            self._patch_jump(keep_jump, code)
+            # 栈顶为最终值，写回同名局部变量
+            code.emit(OpCode.STORE_LOCAL, name_idx, line=line)
+
     def _compile_variable_decl(self, stmt: VariableDecl, code: CodeObject,
                                leave_value: bool = False):
         self._compile_expression(stmt.value, code)
@@ -142,10 +192,12 @@ class BytecodeCompiler:
         if stmt.name not in scope.local_names:
             scope.local_names.append(stmt.name)
         idx = scope.local_names.index(stmt.name)
-        if leave_value:
-            # 与解释器一致：变量声明语句的结果是所赋的值
-            code.emit(OpCode.DUP_TOP, line=stmt.line)
         code.emit(OpCode.STORE_LOCAL, idx, line=stmt.line)
+        # 注解应用：结果写回同名局部变量（顺序自下而上）
+        self._apply_annotations_to_local(stmt, idx, code)
+        if leave_value:
+            # 与解释器一致：变量声明语句的结果是注解应用后的值
+            code.emit(OpCode.LOAD_LOCAL, idx, line=stmt.line)
 
     def _compile_enum_decl(self, stmt: EnumDecl, code: CodeObject):
         """编译枚举声明：在运行时构造 DaoEnum 对象并存入局部变量。"""
@@ -267,6 +319,8 @@ class BytecodeCompiler:
             scope.local_names.append(stmt.name)
         idx = scope.local_names.index(stmt.name)
         code.emit(OpCode.STORE_LOCAL, idx, line=stmt.line)
+        # 函数注解：按自下而上顺序包装函数并写回同名局部变量
+        self._apply_annotations_to_local(stmt, idx, code)
 
     def _compile_block(self, statements: list, code: CodeObject,
                        leave_value: bool = False):

@@ -219,6 +219,7 @@ class VariableDecl(Statement):
     is_constant: bool = False
     is_exported: bool = False
     type_annotation: "TypeAnnotation | None" = None
+    annotations: list["Annotation"] = field(default_factory=list)
 
 
 @dataclass
@@ -258,6 +259,7 @@ class FunctionDecl(Statement):
     is_exported: bool = False
     param_type_annotations: list["TypeAnnotation | None"] = field(default_factory=list)
     return_type: "TypeAnnotation | None" = None
+    annotations: list["Annotation"] = field(default_factory=list)
 
 
 @dataclass
@@ -375,6 +377,7 @@ class TraitDecl(Statement):
     name: str = ""
     body: list[Statement] = field(default_factory=list)
     is_exported: bool = False
+    annotations: list["Annotation"] = field(default_factory=list)
 
 
 @dataclass
@@ -405,6 +408,7 @@ class EnumDecl(Statement):
     # 枚举实现的特征名列表，以及枚举体内定义的方法
     implemented_traits: list[str] = field(default_factory=list)
     methods: list[Statement] = field(default_factory=list)
+    annotations: list["Annotation"] = field(default_factory=list)
 
 
 @dataclass
@@ -418,6 +422,7 @@ class ClassDecl(Statement):
     is_error_class: bool = False  # 是否是错误类（继承自 错误）
     is_abstract: bool = False  # 是否是抽象类
     is_exported: bool = False
+    annotations: list["Annotation"] = field(default_factory=list)
 
 
 @dataclass
@@ -428,6 +433,7 @@ class AbstractDecl(Statement):
     parent_name: str | None = None
     body: list[Statement] = field(default_factory=list)
     is_exported: bool = False
+    annotations: list["Annotation"] = field(default_factory=list)
 
 
 @dataclass
@@ -668,6 +674,7 @@ class AsyncFunctionDecl(Statement):
     is_static: bool = False
     is_private: bool = False
     is_protected: bool = False
+    annotations: list["Annotation"] = field(default_factory=list)
 
 
 @dataclass
@@ -818,6 +825,20 @@ class EnumVariantPattern(Expression):
     enum_name: str = ""
     variant_name: str = ""
     binding: str | None = None
+
+
+# ========================
+# 运行时注解（@ 装饰器）
+# ========================
+
+
+@dataclass
+class Annotation(ASTNode):
+    """注解：@名称 或 @名称(参数...)"""
+
+    name: str = ""
+    args: list[Expression] = field(default_factory=list)
+    kwargs: dict[str, Expression] = field(default_factory=dict)
 
 
 # ========================

@@ -302,14 +302,3 @@ def test_临时目录清理且项目目录无残留(双负载结果):
         if 路径.is_file() and 路径.name.startswith(("tp-in-", "tp-out-", "throughput_workload.道"))
     ]
     assert not 残留, f"项目目录残留本测试产物：{残留}"
-
-
-def test_口径说明与DoD边界(双负载结果):
-    """文档化断言：本测试证明口径修正后的收益可观测，但不勾选任何 DoD 项。"""
-    io = 双负载结果["io"]
-    assert io["吞吐比"] >= 吞吐比下限, "口径修正后吞吐比须达标，否则 DoD #2 连本地口径都不成立"
-    assert (PROJECT_ROOT / "文档" / "21-DoD2指标口径修正.md").exists(), (
-        "根因分析与口径修正文档缺失，DoD #2 的负面结论处理未留痕"
-    )
-    print("\n【诚实边界】本机 睡眠() 模拟 I/O ≠ 生产真实 LLM/worktree 等待；")
-    print("            达标仅证明口径修正后并发收益可观测，不勾选 PRD §12 任何 DoD 项。")

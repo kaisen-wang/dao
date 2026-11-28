@@ -9,6 +9,7 @@
 from ...ast_nodes import *
 from ...builtins import (
     BuiltinFunction,
+    DaoCallable,
     DaoClass,
     DaoFunction,
     DaoInstance,
@@ -207,12 +208,78 @@ class StatementExecutor(LogicExecutor):
                 )
 
     # ========================
+    # 注解应用
+    # ========================
+
+    def _apply_annotations(self, target, annotations: list, env):
+        """应用声明上的注解（书写顺序自下而上），返回替换后的目标。
+
+        语义见《注解功能设计规格》§1.2：
+        1. 按注解名在当前环境查找可调用对象，找不到 / 不可调用均抛中文错误；
+        2. 以 ``注解(target, *args, **kwargs)`` 形式调用，被装饰对象永远是第一个位置参数；
+        3. 返回值非 None 则替换目标，None 则保留原目标；
+        4. 注解名列表写入 ``__注解__`` 属性，写入失败静默跳过。
+
+        参数表达式在此处按当前环境求值，调用复用解释器的统一函数调用接口
+        ``call_function``，不自行实现调用逻辑。
+        """
+        source = getattr(self, "source", "")
+        annotations = annotations or []
+        for annotation in reversed(annotations):
+            name = annotation.name
+            line = getattr(annotation, "line", 0)
+            column = getattr(annotation, "column", 0)
+
+            try:
+                fn = env.get(name)
+            except 名称错误:
+                raise 运行时错误(
+                    f"注解 '{name}' 未定义", line, column, source
+                ) from None
+
+            # 道语言的可调用对象包含 DaoCallable 体系、类型（可实例化）以及
+            # 标准库返回的原生 Python 可调用对象。后者需包装成 BuiltinFunction
+            # 才能交给统一调用接口 call_function。
+            if isinstance(fn, (DaoCallable, DaoClass)):
+                callee = fn
+            elif callable(fn):
+                callee = BuiltinFunction(name, fn)
+            else:
+                raise 运行时错误(
+                    f"注解 '{name}' 不可调用", line, column, source
+                )
+
+            args = [
+                self.eval_expression(arg, env)
+                for arg in (getattr(annotation, "args", None) or [])
+            ]
+            kwargs = {
+                key: self.eval_expression(value, env)
+                for key, value in (getattr(annotation, "kwargs", None) or {}).items()
+            }
+
+            result = self.call_function(callee, [target] + args, kwargs)
+            if result is not None:
+                target = result
+
+        # 元数据写入：数值/文本等常量对象不支持写属性，按规格静默跳过即可。
+        if annotations:
+            try:
+                # noqa: B010 - 属性名来自固定的元数据键，用 setattr 只为统一容错路径
+                setattr(target, "__注解__", [a.name for a in annotations])
+            except Exception:  # noqa: S110 - 规格要求写入失败时静默跳过
+                pass
+
+        return target
+
+    # ========================
     # 基础语句
     # ========================
 
     def exec_variable_decl(self, stmt: VariableDecl, env: Environment) -> object:
         """执行变量/常量声明"""
         value = self.eval_expression(stmt.value, env)
+        value = self._apply_annotations(value, getattr(stmt, "annotations", []), env)
         env.define(stmt.name, value, is_constant=stmt.is_constant)
         if stmt.is_exported:
             env.exports.append(stmt.name)
@@ -319,6 +386,7 @@ class StatementExecutor(LogicExecutor):
             is_generator=self._has_yield(stmt.body),
             rest_param=getattr(stmt, 'rest_param', None),
         )
+        func = self._apply_annotations(func, getattr(stmt, "annotations", []), env)
         env.define(stmt.name, func)
         if stmt.is_exported:
             env.exports.append(stmt.name)
@@ -340,6 +408,7 @@ class StatementExecutor(LogicExecutor):
             is_static=stmt.is_static,
             is_private=stmt.is_private,
         )
+        func = self._apply_annotations(func, getattr(stmt, "annotations", []), env)
         env.define(stmt.name, func)
 
     def exec_return(self, stmt: ReturnStmt, env: Environment) -> None:
@@ -544,6 +613,12 @@ class StatementExecutor(LogicExecutor):
         """执行枚举声明"""
         variants = getattr(stmt, 'variants', None)
         enum_obj = DaoEnum(stmt.name, stmt.values, variants)
+        # 注解作用于可绑定的枚举对象本身；枚举体内的方法在表达式层按需
+        # 构建（见 expressions.py 的 _get_enum_method_table），此处无独立
+        # 方法 target 可供消费，故仅处理声明级注解。
+        enum_obj = self._apply_annotations(
+            enum_obj, getattr(stmt, "annotations", []), env
+        )
         env.define(stmt.name, enum_obj)
         if stmt.is_exported:
             env.exports.append(stmt.name)
@@ -574,6 +649,9 @@ class StatementExecutor(LogicExecutor):
                     closure_env=env,
                     is_generator=self._has_yield(s.body),
                 )
+                func = self._apply_annotations(
+                    func, getattr(s, "annotations", []), env
+                )
                 if s.is_static:
                     static_methods[s.name] = func
                 else:
@@ -585,6 +663,7 @@ class StatementExecutor(LogicExecutor):
             static_methods=static_methods,
             abstract_methods=abstract_methods,
         )
+        trait = self._apply_annotations(trait, getattr(stmt, "annotations", []), env)
         env.define(stmt.name, trait)
         if stmt.is_exported:
             env.exports.append(stmt.name)
@@ -602,7 +681,10 @@ class StatementExecutor(LogicExecutor):
             is_error_class=False,
             is_abstract=True,
             is_exported=stmt.is_exported,
+            annotations=getattr(stmt, "annotations", []),
         )
+        # 抽象类型的声明级注解由 exec_class_decl 在 DaoClass 创建后、
+        # 绑定前统一应用（见 exec_class_decl 末尾的 _apply_annotations）。
         self.exec_class_decl(class_stmt, env)
 
     def exec_class_decl(self, stmt: ClassDecl, env: Environment) -> None:
@@ -673,6 +755,9 @@ class StatementExecutor(LogicExecutor):
                         is_getter=s.is_getter,
                         is_setter=s.is_setter,
                     )
+                # 类体方法的注解在 DaoFunction 构造后、放入方法表前应用，
+                # 保持 private/protected/static/abstract/getter/setter 原有处理不变。
+                func = self._apply_annotations(func, getattr(s, "annotations", []), env)
                 if s.is_private:
                     private_names.add(s.name)
                 if s.is_protected:
@@ -732,6 +817,7 @@ class StatementExecutor(LogicExecutor):
             is_abstract=stmt.is_abstract,
             abstract_methods=abstract_methods,
         )
+        klass = self._apply_annotations(klass, getattr(stmt, "annotations", []), env)
         env.define(stmt.name, klass)
         if stmt.is_exported:
             env.exports.append(stmt.name)

@@ -7,13 +7,15 @@
 
 import logging
 
-from ..ast_nodes import Assignment, Identifier, LogicBlock, MacroDefinition, Statement, VariableDecl, FunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl
+from ..ast_nodes import Assignment, Identifier, LogicBlock, MacroDefinition, Statement, VariableDecl, FunctionDecl, AsyncFunctionDecl, ClassDecl, EnumDecl, TraitDecl, AbstractDecl
+from ..errors import 语法错误
 from ..tokens import TokenType
 
 logger = logging.getLogger('dao.parser')
 
 # 导入所有语句解析模块
 from .modules import (
+    AnnotationParser,
     ConcurrencyParser,
     ControlFlowParser,
     ExceptionHandlingParser,
@@ -30,6 +32,7 @@ from .modules import (
 
 
 class StatementParser(
+    AnnotationParser,
     TypeAnnotationParser,
     TypeAliasParser,
     VariableDeclParser,
@@ -67,6 +70,29 @@ class StatementParser(
             return None
 
         match token.type:
+            case TokenType.注解:
+                annotations = self.parse_annotations()
+                stmt = self.parse_statement()
+                if not isinstance(
+                    stmt,
+                    (
+                        VariableDecl,
+                        FunctionDecl,
+                        AsyncFunctionDecl,
+                        ClassDecl,
+                        AbstractDecl,
+                        EnumDecl,
+                        TraitDecl,
+                    ),
+                ):
+                    raise 语法错误(
+                        "注解只能用于声明（变量/函数/类/枚举/特征）",
+                        token.line,
+                        token.column,
+                        self.source,
+                    )
+                stmt.annotations = annotations
+                return stmt
             case TokenType.私有:
                 self.advance()
                 stmt = self.parse_statement()

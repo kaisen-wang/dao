@@ -2,6 +2,7 @@
 
 from ...ast_nodes import (
     AbstractDecl,
+    AsyncFunctionDecl,
     ClassDecl,
     EnumDecl,
     EnumValues,
@@ -9,6 +10,7 @@ from ...ast_nodes import (
     FunctionDecl,
     Statement,
     TraitDecl,
+    VariableDecl,
 )
 from ...errors import 语法错误
 from ...tokens import Token, TokenType
@@ -228,6 +230,31 @@ class OOPDeclParser:
             column=token.column,
         )
 
+    def _attach_member_annotations(self, stmt, annotations, token):
+        """把类体成员前缀的注解回填到声明节点，非法附着则报中文语法错误"""
+        if not annotations:
+            return stmt
+        if not isinstance(
+            stmt,
+            (
+                VariableDecl,
+                FunctionDecl,
+                AsyncFunctionDecl,
+                ClassDecl,
+                AbstractDecl,
+                EnumDecl,
+                TraitDecl,
+            ),
+        ):
+            raise 语法错误(
+                "注解只能用于声明（变量/函数/类/枚举/特征）",
+                token.line,
+                token.column,
+                self.source,
+            )
+        stmt.annotations = annotations
+        return stmt
+
     def parse_class_body(self, indent_consumed: bool = False) -> list[Statement]:
         """解析类体（缩进块，包含构造函数和方法）"""
         # 允许空类体：检查是否有缩进，如果没有，则返回空语句列表
@@ -243,6 +270,13 @@ class OOPDeclParser:
             self.skip_newlines()
             if self.current.type in (TokenType.回退, TokenType.文件结束):
                 break
+
+            # 注解（每个注解独占一行，可位于修饰符之前）
+            annotation_token = None
+            annotations = []
+            if self.current.type == TokenType.注解:
+                annotation_token = self.current
+                annotations = self.parse_annotations()
 
             # 修饰符
             is_static = False
@@ -272,14 +306,22 @@ class OOPDeclParser:
                 func = self.parse_constructor()
                 func.is_private = is_private
                 func.is_protected = is_protected
-                statements.append(func)
+                statements.append(
+                    self._attach_member_annotations(
+                        func, annotations, annotation_token or self.current
+                    )
+                )
             elif self.current.type == TokenType.函数:
                 # 方法：函数 名字(参数) ...
                 func = self.parse_function_decl()
                 func.is_static = is_static
                 func.is_private = is_private
                 func.is_protected = is_protected
-                statements.append(func)
+                statements.append(
+                    self._attach_member_annotations(
+                        func, annotations, annotation_token or self.current
+                    )
+                )
             elif self.current.type == TokenType.抽象:
                 # 抽象方法：抽象 方法名(参数)
                 token = self.advance()  # 消费 抽象
@@ -288,29 +330,50 @@ class OOPDeclParser:
                 func.is_static = is_static
                 func.is_private = is_private
                 func.is_protected = is_protected
-                statements.append(func)
+                statements.append(
+                    self._attach_member_annotations(
+                        func, annotations, annotation_token or self.current
+                    )
+                )
             elif self.current.type == TokenType.运算符:
                 # 运算符重载：运算符+(参数)
                 func = self._parse_operator_overload(is_static, is_private)
                 func.is_protected = is_protected
-                statements.append(func)
+                statements.append(
+                    self._attach_member_annotations(
+                        func, annotations, annotation_token or self.current
+                    )
+                )
             elif self.current.type == TokenType.获取:
                 # 属性 getter：获取 属性名()
                 func = self._parse_property_accessor(
                     is_static, is_private, is_getter=True
                 )
                 func.is_protected = is_protected
-                statements.append(func)
+                statements.append(
+                    self._attach_member_annotations(
+                        func, annotations, annotation_token or self.current
+                    )
+                )
             elif self.current.type == TokenType.设置:
                 # 属性 setter：设置 属性名(value)
                 func = self._parse_property_accessor(
                     is_static, is_private, is_getter=False
                 )
                 func.is_protected = is_protected
-                statements.append(func)
+                statements.append(
+                    self._attach_member_annotations(
+                        func, annotations, annotation_token or self.current
+                    )
+                )
             else:
                 # 其他语句（如类级别的属性声明）
-                statements.append(self.parse_statement())
+                stmt = self.parse_statement()
+                statements.append(
+                    self._attach_member_annotations(
+                        stmt, annotations, annotation_token or self.current
+                    )
+                )
 
         self.match(TokenType.回退)
         return statements
