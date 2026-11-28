@@ -61,3 +61,9 @@ class OpCode(Enum):
     CAPTURE_NAME = auto()
     RESTORE_NAME = auto()
     STORE_SCOPE_LOCAL = auto()
+    # 模块系统：导入/导出语句（操作数 = 原始 AST 节点在常量池中的索引）
+    IMPORT_STMT = auto()
+    EXPORT_STMT = auto()
+    # 成员运算：在 / 不在
+    CONTAINS = auto()
+    NOT_CONTAINS = auto()

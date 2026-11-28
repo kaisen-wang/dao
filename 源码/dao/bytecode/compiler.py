@@ -14,6 +14,7 @@ from ..ast_nodes import (
     DictPattern,
     EnumDecl,
     EnumVariantPattern,
+    ExportStmt,
     Expression,
     ExpressionStmt,
     ForInStmt,
@@ -98,6 +99,14 @@ class BytecodeCompiler:
             self._compile_function_decl(stmt, code)
         elif isinstance(stmt, MatchStmt):
             self._compile_match_stmt(stmt, code)
+        elif isinstance(stmt, ImportStmt):
+            # 导入/导出语句交由 VM 复用 AST 解释器执行，这里仅把原始节点
+            # 放进常量池并发出对应 opcode，不产生任何栈效应。
+            idx = self._add_constant(stmt, code)
+            code.emit(OpCode.IMPORT_STMT, idx, line=stmt.line)
+        elif isinstance(stmt, ExportStmt):
+            idx = self._add_constant(stmt, code)
+            code.emit(OpCode.EXPORT_STMT, idx, line=stmt.line)
         elif isinstance(stmt, SendStmt):
             self._compile_expression(stmt.channel, code)
             self._compile_expression(stmt.value, code)
@@ -526,6 +535,10 @@ class BytecodeCompiler:
                         ">": OpCode.COMPARE_GT, ">=": OpCode.COMPARE_GE,
                     }
                     code.emit(cmp_map[expr.operator], line=expr.line)
+                elif expr.operator == "在":
+                    code.emit(OpCode.CONTAINS, line=expr.line)
+                elif expr.operator == "不在":
+                    code.emit(OpCode.NOT_CONTAINS, line=expr.line)
         elif isinstance(expr, UnaryOp):
             self._compile_expression(expr.operand, code)
             if expr.operator == "-":
@@ -641,6 +654,9 @@ class BytecodeCompiler:
             elif op == OpCode.MAKE_CLOSURE:
                 current += 1
             elif op in (OpCode.GET_ITERATOR, OpCode.UNARY_NEGATIVE, OpCode.UNARY_NOT):
+                pass
+            elif op in (OpCode.IMPORT_STMT, OpCode.EXPORT_STMT):
+                # 语句级副作用，不改变栈深度
                 pass
             elif op == OpCode.DUP_TOP:
                 current += 1

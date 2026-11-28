@@ -16,7 +16,7 @@ from ..ast_nodes import (
 from ..bytecode.code_object import CodeObject
 from ..bytecode.frame import Frame
 from ..bytecode.opcodes import OpCode
-from ..builtins import BuiltinFunction, get_builtins
+from ..builtins import BuiltinFunction, DaoCallable, get_builtins
 from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误
 
 
@@ -33,6 +33,11 @@ class VirtualMachine:
         self._type_feedback = {}
         self._jit_compiler = None
         self._root_compiled = set()
+        # 模块系统：惰性复用一个 AST 解释器执行导入/导出语句，
+        # 直接复用其模块加载、导出过滤、通配符、别名与错误处理逻辑。
+        self._import_interpreter = None
+        # 与 AST 解释器一致的模块搜索路径（运行前可按需追加）
+        self.module_search_paths: list[str] = []
 
     def enable_jit(self, threshold: int = 100):
         from ..jit.hotspot import HotspotDetector
@@ -141,6 +146,16 @@ class VirtualMachine:
         elif op == OpCode.BINARY_FLOOR_DIV:
             right, left = frame.pop(), frame.pop()
             frame.push(left // right)
+        elif op in (OpCode.CONTAINS, OpCode.NOT_CONTAINS):
+            # 成员运算：与 AST 解释器一致，语义为 left in right
+            right, left = frame.pop(), frame.pop()
+            try:
+                result = left in right
+            except TypeError:
+                raise 类型错误(
+                    f"类型 '{type(right).__name__}' 不支持成员检查"
+                )
+            frame.push(result if op == OpCode.CONTAINS else not result)
         elif op == OpCode.COMPARE_EQ:
             right, left = frame.pop(), frame.pop()
             frame.push(left == right)
@@ -350,7 +365,41 @@ class VirtualMachine:
                 frame.locals[name] = old_value
             else:
                 frame.locals.pop(name, None)
+        elif op in (OpCode.IMPORT_STMT, OpCode.EXPORT_STMT):
+            self._exec_import_export(inst, frame)
         return None
+
+    def _get_import_interpreter(self):
+        """惰性构造并复用一个 AST 解释器，用于执行导入/导出语句。
+
+        延迟导入避免 dao.vm 与 dao.interpreter 之间的循环导入；复用同一实例
+        使其模块缓存在多次导入之间共享（与 AST 模式一致）。
+        """
+        if self._import_interpreter is None:
+            from ..interpreter import Interpreter
+
+            self._import_interpreter = Interpreter()
+            # 错误报告会读取 source；AST 模式由 execute() 设置，这里补一个默认值。
+            self._import_interpreter.source = ""
+        # 搜索路径可能在 VM 构造后才被修改，每次同步同一列表引用。
+        self._import_interpreter.module_search_paths = self.module_search_paths
+        return self._import_interpreter
+
+    def _exec_import_export(self, inst, frame: Frame) -> None:
+        """执行导入/导出语句，把 AST 解释器绑定的名称写入当前栈帧。"""
+        from ..environment import Environment
+
+        stmt = frame.code.constants[inst.operand]
+        interpreter = self._get_import_interpreter()
+        env = Environment()
+        if inst.opcode == OpCode.IMPORT_STMT:
+            interpreter.exec_import(stmt, env)
+        else:
+            interpreter.exec_export(stmt, env)
+        # 直接写字典而非 Environment.define：避免重复定义报错，
+        # 后续 LOAD_NAME / LOAD_ATTR 即可从 frame.locals 找到这些名称。
+        for name, value in env.values.items():
+            frame.locals[name] = value
 
     # ========================
     # 枚举与模式匹配辅助
@@ -659,6 +708,11 @@ class VirtualMachine:
             elif isinstance(callee, BuiltinFunction):
                 # 内置函数包装器只实现 .call()，不可直接 __call__
                 return callee.call(args, {})
+            elif isinstance(callee, DaoCallable):
+                # 导入语句加载的模块函数等来自 AST 解释器，其闭包环境
+                # 由同一个解释器实例持有，交还它统一调用（含方法、类、柯里化函数）。
+                interpreter = self._get_import_interpreter()
+                return interpreter.call_function(callee, args, {})
             elif callable(callee):
                 return callee(*args)
             else:
