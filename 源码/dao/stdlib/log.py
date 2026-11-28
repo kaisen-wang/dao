@@ -1,21 +1,22 @@
 """道语言标准库：日志。
 
 提供分级日志输出，可打印到控制台或写入文件，格式完全可配置。
+日志自动附带调用位置（文件名:行号），由解释器在调用时注入，调用者无需传入。
 可用占位符见 ``DEFAULT_FORMAT`` 与 ``文档/10-标准库.md`` 的日志章节。
 
 典型用法::
 
     从 日志 导入 配置日志, 默认格式
     日志器 = 配置日志(输出="两者", 路径="应用.log", 格式=默认格式)
-    日志器.信息("服务启动", 错误码="E0001", 位置="入口.道:12")
+    日志器.信息("服务启动")
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from ..builtins.callables import BuiltinFunction
+from ..callsite import current_call_site
 from ..environment import Environment
 from ..errors import 运行时错误
 
@@ -41,7 +42,6 @@ _FORMAT_MAP = {
     "{级别}": "%(levelname)s",
     "{名称}": "%(name)s",
     "{位置}": "%(location)s",
-    "{错误码}": "%(error_code)s",
     "{描述}": "%(message)s",
     "{消息}": "%(message)s",
     "{文件名}": "%(filename)s",
@@ -49,8 +49,14 @@ _FORMAT_MAP = {
     "{函数名}": "%(funcName)s",
 }
 
-# 默认格式：时间戳 | 日志级别 | 线程ID | 代码位置 | 错误码 | 描述信息
-DEFAULT_FORMAT = "{时间戳} | {级别} | {线程ID} | {代码位置} | {错误码} | {描述信息}"
+# 默认格式
+DEFAULT_FORMAT = "{级别} {时间戳} {线程ID} {代码位置} | {描述信息}"
+
+
+def _current_location() -> str:
+    """返回解释器记录的当前调用位置（文件名:行号）。"""
+    site = current_call_site.get()
+    return site.describe() if site is not None else ""
 
 
 def _dao_format_to_logging(fmt: str) -> str:
@@ -65,65 +71,44 @@ def _dao_format_to_logging(fmt: str) -> str:
     return result
 
 
-class _DaoAdapter(logging.LoggerAdapter):
-    """合并默认字段与逐条日志传入的字段。
-
-    标准 ``LoggerAdapter.process`` 会用 ``self.extra`` 无条件覆盖调用时的
-    ``extra``，导致逐条的错误码/位置丢失；这里改为合并，调用方优先。
-    """
-
-    def process(self, msg, kwargs):
-        extra = dict(self.extra or {})
-        extra.update(kwargs.get("extra") or {})
-        kwargs["extra"] = extra
-        return msg, kwargs
-
-
 class DaoLogger:
     """道语言日志器：分级日志、格式设置与多处理器输出。"""
 
-    def __init__(self, name: str, 位置: str = ""):
+    def __init__(self, name: str):
         self._logger = logging.getLogger(name)
         self._logger.setLevel(logging.DEBUG)
-        self._位置 = 位置
-        self._adapter = _DaoAdapter(self._logger, {"error_code": "", "location": 位置})
         self._formatter: logging.Formatter | None = None
 
-    def _write(self, level: int, 消息, 错误码: str, 位置):
-        extra: dict[str, Any] = {}
-        if 错误码:
-            extra["error_code"] = 错误码
-        if 位置 is not None:
-            extra["location"] = 位置
-        self._adapter.log(level, 消息, extra=extra)
+    def _write(self, level: int, 消息):
+        self._logger.log(level, 消息, extra={"location": _current_location()})
 
-    def 调试(self, 消息, 错误码="", 位置=None):
-        """记录调试级别日志，可附带错误码与代码位置。"""
-        self._write(logging.DEBUG, 消息, 错误码, 位置)
+    def 调试(self, 消息):
+        """记录调试级别日志，自动附带调用位置。"""
+        self._write(logging.DEBUG, 消息)
 
-    def 信息(self, 消息, 错误码="", 位置=None):
-        """记录信息级别日志，可附带错误码与代码位置。"""
-        self._write(logging.INFO, 消息, 错误码, 位置)
+    def 信息(self, 消息):
+        """记录信息级别日志，自动附带调用位置。"""
+        self._write(logging.INFO, 消息)
 
-    def 警告(self, 消息, 错误码="", 位置=None):
-        """记录警告级别日志，可附带错误码与代码位置。"""
-        self._write(logging.WARNING, 消息, 错误码, 位置)
+    def 警告(self, 消息):
+        """记录警告级别日志，自动附带调用位置。"""
+        self._write(logging.WARNING, 消息)
 
-    def 错误(self, 消息, 错误码="", 位置=None):
-        """记录错误级别日志，可附带错误码与代码位置。"""
-        self._write(logging.ERROR, 消息, 错误码, 位置)
+    def 错误(self, 消息):
+        """记录错误级别日志，自动附带调用位置。"""
+        self._write(logging.ERROR, 消息)
 
-    def 致命(self, 消息, 错误码="", 位置=None):
-        """记录致命级别日志，可附带错误码与代码位置。"""
-        self._write(logging.CRITICAL, 消息, 错误码, 位置)
+    def 致命(self, 消息):
+        """记录致命级别日志，自动附带调用位置。"""
+        self._write(logging.CRITICAL, 消息)
 
-    def 记录(self, 级别, 消息, 错误码="", 位置=None):
+    def 记录(self, 级别, 消息):
         """按中文级别名记录日志（调试/信息/警告/错误/致命）。"""
         if 级别 not in _LEVEL_MAP:
             raise 运行时错误(
                 f"无效的日志级别: {级别}，有效值: {', '.join(_LEVEL_MAP.keys())}"
             )
-        self._write(_LEVEL_MAP[级别], 消息, 错误码, 位置)
+        self._write(_LEVEL_MAP[级别], 消息)
 
     def 设置级别(self, 级别):
         """设置日志器的最低级别，低于该级别的日志不再输出。"""
@@ -132,11 +117,6 @@ class DaoLogger:
                 f"无效的日志级别: {级别}，有效值: {', '.join(_LEVEL_MAP.keys())}"
             )
         self._logger.setLevel(_LEVEL_MAP[级别])
-
-    def 设置位置(self, 位置):
-        """设置默认代码位置（如 入口.道:12），后续日志可省略位置参数。"""
-        self._位置 = 位置
-        self._adapter.extra["location"] = 位置
 
     def 添加处理器(self, 处理器):
         """添加文件或控制台处理器；同一对象或同一文件不会重复添加。"""
@@ -205,9 +185,9 @@ class DaoConsoleHandler:
         return "<控制台处理器>"
 
 
-def _stdlib_创建日志器(名称, 位置=""):
-    """创建一个指定名称的日志器，可选设置默认代码位置。"""
-    return DaoLogger(名称, 位置)
+def _stdlib_创建日志器(名称):
+    """创建一个指定名称的日志器。"""
+    return DaoLogger(名称)
 
 
 def _stdlib_创建文件处理器(路径, 格式=None, 时间格式=None):

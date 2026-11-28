@@ -17,11 +17,21 @@ from ..builtins import (
     InterpreterBuiltin,
     SuperProxy,
 )
+from ..callsite import CallSite, current_call_site
 from ..environment import Environment
 from ..errors import 名称错误, 类型错误, 索引错误, 运行时错误, 返回信号
 
 # 导入逻辑编程相关类型
 from ..logic.core import LogicVariable as RuntimeLogicVariable
+
+
+def _invoke_with_call_site(callee, args, kwargs, source, line, column):
+    """在调用点上下文中调用可调用对象，结束后恢复上一层位置。"""
+    token = current_call_site.set(CallSite(source, line, column))
+    try:
+        return callee.call(args, kwargs)
+    finally:
+        current_call_site.reset(token)
 
 
 class BoundEnumMethod(DaoCallable):
@@ -902,10 +912,10 @@ class ExpressionEvaluator:
             )
 
         if isinstance(callee, BuiltinFunction):
-            return callee.call(args, kwargs)
+            return _invoke_with_call_site(callee, args, kwargs, getattr(self, "filename", "") or self.source, expr.line, expr.column)
 
         if isinstance(callee, InterpreterBuiltin):
-            return callee.call(args, kwargs)
+            return _invoke_with_call_site(callee, args, kwargs, getattr(self, "filename", "") or self.source, expr.line, expr.column)
 
         if isinstance(callee, DaoFunction):
             return self._call_dao_function(callee, args, kwargs, expr)
@@ -913,9 +923,9 @@ class ExpressionEvaluator:
         from ..builtins import CurriedFunction
 
         if isinstance(callee, CurriedFunction):
-            return callee.call(args, kwargs)
+            return _invoke_with_call_site(callee, args, kwargs, getattr(self, "filename", "") or self.source, expr.line, expr.column)
 
-        return callee.call(args, kwargs)
+        return _invoke_with_call_site(callee, args, kwargs, getattr(self, "filename", "") or self.source, expr.line, expr.column)
 
     # ========================
     # 宏系统相关表达式求值
@@ -1239,9 +1249,9 @@ class ExpressionEvaluator:
                     callee.instance, callee.method, args, kwargs, expr
                 )
             if isinstance(callee, BuiltinFunction):
-                return callee.call(args, kwargs)
+                return _invoke_with_call_site(callee, args, kwargs, getattr(self, "filename", "") or self.source, expr.line, expr.column)
             if isinstance(callee, InterpreterBuiltin):
-                return callee.call(args, kwargs)
+                return _invoke_with_call_site(callee, args, kwargs, getattr(self, "filename", "") or self.source, expr.line, expr.column)
             if isinstance(callee, DaoFunction):
                 return self._call_dao_function(callee, args, kwargs, expr)
             raise 类型错误("管道右侧必须是函数", expr.line, expr.column, self.source)

@@ -51,6 +51,8 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
         self.module_search_paths: list[str] = []
         # 包管理器
         self.package_manager: PackageManager = PackageManager(project_dir)
+        # 当前执行文件名（由主入口传入，用于调用点位置等信息）
+        self.filename = ""
         # 宏注册表（每个 Interpreter 实例独立）
         from ..macros.registry import MacroRegistry
         self.macro_registry = MacroRegistry()
@@ -63,18 +65,23 @@ class Interpreter(StatementExecutor, ExpressionEvaluator, ConcurrencyEvaluator):
             self.global_env.define(name, func)
 
     def execute(
-        self, program: Program, env: Environment | None = None, source: str = ""
+        self, program: Program, env: Environment | None = None, source: str = "",
+        filename: str = "",
     ) -> object:
         """
         执行程序
 
         参数：
-            program : AST 根节点
-            env     : 执行环境（默认全局环境）
-            source  : 原始源代码（用于错误报告）
+            program  : AST 根节点
+            env      : 执行环境（默认全局环境）
+            source   : 原始源代码（用于错误报告）
+            filename : 源文件路径（用于调用点位置等信息）
         返回：最后一条语句的值
         """
         self.source = source
+        # 模块加载会再次调用 execute 而不带 filename，此时保留主入口的文件名
+        if filename:
+            self.filename = filename
         if env is None:
             env = self.global_env
         else:

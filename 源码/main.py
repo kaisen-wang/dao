@@ -76,7 +76,7 @@ def run_source(source: str, interpreter: Interpreter, filename: str = "<输入>"
             vm.enable_jit()
         return vm.run(code)
 
-    result = interpreter.execute(ast, source=source)
+    result = interpreter.execute(ast, source=source, filename=filename)
     return result
 
 

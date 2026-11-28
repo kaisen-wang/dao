@@ -1,12 +1,16 @@
 import os
 import re
+import subprocess
 import sys
 import tempfile
+import threading
+from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from dao.callsite import CallSite, current_call_site
 from dao.errors import 运行时错误
 from dao.stdlib.log import (
     DEFAULT_FORMAT,
@@ -32,6 +36,7 @@ class TestLogger:
         logger.设置级别("信息")
         logger.设置级别("警告")
         logger.设置级别("错误")
+        logger.设置级别("致命")
 
     def test_logger_invalid_level(self):
         logger = _stdlib_创建日志器("无效级别")
@@ -68,13 +73,13 @@ class TestFormatPlaceholders:
     def test_全部占位符转换(self):
         fmt = (
             "{时间戳}|{日志级别}|{级别}|{线程ID}|{线程名}|{代码位置}|"
-            "{错误码}|{描述信息}|{描述}|{消息}|{名称}|{时间}|"
+            "{描述信息}|{描述}|{消息}|{名称}|{时间}|"
             "{位置}|{文件名}|{行号}|{函数名}"
         )
         py = _dao_format_to_logging(fmt)
         for field in (
             "asctime", "levelname", "thread)d", "threadName", "location",
-            "error_code", "message", "name", "filename", "lineno", "funcName",
+            "message", "name", "filename", "lineno", "funcName",
         ):
             assert field in py
 
@@ -82,7 +87,7 @@ class TestFormatPlaceholders:
         assert _dao_format_to_logging("完成 100% {消息}") == "完成 100%% %(message)s"
 
     def test_默认格式字段齐全(self):
-        for token in ("{时间戳}", "{级别}", "{线程ID}", "{代码位置}", "{错误码}", "{描述信息}"):
+        for token in ("{时间戳}", "{级别}", "{线程ID}", "{代码位置}", "{描述信息}"):
             assert token in DEFAULT_FORMAT
 
 
@@ -95,28 +100,61 @@ class TestConfiguredLogging:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "app.log")
             logger = self._make(path)
-            logger.信息("服务启动", 错误码="E0001", 位置="入口.道:12")
+            logger.信息("服务启动")
             with open(path, encoding="utf-8") as f:
                 text = f.read()
             assert "INFO" in text
-            assert "E0001" in text
-            assert "入口.道:12" in text
             assert "服务启动" in text
             assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", text), text
-            assert re.search(r"\| \d+ \|", text), text
+            assert str(threading.get_ident()) in text
 
-    def test_设置位置作为默认值(self):
+    def test_调用点位置自动注入(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "app.log")
             logger = self._make(path)
-            logger.设置位置("模块.道:3")
-            logger.警告("未传位置")
-            logger.警告("覆盖位置", 位置="另一.道:9")
+            token = current_call_site.set(CallSite("模块.道", 3, 1))
+            try:
+                logger.信息("自动位置")
+            finally:
+                current_call_site.reset(token)
             with open(path, encoding="utf-8") as f:
-                lines = f.readlines()
-            assert "模块.道:3" in lines[0]
-            assert "另一.道:9" in lines[1]
-            assert "模块.道:3" not in lines[1]
+                text = f.read()
+            assert "模块.道:3" in text
+
+    def test_绝对路径转为执行目录相对路径(self):
+        from dao.callsite import CallSite, current_call_site
+
+        cwd = Path.cwd().resolve()
+        abs_path = cwd / "接入层" / "入口.道"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "app.log")
+            logger = self._make(path)
+            token = current_call_site.set(CallSite(str(abs_path), 7, 1))
+            try:
+                logger.信息("路径测试")
+            finally:
+                current_call_site.reset(token)
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            expected = Path("接入层") / "入口.道"
+            assert f"{expected}:7" in text
+            assert str(cwd) not in text
+
+    def test_嵌套调用后恢复位置(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "app.log")
+            logger = self._make(path)
+            outer = current_call_site.set(CallSite("外层.道", 1, 1))
+            inner = current_call_site.set(CallSite("内层.道", 2, 1))
+            current_call_site.reset(inner)
+            try:
+                logger.信息("恢复后")
+            finally:
+                current_call_site.reset(outer)
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            assert "外层.道:1" in text
+            assert "内层.道:2" not in text
 
     def test_时间格式可配置(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -142,10 +180,10 @@ class TestConfiguredLogging:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "app.log")
             logger = self._make(path)
-            logger.记录("错误", "分派消息", 错误码="E900", 位置="分发.道:1")
+            logger.记录("错误", "分派消息")
             with open(path, encoding="utf-8") as f:
                 text = f.read()
-            assert "ERROR" in text and "E900" in text and "分发.道:1" in text
+            assert "ERROR" in text
 
     def test_无效级别抛中文错误(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -175,25 +213,19 @@ class TestConfiguredLogging:
 
 
 class TestDaoLanguageLogging:
-    @staticmethod
-    def _run(source):
-        from dao.interpreter import Interpreter
-        from dao.lexer import Lexer
-        from dao.parser import Parser
-
-        return Interpreter().execute(Parser(Lexer(source).tokenize()).parse())
-
-    def test_道语言端到端文件日志(self):
+    def test_道语言端到端自动位置(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "app.log")
-            source = (
+            log_path = os.path.join(tmpdir, "app.log")
+            script = os.path.join(tmpdir, "自动位置.道")
+            Path(script).write_text(
                 '从 日志 导入 配置日志, 默认格式\n'
-                f'日志器 = 配置日志(输出="文件", 路径="{path}", 格式=默认格式, 级别="调试")\n'
-                '日志器.信息("端到端消息", 错误码="E100", 位置="测试.道:7")\n'
+                f'日志器 = 配置日志(输出="文件", 路径="{log_path}", 格式=默认格式, 级别="调试")\n'
+                '日志器.信息("端到端消息")\n',
+                encoding="utf-8",
             )
-            self._run(source)
-            with open(path, encoding="utf-8") as f:
+            main_py = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "main.py"))
+            subprocess.run([sys.executable, main_py, script], check=True, capture_output=True)
+            with open(log_path, encoding="utf-8") as f:
                 text = f.read()
             assert "端到端消息" in text
-            assert "E100" in text
-            assert "测试.道:7" in text
+            assert f"{script}:3" in text
