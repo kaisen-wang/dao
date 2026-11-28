@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 from contextvars import ContextVar
@@ -197,6 +198,40 @@ def set_resource(
     return resource
 
 
+def resource_from_env() -> Resource:
+    """从环境变量构建资源元数据，不修改当前 ContextVar。
+
+    支持以下变量：
+
+    * ``OTEL_SERVICE_NAME``：服务名，缺省为「道应用」；
+    * ``OTEL_RESOURCE_ATTRIBUTES``：逗号分隔的 ``key=value`` 属性；
+    * ``HOSTNAME``：主机名；
+    * ``DEPLOY_ENV`` / ``ENVIRONMENT``：部署环境（前者优先）。
+
+    属性项缺少等号或键为空时忽略，键值两侧空白会被去除。
+    """
+    attributes: dict = {}
+    raw_attributes = os.environ.get("OTEL_RESOURCE_ATTRIBUTES")
+    if raw_attributes:
+        for part in raw_attributes.split(","):
+            key, sep, value = part.partition("=")
+            key = key.strip()
+            if sep and key:
+                attributes[key] = value.strip()
+    return Resource(
+        service_name=os.environ.get("OTEL_SERVICE_NAME") or "道应用",
+        host_name=os.environ.get("HOSTNAME", ""),
+        environment=os.environ.get("DEPLOY_ENV")
+        or os.environ.get("ENVIRONMENT")
+        or "",
+        attributes=attributes,
+    )
+
+
 def get_resource() -> Resource:
-    """返回当前资源元数据，未设置时返回默认值。"""
-    return current_resource.get() or Resource()
+    """返回当前资源元数据；首次调用且未设置时从环境变量加载并激活。"""
+    resource = current_resource.get()
+    if resource is None:
+        resource = resource_from_env()
+        current_resource.set(resource)
+    return resource

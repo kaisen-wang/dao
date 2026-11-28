@@ -18,6 +18,7 @@ from .context import (
     new_trace_id,
     parse_baggage,
     parse_traceparent,
+    resource_from_env,
     set_resource,
     start_trace,
 )
@@ -25,7 +26,9 @@ from .exporters import (
     ConsoleExporter,
     FileExporter,
     MemoryExporter,
+    TailSamplingExporter,
     内存导出器,
+    尾部采样导出器,
     控制台导出器,
     文件导出器,
 )
@@ -35,6 +38,11 @@ from .model import (
     create_record,
     now_iso,
     severity_of,
+)
+from .otlp import (
+    OTLP导出器,
+    OTLPHTTPExporter,
+    to_otlp_json,
 )
 from .pipeline import (
     AsyncLogPipeline,
@@ -59,6 +67,7 @@ from .processors import (
 )
 
 __all__ = [
+    "OTLP导出器",
     "SEVERITY_MAP",
     "AsyncLogPipeline",
     "AttributeInjector",
@@ -68,11 +77,13 @@ __all__ = [
     "LogPipeline",
     "LogRecord",
     "MemoryExporter",
+    "OTLPHTTPExporter",
     "Processor",
     "RedactionProcessor",
     "Resource",
     "ResourceInjector",
     "SamplingProcessor",
+    "TailSamplingExporter",
     "TraceContext",
     "TraceInjector",
     "clear_trace",
@@ -88,10 +99,13 @@ __all__ = [
     "now_iso",
     "parse_baggage",
     "parse_traceparent",
+    "resource_from_env",
     "set_resource",
     "severity_of",
     "start_trace",
+    "to_otlp_json",
     "内存导出器",
+    "尾部采样导出器",
     "属性注入处理器",
     "异步日志管道",
     "控制台导出器",

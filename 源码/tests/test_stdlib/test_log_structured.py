@@ -16,12 +16,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from dao.callsite import CallSite, current_call_site
 from dao.errors import 运行时错误
-from dao.logmodel.context import current_resource, current_trace
+from dao.logmodel.context import (
+    Resource,
+    current_resource,
+    current_trace,
+    get_resource,
+    resource_from_env,
+)
 from dao.logmodel.exporters import MemoryExporter
 from dao.stdlib.log import (
     DEFAULT_FORMAT,
     DaoStructuredLogger,
+    _stdlib_从环境加载资源,
+    _stdlib_创建OTLP导出器,
     _stdlib_创建内存导出器,
+    _stdlib_创建尾部采样导出器,
     _stdlib_创建属性处理器,
     _stdlib_创建脱敏处理器,
     _stdlib_创建追踪,
@@ -554,3 +563,201 @@ class Test道语言端到端:
             content = Path(log_path).read_text(encoding="utf-8")
             assert "原有端到端" in content
             assert "INFO" in content
+
+
+# ---------------------------------------------------------------------------
+# 第二轮：环境变量集中配置与 OTLP / 尾部采样导出器桥接
+# ---------------------------------------------------------------------------
+
+_ENV_KEYS = (
+    "OTEL_SERVICE_NAME",
+    "OTEL_RESOURCE_ATTRIBUTES",
+    "HOSTNAME",
+    "DEPLOY_ENV",
+    "ENVIRONMENT",
+)
+
+
+def _清空环境(monkeypatch):
+    """清除全部资源相关环境变量，避免测试机环境干扰。"""
+    for key in _ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+class Test环境资源加载:
+    """resource_from_env 与 get_resource 的环境变量行为。"""
+
+    def test_resource_from_env_读取全部变量(self, monkeypatch):
+        _清空环境(monkeypatch)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "订单服务")
+        monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "team=pay,region=华南")
+        monkeypatch.setenv("HOSTNAME", "节点一")
+        monkeypatch.setenv("DEPLOY_ENV", "生产")
+        resource = resource_from_env()
+        assert resource.service_name == "订单服务"
+        assert resource.host_name == "节点一"
+        assert resource.environment == "生产"
+        assert resource.attributes == {"team": "pay", "region": "华南"}
+
+    def test_resource_from_env_默认值(self, monkeypatch):
+        _清空环境(monkeypatch)
+        assert resource_from_env().to_dict() == {"service.name": "道应用"}
+
+    def test_resource_from_env_忽略非法属性项并去除空白(self, monkeypatch):
+        _清空环境(monkeypatch)
+        monkeypatch.setenv(
+            "OTEL_RESOURCE_ATTRIBUTES",
+            " team = pay , 无效项, =空键, region = 华 南 ",
+        )
+        resource = resource_from_env()
+        assert resource.attributes == {"team": "pay", "region": "华 南"}
+
+    def test_resource_from_env_Environment回退(self, monkeypatch):
+        _清空环境(monkeypatch)
+        monkeypatch.setenv("ENVIRONMENT", "预发布")
+        assert resource_from_env().environment == "预发布"
+
+    def test_resource_from_env_DeployEnv优先(self, monkeypatch):
+        _清空环境(monkeypatch)
+        monkeypatch.setenv("DEPLOY_ENV", "生产")
+        monkeypatch.setenv("ENVIRONMENT", "测试")
+        assert resource_from_env().environment == "生产"
+
+    def test_resource_from_env_不修改ContextVar(self, monkeypatch):
+        _清空环境(monkeypatch)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "环境服务")
+        resource_from_env()
+        assert current_resource.get() is None
+
+    def test_get_resource_首次从环境加载并复用(self, monkeypatch):
+        _清空环境(monkeypatch)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "环境服务")
+        first = get_resource()
+        second = get_resource()
+        assert first is second
+        assert first.service_name == "环境服务"
+        assert current_resource.get() is first
+
+    def test_get_resource_已手动设置时不读环境(self, monkeypatch):
+        _清空环境(monkeypatch)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "环境服务")
+        manual = _stdlib_设置资源(服务名="手动服务")
+        assert get_resource() is manual
+        assert current_resource.get() is manual
+
+    def test_从环境加载资源_激活并返回(self, monkeypatch):
+        _清空环境(monkeypatch)
+        monkeypatch.setenv("OTEL_SERVICE_NAME", "启动服务")
+        resource = _stdlib_从环境加载资源()
+        assert isinstance(resource, Resource)
+        assert resource.service_name == "启动服务"
+        assert current_resource.get() is resource
+
+
+class Test环境相关导出:
+    """新增 API 必须完整导出。"""
+
+    def test_新增三个导出全部存在(self):
+        env = create_module_env()
+        for name in ("从环境加载资源", "创建OTLP导出器", "创建尾部采样导出器"):
+            assert name in env.values, name
+            assert name in env.exports, name
+
+
+class TestOTLP导出器桥接:
+    """创建OTLP导出器的参数透传与校验。"""
+
+    def test_创建OTLP导出器_参数透传(self):
+        exporter = _stdlib_创建OTLP导出器(
+            "http://collector:4318/v1/logs",
+            头={"Authorization": "Bearer token"},
+            超时=2.5,
+        )
+        assert exporter.endpoint == "http://collector:4318/v1/logs"
+        assert exporter.headers["Authorization"] == "Bearer token"
+        assert exporter.timeout == 2.5
+
+    def test_创建OTLP导出器_空端点抛中文错误(self):
+        with pytest.raises(运行时错误, match="端点"):
+            _stdlib_创建OTLP导出器("")
+        with pytest.raises(运行时错误, match="端点"):
+            _stdlib_创建OTLP导出器(None)
+
+    def test_创建OTLP导出器_默认值(self):
+        exporter = _stdlib_创建OTLP导出器("http://collector:4318/v1/logs")
+        assert isinstance(exporter.headers, dict)
+        assert exporter.timeout == 5.0
+
+
+class Test尾部采样导出器桥接:
+    """创建尾部采样导出器与取记录穿透。"""
+
+    def test_创建尾部采样导出器_类型校验(self):
+        with pytest.raises(运行时错误, match="export"):
+            _stdlib_创建尾部采样导出器(object())
+
+    def test_创建尾部采样导出器_参数透传(self):
+        内存 = _stdlib_创建内存导出器()
+        exporter = _stdlib_创建尾部采样导出器(
+            内存, 比率=0.5, 保留错误=False, 最大追踪数=10
+        )
+        assert exporter.exporter is 内存
+        assert exporter.ratio == 0.5
+        assert exporter.keep_errors is False
+        assert exporter.max_traces == 10
+
+    def test_取记录穿透尾部采样导出器(self):
+        from dao.logmodel.exporters import TailSamplingExporter
+
+        内存 = _stdlib_创建内存导出器()
+        采样导出器 = TailSamplingExporter(内存, ratio=1.0)
+        logger = _stdlib_配置结构化日志(输出="内存", 导出器=采样导出器)
+        logger.信息("采样后记录")
+        records = logger.取记录()
+        assert [record["body"] for record in records] == ["采样后记录"]
+
+    def test_带追踪的缓冲记录经flush后可读(self):
+        from dao.logmodel.exporters import TailSamplingExporter
+
+        _stdlib_创建追踪()
+        内存 = _stdlib_创建内存导出器()
+        采样导出器 = TailSamplingExporter(内存, ratio=1.0)
+        logger = _stdlib_配置结构化日志(输出="内存", 批量大小=10, 导出器=采样导出器)
+        logger.信息("缓冲记录")
+        # 带 trace_id 的记录由尾部采样器分桶缓存，取记录触发管道 flush 后才可读
+        assert [record["body"] for record in logger.取记录()] == ["缓冲记录"]
+
+
+class Test自定义导出器配置:
+    """配置结构化日志的 导出器 参数。"""
+
+    def test_配置结构化日志_使用自定义导出器(self):
+        内存 = _stdlib_创建内存导出器()
+        logger = _stdlib_配置结构化日志(输出="内存", 导出器=内存)
+        assert logger._导出器 is 内存
+        logger.信息("自定义消息")
+        assert [record["body"] for record in logger.取记录()] == ["自定义消息"]
+
+    def test_自定义导出器仍校验输出值(self):
+        with pytest.raises(运行时错误, match="无效的日志输出方式"):
+            _stdlib_配置结构化日志(输出="数据库", 导出器=_stdlib_创建内存导出器())
+
+    def test_自定义导出器忽略路径要求(self):
+        内存 = _stdlib_创建内存导出器()
+        logger = _stdlib_配置结构化日志(输出="文件", 导出器=内存)
+        assert logger._导出器 is 内存
+
+    def test_道语言端到端用自定义导出器(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script = os.path.join(tmpdir, "自定义导出器.道")
+            Path(script).write_text(
+                '从 日志 导入 配置结构化日志, 创建内存导出器\n'
+                '导出器 = 创建内存导出器()\n'
+                '日志器 = 配置结构化日志(输出="内存", 导出器=导出器)\n'
+                '日志器.信息("自定义端到端")\n'
+                '记录 = 日志器.取记录()\n'
+                '打印(记录[0]["body"])\n',
+                encoding="utf-8",
+            )
+            result = _运行脚本(script)
+            assert "自定义端到端" in result.stdout

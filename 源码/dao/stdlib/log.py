@@ -251,6 +251,13 @@ def _logmodel():
     return _context, _exporters, _model, _pipeline, _processors
 
 
+def _otlp():
+    """延迟导入 OTLP 导出器模块，避免纯文本日志依赖网络栈。"""
+    from ..logmodel import otlp as _otlp
+
+    return _otlp
+
+
 def _结构化字典(值, 名称: str) -> dict:
     """把道语言传入的字典规范为 Python dict；空值视为空字典。"""
     if 值 is None:
@@ -406,6 +413,32 @@ class _记录字典(dict):
         return json.dumps(self, ensure_ascii=ensure_ascii)
 
 
+def _找内存导出器(导出器):
+    """在导出器中查找内存导出器；支持穿透常见的包装导出器属性。"""
+    _, exporters, _, _, _ = _logmodel()
+    pending = [导出器]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, exporters.MemoryExporter):
+            return current
+        for name in (
+            "_wrapped",
+            "_exporter",
+            "_导出器",
+            "_内部导出器",
+            "wrapped",
+            "exporter",
+        ):
+            wrapped = getattr(current, name, None)
+            if wrapped is not None:
+                pending.append(wrapped)
+    return None
+
+
 class DaoStructuredLogger:
     """道语言结构化日志器：把每条日志构造成 LogRecord，经处理管道导出。"""
 
@@ -464,15 +497,15 @@ class DaoStructuredLogger:
 
     def 取记录(self):
         """返回内存导出器收集到的记录字典列表；非内存导出器抛运行时错误。"""
-        _, exporters, _, _, _ = _logmodel()
-        if not isinstance(self._导出器, exporters.MemoryExporter):
+        memory = _找内存导出器(self._导出器)
+        if memory is None:
             raise 运行时错误(
                 "取记录需要内存导出器，请使用输出=\"内存\"或传入创建内存导出器的结果"
             )
         self._管道.flush()
-        records = getattr(self._导出器, "records", None)
+        records = getattr(memory, "records", None)
         if records is None:
-            records = getattr(self._导出器, "记录", None)
+            records = getattr(memory, "记录", None)
         if not isinstance(records, (list, tuple)):
             raise 运行时错误("内存导出器未提供可读取的记录列表")
         result = []
@@ -498,18 +531,20 @@ def _stdlib_配置结构化日志(
     处理器=None,
     批量大小=1,
     异步=False,
+    导出器=None,
 ):
     """一步配置结构化日志器：构造 LogRecord 经处理器管道导出为 JSON。
 
     输出可为 控制台 / 文件 / 两者 / 内存；内存输出配合 ``取记录()`` 读取记录。
-    处理器为处理器对象列表，链首自动注入追踪与资源信息。
+    处理器为处理器对象列表，链首自动注入追踪与资源信息。传入 ``导出器`` 时
+    优先使用它（忽略 输出/路径 对应的默认导出器），输出取值仍会被校验。
     """
     _, exporters, _, pipeline, processors = _logmodel()
     if 输出 not in ("控制台", "文件", "两者", "内存"):
         raise 运行时错误(
             f"无效的日志输出方式: {输出}，有效值: 控制台 / 文件 / 两者 / 内存"
         )
-    if 输出 in ("文件", "两者") and not 路径:
+    if 导出器 is None and 输出 in ("文件", "两者") and not 路径:
         raise 运行时错误(f"输出为{输出}时必须提供路径")
 
     _设置结构化资源(资源)
@@ -518,7 +553,9 @@ def _stdlib_配置结构化日志(
     for item in (处理器 or []):
         if not isinstance(item, (list, tuple)):
             chain.append(item)
-    if 输出 == "控制台":
+    if 导出器 is not None:
+        exporter = 导出器
+    elif 输出 == "控制台":
         exporter = exporters.ConsoleExporter()
     elif 输出 == "文件":
         exporter = exporters.FileExporter(路径)
@@ -614,6 +651,39 @@ def _stdlib_创建内存导出器():
     return exporters.MemoryExporter()
 
 
+def _stdlib_从环境加载资源():
+    """从环境变量加载资源元数据并激活，返回加载后的 Resource。"""
+    context, _, _, _, _ = _logmodel()
+    resource = context.resource_from_env()
+    context.current_resource.set(resource)
+    return resource
+
+
+def _stdlib_创建OTLP导出器(端点, 头=None, 超时=5.0):
+    """创建 OTLP/HTTP 导出器：端点为收集器地址，头为请求头字典，超时单位为秒。"""
+    if not 端点:
+        raise 运行时错误("OTLP 导出器端点不能为空")
+    otlp = _otlp()
+    return otlp.OTLPHTTPExporter(
+        endpoint=端点,
+        headers=_结构化字典(头, "OTLP 请求头"),
+        timeout=超时,
+    )
+
+
+def _stdlib_创建尾部采样导出器(导出器, 比率=1.0, 保留错误=True, 最大追踪数=1000):
+    """创建尾部采样导出器：按追踪采样后转发给内部导出器。"""
+    if not callable(getattr(导出器, "export", None)):
+        raise 运行时错误("尾部采样导出器需要一个提供 export 方法的导出器")
+    _, exporters, _, _, _ = _logmodel()
+    return exporters.TailSamplingExporter(
+        exporter=导出器,
+        ratio=比率,
+        keep_errors=保留错误,
+        max_traces=最大追踪数,
+    )
+
+
 def create_module_env(interpreter=None) -> Environment:
     """创建日志模块的导出环境。"""
     env = Environment()
@@ -630,6 +700,12 @@ def create_module_env(interpreter=None) -> Environment:
     env.define("创建采样处理器", BuiltinFunction("创建采样处理器", _stdlib_创建采样处理器, -1))
     env.define("创建属性处理器", BuiltinFunction("创建属性处理器", _stdlib_创建属性处理器, -1))
     env.define("创建内存导出器", BuiltinFunction("创建内存导出器", _stdlib_创建内存导出器, -1))
+    env.define("从环境加载资源", BuiltinFunction("从环境加载资源", _stdlib_从环境加载资源, -1))
+    env.define("创建OTLP导出器", BuiltinFunction("创建OTLP导出器", _stdlib_创建OTLP导出器, -1))
+    env.define(
+        "创建尾部采样导出器",
+        BuiltinFunction("创建尾部采样导出器", _stdlib_创建尾部采样导出器, -1),
+    )
     env.define("默认格式", DEFAULT_FORMAT)
     env.exports = list(env.values.keys())
     return env

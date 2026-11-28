@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import os
+import random
 import sys
-from typing import TextIO
+from typing import Any, TextIO
 
 from ..errors import 运行时错误
 from .model import LogRecord
@@ -91,16 +92,111 @@ class MemoryExporter:
         self.records.clear()
 
 
+class TailSamplingExporter:
+    """尾部采样导出器：按链路（trace_id）聚合后统一做采样决策。
+
+    有 trace_id 的记录先按 trace 分桶缓存，flush 时若链路中出现 ERROR/FATAL
+    则整链保留，否则按 ratio 对整链做一次采样；无 trace_id 的记录立即决策
+    并转发。缓冲的 trace 数量受 ``max_traces`` 限制，超限时新 trace 立即决策。
+    """
+
+    def __init__(
+        self,
+        exporter: Any,
+        ratio: float = 1.0,
+        keep_errors: bool = True,
+        max_traces: int = 1000,
+    ) -> None:
+        if not callable(getattr(exporter, "export", None)):
+            raise 运行时错误("尾部采样导出器的 exporter 必须提供 export 方法")
+        self.ratio = float(ratio)
+        if not 0.0 <= self.ratio <= 1.0:
+            raise 运行时错误(f"无效的采样比例: {ratio}，有效范围: 0-1")
+        self.keep_errors = bool(keep_errors)
+        self.max_traces = int(max_traces)
+        if self.max_traces < 1:
+            raise 运行时错误(f"无效的 max_traces: {max_traces}，必须大于 0")
+        self.exporter = exporter
+        self._buffers: dict[str, list[LogRecord]] = {}
+        self._closed = False
+
+    @staticmethod
+    def _is_error(record: LogRecord) -> bool:
+        """判断单条记录是否属于错误级别。"""
+        return (
+            int(record.severity_number) >= 17
+            or str(record.severity_text).upper() in ("ERROR", "FATAL")
+        )
+
+    def _should_keep(self, record: LogRecord) -> bool:
+        """对单条记录做立即采样决策。"""
+        if self.keep_errors and self._is_error(record):
+            return True
+        return random.random() < self.ratio
+
+    def _flush_trace(self, records: list[LogRecord]) -> None:
+        """对一条 trace 的所有记录做一次采样决策，保留时整体转发。"""
+        if not records:
+            return
+        keep = self.keep_errors and any(self._is_error(record) for record in records)
+        if not keep:
+            keep = random.random() < self.ratio
+        if keep:
+            self.exporter.export(list(records))
+
+    def export(self, records: list[LogRecord]) -> None:
+        """缓冲有 trace_id 的记录；无 trace_id 的记录立即决策并转发。"""
+        for record in records:
+            trace_id = str(record.trace_id)
+            if not trace_id:
+                if self._should_keep(record):
+                    self.exporter.export([record])
+                continue
+            if trace_id not in self._buffers:
+                if len(self._buffers) >= self.max_traces:
+                    # 缓冲区已满：新 trace 立即决策，不占用缓冲槽位。
+                    if self._should_keep(record):
+                        self.exporter.export([record])
+                    continue
+                self._buffers[trace_id] = []
+            self._buffers[trace_id].append(record)
+
+    def flush(self) -> None:
+        """决策并转发所有缓冲的 trace，然后刷新下游导出器。"""
+        buffers = self._buffers
+        self._buffers = {}
+        try:
+            for records in buffers.values():
+                self._flush_trace(records)
+        finally:
+            flush = getattr(self.exporter, "flush", None)
+            if callable(flush):
+                flush()
+
+    def close(self) -> None:
+        """先 flush 再关闭下游导出器；重复调用安全。"""
+        if self._closed:
+            return
+        self.flush()
+        close = getattr(self.exporter, "close", None)
+        if callable(close):
+            close()
+        self._closed = True
+
+
 # 中文别名，便于道语言侧与中文文档使用。
 控制台导出器 = ConsoleExporter
 文件导出器 = FileExporter
 内存导出器 = MemoryExporter
+尾部采样导出器 = TailSamplingExporter
 
 __all__ = [
     "ConsoleExporter",
     "FileExporter",
     "MemoryExporter",
+    "TailSamplingExporter",
     "内存导出器",
+    "尾部采样导出器",
     "控制台导出器",
     "文件导出器",
 ]
